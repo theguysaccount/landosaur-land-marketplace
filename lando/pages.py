@@ -129,13 +129,14 @@ class Site(object):
         out = []
         for r in listings:
             where = r["county_label"] + (", " + r["state"] if show_state else "")
-            out.append('<tr><th scope="row"><a href="%s">%s</a><span class="sub">%s</span></th><td>%s</td><td class="n" data-v="%s">%s</td>'
-                       '<td class="n" data-v="%s">%s</td><td>%s</td></tr>' % (
+            out.append('<tr><th scope="row"><a href="%s">%s</a><span class="sub">%s</span></th><td data-label="Status">%s</td>'
+                       '<td class="n" data-label="Price" data-v="%s">%s</td><td class="n" data-label="Acres" data-v="%s">%s</td>'
+                       '<td data-label="Deadline">%s</td></tr>' % (
                            self.u(self.cat.listing_path(r)), esc(r["title"]), esc(where), self.badge(r),
                            r["price"] if r["price"] is not None else "", esc(price_line(r)) if r["price"] is not None else "–",
                            r["acres"] or "", esc(acres_text(r["acres"])) if r["acres"] else "–",
                            esc(date_text(r.get("deadline"))) or "–"))
-        return ('<div class="scroll"><table class="data sortable"><thead><tr><th scope="col">Listing</th><th scope="col">Status</th>'
+        return ('<div class="scroll"><table class="data sortable listings"><thead><tr><th scope="col">Listing</th><th scope="col">Status</th>'
                 '<th scope="col" class="n">Price or minimum bid</th><th scope="col" class="n">Acres</th><th scope="col">Deadline</th>'
                 '</tr></thead><tbody>%s</tbody></table></div>' % "".join(out))
 

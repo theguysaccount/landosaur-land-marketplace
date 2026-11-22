@@ -120,6 +120,13 @@ footer p { margin: 0 0 8px; }
   .map { height: 420px; }
 }
 @media (max-width: 560px) {
+  table.listings thead { display: none; }
+  table.listings tr { display: block; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  table.listings tbody tr:last-child { border-bottom: 0; }
+  table.listings th, table.listings td { display: block; border: 0 !important; padding: 0; text-align: left; white-space: normal; }
+  table.listings th { margin-bottom: 4px; }
+  table.listings td { display: inline-block; margin: 2px 12px 0 0; font-size: 14px; }
+  table.listings td.n::before, table.listings td[data-label="Deadline"]::before { content: attr(data-label) ": "; color: var(--muted); }
   body { font-size: 15.5px; }
   .lede { font-size: 16.5px; }
   .hero { align-items: flex-start; }

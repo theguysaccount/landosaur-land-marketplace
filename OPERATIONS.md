@@ -54,6 +54,9 @@ sitemap and IndexNow all follow it. To move the site to, for example, `land.exam
 3. `~/.local/bin/gh variable set SITE_URL -R theguysaccount/landosaur-land-marketplace -b https://land.example.com`
 4. `~/.local/bin/gh workflow run deploy.yml -R theguysaccount/landosaur-land-marketplace`
 5. Once GitHub has issued the certificate: `~/.local/bin/gh api -X PUT repos/theguysaccount/landosaur-land-marketplace/pages -F https_enforced=true`
+6. About 30 minutes later, if `SITE_INDEXABLE` is `true`, send the indexed pages to IndexNow once. IndexNow refuses a
+   new host for roughly its first 20 minutes, and later deploys send only pages that changed:
+   `printf '%s\n' https://land.example.com/new/ https://land.example.com/closing-soon/ > urls.txt && python3 scripts/indexnow.py submit urls.txt https://land.example.com`
 
 The original stays where it is; nothing in this procedure touches landosaur.fly.dev. Moving the address and
 indexing are separate switches (`SITE_URL`, `SITE_INDEXABLE`).

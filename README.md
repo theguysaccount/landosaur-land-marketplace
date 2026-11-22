@@ -11,7 +11,7 @@ Alaska DNR land sales), keeps parcel outlines from the agencies' own GIS, and pu
 - a map with filters (state, fixed price or auction, price, acreage, search) and a result list;
 - one page per listing: status, price or minimum bid, acreage, location, the agency's facts with the date they were
   read and a link to each, the parcel outline, county land values from the
-  [US County Land Index](https://theguysaccount.github.io/land-index-fund/), and an all-in cost worksheet;
+  [US County Land Index](https://index.grounded.to/), and an all-in cost worksheet;
 - state and county pages, **new listings** and **closing soon** pages with Atom feeds, CSV/JSON downloads.
 
 Not an offer to sell; Landosaur does not sell or broker land. No legal, tax or investment advice.

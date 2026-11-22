@@ -9,7 +9,8 @@
   first run: 7,452 St. Louis lots, 2,807 Arkansas parcels, 18 Wisconsin, 10 Alaska Trust, 1 Alaska DNR), parcel
   outlines from agency GIS, map, listing/state/county pages, new and closing-soon pages with feeds, CSV/JSON, cost
   worksheet, county land values from the US County Land Index.
-- Works: 14 unit tests, build guard over ~10,400 pages, headless-Chrome end-to-end test (map, filters, listing,
-  worksheet, indexing policy, phone width).
+- Works: 15 unit tests, build guard over ~10,400 pages, headless-Chrome end-to-end test (map, filters, listing,
+  worksheet, indexing policy, phone width). Schedules proven 2026-11-22: the daily crawl fired on its own (8 hours
+  late, as usual on this account), committed and deployed; the first scheduled weekly check passed.
 - Reused: the original's adapter rules, source list, brand (mascot, dino mark, colours), map base layers.
 - Not done (keys): domain, parcel-report checkout, support link, analytics.

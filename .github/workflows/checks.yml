@@ -6,9 +6,6 @@ name: Weekly checks
 on:
   schedule:
     - cron: "11 6 * * 2"
-    # TEMPORARY (22-23 Nov 2026 only): proves the schedule trigger on this new repository. Remove after the first
-    # scheduled run; it cannot fire on other dates.
-    - cron: "47 * 22,23 11 *"
   workflow_dispatch:
 
 permissions:
@@ -16,9 +13,12 @@ permissions:
   actions: write
 
 env:
-  LANDO_BASE_URL: ${{ vars.LANDO_BASE_URL || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+  # Fleet convention (~/code/DOMAIN_ROLLOUT.md): SITE_URL is the public address (LANDO_BASE_URL also works);
+  # SITE_INDEXABLE is read back from the live build by scripts/health.py. See OPERATIONS.md.
+  SITE_URL: ${{ vars.SITE_URL }}
+  SITE_INDEXABLE: ${{ vars.SITE_INDEXABLE }}
+  LANDO_BASE_URL: ${{ vars.SITE_URL || vars.LANDO_BASE_URL || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
   LANDO_REPO: ${{ github.repository }}
-  LANDO_INDEX_DUPLICATES: ${{ vars.LANDO_INDEX_DUPLICATES }}
 
 jobs:
   live:
@@ -35,7 +35,6 @@ jobs:
         run: python scripts/health.py "$LANDO_BASE_URL"
 
   links:
-    if: github.event.schedule != '47 * 22,23 11 *'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -47,7 +46,6 @@ jobs:
         run: python scripts/linkcheck.py "$LANDO_BASE_URL"
 
   browser:
-    if: github.event.schedule != '47 * 22,23 11 *'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

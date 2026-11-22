@@ -31,8 +31,8 @@ This repo follows the fleet convention recorded in `~/code/DOMAIN_ROLLOUT.md`:
 | `ci.yml` | Every push and pull request | Unit tests (Python 3.10 and 3.13), full build plus guard, script syntax. | Read-only. |
 
 GitHub fires schedules late on this account. Nothing depends on exact timing; the weekly check re-dispatches a
-stalled crawl. `checks.yml` carries a temporary line `47 * 22,23 11 *` that only fired on 22 and 23 November 2026 to
-prove the schedule trigger; delete it when convenient (it would fire again on those dates next year).
+stalled crawl. Schedules proven on 2026-11-22: the first scheduled crawl (due 09:37 UTC) ran at 17:21 UTC, crawled,
+committed and deployed, and the first scheduled weekly check passed; the temporary proof cron was then removed.
 
 ## What to watch
 

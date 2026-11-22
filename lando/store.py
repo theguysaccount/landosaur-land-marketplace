@@ -76,6 +76,14 @@ def save_status(status, data_dir=None):
         fh.write("\n")
 
 
+def _days(a, b):
+    import datetime
+    try:
+        return (datetime.date.fromisoformat(b[:10]) - datetime.date.fromisoformat(a[:10])).days
+    except ValueError:
+        return 999
+
+
 def merge(old, new, today, complete):
     """Merge a successful read into the stored inventory. Returns (rows, notes)."""
     notes = []
@@ -90,6 +98,13 @@ def merge(old, new, today, complete):
             # "new": the date stays unknown unless the source states when the parcel was added.
             r["first_seen"] = r.get("listed_date") or (today if old else "")
         r["missing"] = 0
+        if r.pop("rotating_url", False):
+            # Some sources (Arkansas COSL) issue a new link token on every read while old tokens keep working.
+            # Keep a listing's link for up to a week so the stored data does not churn daily.
+            if prev and prev.get("url_date") and _days(prev["url_date"], today) < 7:
+                r["url"], r["url_date"] = prev["url"], prev["url_date"]
+            else:
+                r["url_date"] = today
         if not r.get("geometry") and prev and prev.get("geometry"):
             r["geometry"] = prev["geometry"]      # an outline lookup failed this time: keep the last good one
             if prev.get("lat") is not None and r.get("lat") is None:

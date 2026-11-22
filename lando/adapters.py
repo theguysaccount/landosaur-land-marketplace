@@ -324,6 +324,7 @@ def arkansas_listing(r, now):
         "lat": None, "lon": None, "geometry": None, "facts": facts,
         "tags": ["tax-forfeited parcel", "auction terms apply", "improvements unverified"],
         "listed_date": added if re.match(r"^\d{4}-\d{2}-\d{2}$", added) else None,
+        "rotating_url": True,   # COSL issues a new token per read; old tokens keep working (checked 2026-11-22)
     }
 
 

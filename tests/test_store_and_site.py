@@ -47,6 +47,20 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(len(rows), 10)
 
 
+class RotatingUrlTest(unittest.TestCase):
+    def test_rotating_links_are_kept_for_a_week(self):
+        a = listing(1, url="https://auction.cosl.org/Auction/Listing/AAA", rotating_url=True)
+        rows, _ = store.merge([], [a], "2026-11-01", True)
+        self.assertEqual((rows[0]["url"], rows[0]["url_date"]), ("https://auction.cosl.org/Auction/Listing/AAA", "2026-11-01"))
+        b = listing(1, url="https://auction.cosl.org/Auction/Listing/BBB", rotating_url=True)
+        rows, _ = store.merge(rows, [b], "2026-11-05", True)
+        self.assertEqual(rows[0]["url"], "https://auction.cosl.org/Auction/Listing/AAA")
+        c = listing(1, url="https://auction.cosl.org/Auction/Listing/CCC", rotating_url=True)
+        rows, _ = store.merge(rows, [c], "2026-11-09", True)
+        self.assertEqual((rows[0]["url"], rows[0]["url_date"]), ("https://auction.cosl.org/Auction/Listing/CCC", "2026-11-09"))
+        self.assertNotIn("rotating_url", rows[0])
+
+
 class RefreshAndBuildTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

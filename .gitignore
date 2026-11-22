@@ -1,0 +1,8 @@
+# The original project's copy (private server code, database, documents). Never published.
+original/
+dist/
+work/
+__pycache__/
+*.pyc
+.DS_Store
+.env

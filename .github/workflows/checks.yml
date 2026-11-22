@@ -1,0 +1,66 @@
+# Weekly: live pages, files and sampled listings answer; every source was read within a week and is not failing;
+# the indexing policy on the live site matches the configuration; the crawl is dispatched when it has stalled;
+# official source links answer; the browser test passes on the live site.
+name: Weekly checks
+
+on:
+  schedule:
+    - cron: "11 6 * * 2"
+    # TEMPORARY (22-23 Nov 2026 only): proves the schedule trigger on this new repository. Remove after the first
+    # scheduled run; it cannot fire on other dates.
+    - cron: "47 * 22,23 11 *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  LANDO_BASE_URL: ${{ vars.LANDO_BASE_URL || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+  LANDO_REPO: ${{ github.repository }}
+  LANDO_INDEX_DUPLICATES: ${{ vars.LANDO_INDEX_DUPLICATES }}
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Live health and staleness
+        run: python scripts/health.py "$LANDO_BASE_URL"
+
+  links:
+    if: github.event.schedule != '47 * 22,23 11 *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Official source links answer
+        run: python scripts/linkcheck.py "$LANDO_BASE_URL"
+
+  browser:
+    if: github.event.schedule != '47 * 22,23 11 *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Browser test of the live site
+        env:
+          CI: "1"
+        run: CHROME="$(command -v google-chrome)" node scripts/e2e.mjs "$LANDO_BASE_URL"
+
+  keepalive:
+    needs: [live, links, browser]
+    if: always() && github.event_name == 'schedule'
+    uses: ./.github/workflows/keepalive.yml

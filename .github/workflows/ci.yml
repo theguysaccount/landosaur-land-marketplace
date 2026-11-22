@@ -1,0 +1,33 @@
+# Tests on every push and pull request: parsers on synthetic pages, merge rules, a fixture build. No network.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: Build and guard the full site from the committed data
+        run: |
+          python -m lando.build dist
+          python scripts/check_dist.py dist
+      - name: Client scripts parse
+        run: for f in site/map.js site/listing.js site/tables.js scripts/e2e.mjs; do node --check "$f"; done

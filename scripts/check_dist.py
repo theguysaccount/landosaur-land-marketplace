@@ -3,9 +3,10 @@
     python3 scripts/check_dist.py [dist]
 
 Every page: title, description, canonical, one h1, the not-an-offer notice, valid JSON-LD, and a robots meta that
-matches the indexing policy (noindex on pages that duplicate the live original, unless LANDO_INDEX_DUPLICATES).
+matches the indexing policy (pages that duplicate the live original are always noindex).
 Every internal link resolves. The sitemap lists exactly the indexable pages. Every listing in data/ has a page,
 and every listing page links to an official source over https. No previous-owner field leaks into the output.
+Indexing follows the fleet convention: SITE_INDEXABLE unset keeps the whole copy out of search.
 """
 import html
 import json
@@ -81,13 +82,20 @@ def main(dist, data_dir=None):
     for t, where in titles.items():
         if len(where) > 1:
             problems.append("duplicate title %r on %s" % (t, ", ".join(where[:3])))
-    expected = {"/new/", "/closing-soon/"} if not config.INDEX_DUPLICATES else None
-    if expected is not None and indexable != expected:
+    # Fleet convention: SITE_INDEXABLE unset -> nothing indexable; true -> only the pages the original lacks.
+    expected = {"/new/", "/closing-soon/"} if config.INDEXABLE else set()
+    if indexable != expected:
         problems.append("indexable pages %s, expected %s" % (sorted(indexable)[:5], sorted(expected)))
-    sitemap = open(os.path.join(dist, "sitemap.xml"), encoding="utf-8").read()
-    locs = {l[len(config.BASE_URL):] for l in re.findall(r"<loc>([^<]+)</loc>", sitemap)}
-    if locs != indexable:
-        problems.append("sitemap lists %d URLs but %d pages are indexable" % (len(locs), len(indexable)))
+    robots = open(os.path.join(dist, "robots.txt"), encoding="utf-8").read()
+    smap = os.path.join(dist, "sitemap.xml")
+    if config.INDEXABLE:
+        locs = {l[len(config.BASE_URL):] for l in re.findall(r"<loc>([^<]+)</loc>", open(smap, encoding="utf-8").read())}
+        if locs != indexable:
+            problems.append("sitemap lists %d URLs but %d pages are indexable" % (len(locs), len(indexable)))
+        if "Sitemap: %s/sitemap.xml" % config.BASE_URL not in robots:
+            problems.append("robots.txt does not point at the sitemap")
+    elif os.path.exists(smap) or "Disallow: /" not in robots:
+        problems.append("staged copy must have robots.txt Disallow: / and no sitemap")
     cat = Catalog(data_dir)
     for r in cat.listings:
         if not os.path.exists(os.path.join(dist, "land", r["slug"], "index.html")):

@@ -43,7 +43,7 @@ class Writer(object):
 
     def page(self, path, html_, indexable=False):
         rel = path.strip("/")
-        self.write((rel + "/" if rel else "") + "index.html", html_, path, indexable or config.INDEX_DUPLICATES)
+        self.write((rel + "/" if rel else "") + "index.html", html_, path, indexable and config.INDEXABLE)
 
 
 def atom(title, path, listings, cat, updated):
@@ -123,7 +123,7 @@ def build(dist, data_dir=None, now=None, log=print):
     status = dict(cat.status)
     status["site"] = {"base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cat.current()),
                       "new": len(cat.new()), "closing_soon": len(cat.closing()), "commit": os.environ.get("GITHUB_SHA", ""),
-                      "index_duplicates": config.INDEX_DUPLICATES}
+                      "indexable": config.INDEXABLE, "indexable_pages": sorted(w.indexable)}
     w.write("data/sources.json", json.dumps(status, indent=1, sort_keys=True))
     w.page("/data/", site.data_page([("/data/listings.csv", "Every listing: facts, status, official link"),
                                      ("/data/map.json", "Compact listing points used by the map"),
@@ -148,12 +148,15 @@ def build(dist, data_dir=None, now=None, log=print):
         w.write("_og/state-%s.html" % st["code"].lower(), og_card("Government and auction land in %s" % st["name"],
                                                                   "%s current listings" % "{:,}".format(n), "Every listing links to the agency's own page."))
 
-    sm = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    for p in sorted(w.indexable):
-        sm.append("<url><loc>%s</loc><lastmod>%s</lastmod></url>" % (esc(config.BASE_URL + p), updated))
-    sm.append("</urlset>")
-    w.write("sitemap.xml", "\n".join(sm) + "\n")
-    w.write("robots.txt", "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n" % config.BASE_URL)
+    if config.INDEXABLE:
+        sm = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+        for p in sorted(w.indexable):
+            sm.append("<url><loc>%s</loc><lastmod>%s</lastmod></url>" % (esc(config.BASE_URL + p), updated))
+        sm.append("</urlset>")
+        w.write("sitemap.xml", "\n".join(sm) + "\n")
+        w.write("robots.txt", "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n" % config.BASE_URL)
+    else:   # staged: the whole copy stays out of search (fleet convention, SITE_INDEXABLE unset)
+        w.write("robots.txt", "User-agent: *\nDisallow: /\n")
     w.write("manifest.json", json.dumps({"pages": w.pages, "indexable": sorted(w.indexable), "updated": updated}, sort_keys=True,
                                         separators=(",", ":")))
     w.write(".nojekyll", "")

@@ -73,15 +73,29 @@ class RefreshAndBuildTest(unittest.TestCase):
         self.assertEqual(len(store.load_listings("st-louis-lra", self.data)), 2)
 
         dist = os.path.join(self.tmp, "dist")
-        w = build.build(dist, self.data, now=NOW + datetime.timedelta(days=1), log=lambda *a: None)
-        self.assertEqual(sorted(w.indexable), ["/closing-soon/", "/new/"] if not config.INDEX_DUPLICATES else sorted(w.indexable))
-        page = open(os.path.join(dist, "land", "stl-%011d" % 1, "index.html"), encoding="utf-8").read()
+        saved = config.INDEXABLE
+        try:
+            config.INDEXABLE = False      # staged (SITE_INDEXABLE unset): nothing indexable, robots Disallow, no sitemap
+            w = build.build(os.path.join(self.tmp, "staged"), self.data, now=NOW + datetime.timedelta(days=1), log=lambda *a: None)
+            self.assertEqual(w.indexable, [])
+            with open(os.path.join(self.tmp, "staged", "robots.txt")) as fh:
+                self.assertIn("Disallow: /", fh.read())
+            self.assertFalse(os.path.exists(os.path.join(self.tmp, "staged", "sitemap.xml")))
+            config.INDEXABLE = True       # SITE_INDEXABLE=true: only the pages the original lacks
+            w = build.build(dist, self.data, now=NOW + datetime.timedelta(days=1), log=lambda *a: None)
+        finally:
+            config.INDEXABLE = saved
+        self.assertEqual(sorted(w.indexable), ["/closing-soon/", "/new/"])
+        with open(os.path.join(dist, "land", "stl-%011d" % 1, "index.html"), encoding="utf-8") as fh:
+            page = fh.read()
         self.assertIn("noindex", page)
         self.assertIn("It is not an offer", page)
         self.assertIn("https://www.stlouis-mo.gov/x?parcelId=1", page)
-        closing = open(os.path.join(dist, "closing-soon", "index.html"), encoding="utf-8").read()
+        with open(os.path.join(dist, "closing-soon", "index.html"), encoding="utf-8") as fh:
+            closing = fh.read()
         self.assertIn("stl-%011d" % 2, closing)
-        sitemap = open(os.path.join(dist, "sitemap.xml"), encoding="utf-8").read()
+        with open(os.path.join(dist, "sitemap.xml"), encoding="utf-8") as fh:
+            sitemap = fh.read()
         self.assertIn("/new/</loc>", sitemap)
         self.assertNotIn("/land/", sitemap)
 

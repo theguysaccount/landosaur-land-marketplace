@@ -3,8 +3,9 @@
 ## 1. A static edition built on top of the live original
 The original (Next.js + SQLite on one Fly machine) stays up and untouched. This edition reproduces its core public
 value (find official land offerings, see source-dated evidence, estimate all-in costs) as a static site that runs
-itself on GitHub Actions. No cutover: duplicate pages are `noindex`, new pages (new listings, closing soon, feeds)
-are indexed. One variable (`LANDO_INDEX_DUPLICATES`) would change that if Jack retires the original.
+itself on GitHub Actions. No cutover: duplicate pages are always `noindex`; with the fleet variable
+`SITE_INDEXABLE=true` only the pages the original lacks (new listings, closing soon) are indexed. `SITE_URL` moves
+the address. Both follow `~/code/DOMAIN_ROLLOUT.md` rather than a mechanism of this repo's own.
 
 ## 2. Official government and auction sources only
 The original also read LandCentral, a private seller's catalogue. Left out: the brief is official government and

@@ -17,7 +17,8 @@ Alaska DNR land sales), keeps parcel outlines from the agencies' own GIS, and pu
 Not an offer to sell; Landosaur does not sell or broker land. No legal, tax or investment advice.
 
 This edition is built on top of the original Landosaur application (https://landosaur.fly.dev), which stays live.
-Pages that duplicate the original carry `noindex`; see [OPERATIONS.md](OPERATIONS.md).
+Pages that duplicate the original always carry `noindex`; with `SITE_INDEXABLE=true` only the new-listing and
+closing-soon pages are indexed. See [OPERATIONS.md](OPERATIONS.md).
 
 ## Run
 

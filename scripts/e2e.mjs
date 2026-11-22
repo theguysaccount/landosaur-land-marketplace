@@ -41,11 +41,13 @@ try {
     const total = await page.eval("document.querySelector('[data-t=total]').textContent");
     assert(total === "$1,800", "total is " + total);
   });
-  await step("new and closing-soon pages are indexable, listing pages are not", async () => {
-    await page.goto(base + "/new/");
-    assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith("index"), "/new/ not indexable");
-    await page.goto(base + "/closing-soon/");
-    assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith("index"), "/closing-soon/ not indexable");
+  await step("indexing follows SITE_INDEXABLE; listing pages are never indexable", async () => {
+    const indexable = await page.eval(`fetch(${JSON.stringify(base)} + "/data/sources.json").then(r => r.json()).then(d => !!d.site.indexable)`);
+    const want = indexable ? "index" : "noindex";
+    for (const p of ["/new/", "/closing-soon/"]) {
+      await page.goto(base + p);
+      assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith(want), p + " should be " + want);
+    }
     await page.goto(new URL(listing, base).href);
     assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith("noindex"), "listing page indexable");
   });

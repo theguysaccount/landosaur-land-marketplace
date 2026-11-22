@@ -2,7 +2,8 @@
 
 ## Live now
 - https://theguysaccount.github.io/landosaur-land-marketplace/ (GitHub Pages). Live alongside the original at
-  https://landosaur.fly.dev, which is unchanged. Only /new/ and /closing-soon/ are indexed (see OPERATIONS.md).
+  https://landosaur.fly.dev, which is unchanged. `SITE_INDEXABLE=true`: only /new/ and /closing-soon/ are indexed;
+every page that duplicates the original is noindex (see OPERATIONS.md).
 
 ## Domain (a key; nothing has been changed)
 No Landosaur domain was in Jack's 2026-08-30 portfolio. The domain-rollout session gives this edition its address;

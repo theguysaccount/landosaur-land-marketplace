@@ -10,16 +10,19 @@ TAGLINE = "Government and auction land for sale, on one map, with every listing 
 
 REPO = os.environ.get("LANDO_REPO", "theguysaccount/landosaur-land-marketplace")
 REPO_URL = "https://github.com/" + REPO
-BASE_URL = os.environ.get("LANDO_BASE_URL", "https://theguysaccount.github.io/landosaur-land-marketplace").rstrip("/")
+# The public address: one setting. Fleet convention (see ~/code/DOMAIN_ROLLOUT.md): repository variable SITE_URL.
+BASE_URL = (os.environ.get("SITE_URL") or os.environ.get("LANDO_BASE_URL")
+            or "https://theguysaccount.github.io/landosaur-land-marketplace").rstrip("/")
 
-# The original Landosaur application stays live. Pages that duplicate what it serves (listings, browse pages,
-# guides, about) carry noindex so this edition never competes with it; pages it does not have (new-listing and
-# closing-soon pages, feeds) are indexed. Set LANDO_INDEX_DUPLICATES=true only if Jack retires the original.
-ORIGINAL_URL = os.environ.get("LANDO_ORIGINAL_URL", "https://landosaur.fly.dev").rstrip("/")
-INDEX_DUPLICATES = os.environ.get("LANDO_INDEX_DUPLICATES", "").lower() in ("1", "true", "yes")
+# The original Landosaur application stays live and is never replaced. Fleet convention for staged copies:
+# SITE_INDEXABLE unset -> the whole copy is noindex (robots.txt Disallow, no sitemap, no IndexNow);
+# SITE_INDEXABLE=true -> only pages the original does not serve are indexed (/new/, /closing-soon/). Pages that
+# duplicate the original (map, listings, state and county pages, sources, about, data) stay noindex either way.
+ORIGINAL_URL = (os.environ.get("LANDO_ORIGINAL_URL") or "https://landosaur.fly.dev").rstrip("/")
+INDEXABLE = (os.environ.get("SITE_INDEXABLE") or "").strip().lower() in ("1", "true", "yes")
 
 # Sister site with county land values per acre (USDA and FHFA). Read at build time; a cached copy is committed.
-LAND_INDEX_URL = os.environ.get("LANDO_LAND_INDEX_URL", "https://theguysaccount.github.io/land-index-fund").rstrip("/")
+LAND_INDEX_URL = (os.environ.get("LANDO_LAND_INDEX_URL") or "https://theguysaccount.github.io/land-index-fund").rstrip("/")
 
 # Optional keys (see OPERATIONS.md). Empty means the feature stays off.
 SUPPORT_URL = os.environ.get("LANDO_SUPPORT_URL", "").strip()

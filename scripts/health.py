@@ -4,7 +4,7 @@
 
 Fails (exit 1) when key pages or files do not answer, when sampled listing pages do not answer or lack their
 official link, when a source has failed 3 reads in a row or has not been read successfully for 7 days, or when the
-indexing policy on the live site differs from the configuration. When the newest crawl is more than 2 days old it
+live indexing state is inconsistent (SITE_INDEXABLE: duplicates always noindex). When the newest crawl is more than 2 days old it
 dispatches the crawl (GitHub sometimes skips scheduled runs). Writes a report to $GITHUB_STEP_SUMMARY.
 """
 import datetime
@@ -68,12 +68,15 @@ def main(base):
                                                                                     (" (" + s.get("message", "") + ")") if s.get("message") else ""))
         report(age is not None and age < config.CURRENT_DAYS, "%s last read successfully %s days ago" % (s.get("name", sid), age))
     site = status.get("site", {})
-    report(bool(site.get("index_duplicates")) == config.INDEX_DUPLICATES, "indexing policy matches the configuration")
-
+    live_indexable = bool(site.get("indexable"))
+    lines.append("- info SITE_INDEXABLE on the live build: %s" % ("true" if live_indexable else "unset (whole copy noindex)"))
     st, page = get(base + "/land-for-sale/missouri/")
-    report(st == 200 and b'content="noindex' in page if not config.INDEX_DUPLICATES else st == 200, "duplicate pages carry noindex")
+    report(st == 200 and b'content="noindex' in page, "pages that duplicate the original carry noindex")
     st, page = get(base + "/new/")
-    report(st == 200 and b'content="index' in page, "/new/ is indexable")
+    want = b'content="index' if live_indexable else b'content="noindex'
+    report(st == 200 and want in page, "/new/ indexing matches SITE_INDEXABLE")
+    st, robots = get(base + "/robots.txt")
+    report((b"Sitemap:" in robots) == live_indexable, "robots.txt matches SITE_INDEXABLE")
 
     st, body = get(base + "/data/map.json")
     try:

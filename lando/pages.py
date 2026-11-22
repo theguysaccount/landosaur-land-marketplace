@@ -65,8 +65,8 @@ class Site(object):
         return config.BASE_URL + path
 
     def layout(self, title, description, path, body, indexable=False, jsonld=None, og="default", scripts=(), wide=False):
-        """indexable: True only for pages the original application does not serve (see config.INDEX_DUPLICATES)."""
-        index = indexable or config.INDEX_DUPLICATES
+        """indexable: True only for pages the original application does not serve, and only when SITE_INDEXABLE."""
+        index = indexable and config.INDEXABLE
         head = [
             '<meta charset="utf-8">', '<meta name="viewport" content="width=device-width, initial-scale=1">',
             "<title>%s</title>" % esc(title), '<meta name="description" content="%s">' % esc(description),

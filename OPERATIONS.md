@@ -8,12 +8,17 @@ Everything that runs, how it fails safely, what to watch, and the keys a human c
 
 ## Indexing policy (no cutover)
 
-Pages that duplicate what the original serves (map, state, county and listing pages, sources, about, data) carry
-`noindex, follow` and stay out of the sitemap, so this edition never competes with the original in search. Pages the
-original does not have are indexed and in the sitemap: `/new/` (new listings, with Atom feeds) and `/closing-soon/`.
-IndexNow is told only about those. The switch is one repository variable, `LANDO_INDEX_DUPLICATES`: leave it unset
-while the original serves those pages. If Jack ever retires the original, set it to `true` and redeploy; every page
-becomes indexable and enters the sitemap. The weekly check fails if the live site and the setting disagree.
+This repo follows the fleet convention recorded in `~/code/DOMAIN_ROLLOUT.md`:
+
+- Pages that duplicate what the original serves (map, listing, state and county pages, sources, about, data) are
+  always `noindex, follow`, never in the sitemap and never sent to IndexNow. There is no switch that indexes them:
+  the original is never replaced.
+- Repository variable **`SITE_INDEXABLE`**: unset means the whole copy is staged (every page noindex, robots.txt
+  `Disallow: /`, no sitemap, no IndexNow). `true` indexes only the pages the original does not have, `/new/` and
+  `/closing-soon/`, which go into the sitemap and to IndexNow. Set to `true` on 2026-11-22, as the parent session
+  instructed ("index pages that add something new").
+- The weekly check fails if the live site is inconsistent (a duplicate page without noindex, or `/new/` and
+  robots.txt disagreeing with the live build's `SITE_INDEXABLE`).
 
 ## Automated jobs
 
@@ -40,17 +45,18 @@ prove the schedule trigger; delete it when convenient (it would fire again on th
 
 ## Changing the address (custom domain), DNS by the domain-rollout session
 
-The base URL is one setting: the repository variable `LANDO_BASE_URL` (default
-`https://theguysaccount.github.io/landosaur-land-marketplace`). Canonicals, sitemap, robots.txt, feeds, share cards
-and IndexNow all follow it. To move the site to, for example, `land.example.com`:
+The base URL is one setting: the repository variable **`SITE_URL`** (fleet convention; `LANDO_BASE_URL` also works).
+Default: `https://theguysaccount.github.io/landosaur-land-marketplace`. Canonicals, feeds, share cards, the
+sitemap and IndexNow all follow it. To move the site to, for example, `land.example.com`:
 
 1. DNS (domain-rollout session or Jack): `CNAME land -> theguysaccount.github.io.`
 2. `~/.local/bin/gh api -X PUT repos/theguysaccount/landosaur-land-marketplace/pages -f cname=land.example.com`
-3. `~/.local/bin/gh variable set LANDO_BASE_URL -R theguysaccount/landosaur-land-marketplace -b https://land.example.com`
+3. `~/.local/bin/gh variable set SITE_URL -R theguysaccount/landosaur-land-marketplace -b https://land.example.com`
 4. `~/.local/bin/gh workflow run deploy.yml -R theguysaccount/landosaur-land-marketplace`
 5. Once GitHub has issued the certificate: `~/.local/bin/gh api -X PUT repos/theguysaccount/landosaur-land-marketplace/pages -F https_enforced=true`
 
-The original stays where it is; nothing in this procedure touches landosaur.fly.dev.
+The original stays where it is; nothing in this procedure touches landosaur.fly.dev. Moving the address and
+indexing are separate switches (`SITE_URL`, `SITE_INDEXABLE`).
 
 ## Keys Jack can turn later
 
@@ -60,7 +66,7 @@ The original stays where it is; nothing in this procedure touches landosaur.fly.
 | **Money: parcel report** | The evaluator's cheapest test: a paid parcel-diligence report sold from listing pages | Pages is non-commercial, so the checkout lives elsewhere (for example a Stripe Payment Link or a page on another host). Create it, then `gh variable set LANDO_REPORT_URL -b <url>` and redeploy. Every listing page then shows "Order a parcel report" linking to `<url>?listing=<id>`. Fulfilment needs a person or a separate service; nothing here takes payment. |
 | **Money: support link** | Donations without commerce on Pages | Set up GitHub Sponsors (needs Jack's identity and bank details), then `gh variable set LANDO_SUPPORT_URL -b https://github.com/sponsors/theguysaccount` and redeploy. |
 | **Analytics** | Measure the activation event (opening an official listing link from a listing page) | Create a GoatCounter site; `gh variable set LANDO_GOATCOUNTER -b https://<code>.goatcounter.com/count`; redeploy. Cookieless. |
-| **Index everything** | Only if the original is retired | `gh variable set LANDO_INDEX_DUPLICATES -b true`; redeploy. Jack's decision. |
+| **Stage the copy again** | If Jack wants this edition out of search entirely | `gh variable delete SITE_INDEXABLE -R theguysaccount/landosaur-land-marketplace`; run `deploy.yml`. |
 | **More sources** | Coverage beyond MO, AR, WI and AK | Add an adapter to `lando/adapters.py` with a parser test. Candidates and why they are not in yet are on `/sources/`. GSA RealEstateSales.gov disallows crawlers in robots.txt: stays out. |
 
 ## Scheduled Claude routine (optional)

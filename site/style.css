@@ -57,6 +57,8 @@ code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 .filters input[type=number] { width: 110px; }
 .map { height: 520px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; background: var(--lime-soft); z-index: 0; }
 .map.small { height: 320px; border-top: 1px solid var(--line); border-radius: 12px; }
+#map-count { min-height: 24px; }
+#results { min-height: 360px; contain: layout; }
 .leaflet-container { font: inherit; }
 .pop a { font-weight: 700; }
 .pop p { margin: 4px 0 0; }

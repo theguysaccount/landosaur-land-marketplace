@@ -157,6 +157,28 @@ def build(dist, data_dir=None, now=None, log=print):
         w.write("robots.txt", "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n" % config.BASE_URL)
     else:   # staged: the whole copy stays out of search (fleet convention, SITE_INDEXABLE unset)
         w.write("robots.txt", "User-agent: *\nDisallow: /\n")
+    llms_lines = [
+        "# Landosaur — Official U.S. Government & Auction Land Reference Hub",
+        "",
+        "> Landosaur maps rural, municipal, and government auction land offerings across U.S. states and counties read directly from official public-agency inventories (checked daily), with GIS parcel outlines, county USDA/FHFA land value context, buying cost worksheets, and direct links to each agency's listing.",
+        "",
+        "## Direct Answers: Rural Land, Raw Acreage & County Parcel Research",
+        "",
+        "- **Active public-agency inventory**: %s current offerings across %d states (snapshot checked %s) from official government agencies—including rural state trust acreage (Wisconsin BCPL, Alaska Mental Health Trust, Alaska DNR), county tax-forfeited auctions (Arkansas COSL), and municipal land-bank lots (St. Louis LRA)." % ("{:,}".format(len(cur)), len(cat.states), updated),
+        "- **Difference from commercial land portals**: Official agency inventories only (never commercial brokerage scrapes), zero invented prices where an agency publishes none, minimum bids labeled separately from fixed prices, not a broker or offer to sell.",
+        "- **Open data & feeds**: [Listings CSV](%s/data/listings.csv), [Map JSON](%s/data/map.json), [Sources JSON](%s/data/sources.json), [New Listings Atom Feed](%s/feeds/new.xml)." % (config.BASE_URL, config.BASE_URL, config.BASE_URL, config.BASE_URL),
+        "",
+        "## Key Pages",
+        "",
+        "- [Map & Filters](%s/)" % config.BASE_URL,
+        "- [New Listings](%s/new/)" % config.BASE_URL,
+        "- [Closing Soon](%s/closing-soon/)" % config.BASE_URL,
+        "- [Sources & Health](%s/sources/)" % config.BASE_URL,
+        "- [Data Downloads](%s/data/)" % config.BASE_URL,
+        "- [About & Disclosures](%s/about/)" % config.BASE_URL,
+        "",
+    ]
+    w.write("llms.txt", "\n".join(llms_lines))
     w.write("manifest.json", json.dumps({"pages": w.pages, "indexable": sorted(w.indexable), "updated": updated}, sort_keys=True,
                                         separators=(",", ":")))
     w.write(".nojekyll", "")

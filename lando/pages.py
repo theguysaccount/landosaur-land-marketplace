@@ -81,6 +81,7 @@ class Site(object):
             '<link rel="icon" href="%s" type="image/svg+xml">' % self.u("/assets/favicon.svg"),
             '<link rel="stylesheet" href="%s">' % self.u("/assets/style.css"),
             '<link rel="alternate" type="application/atom+xml" title="New government land listings" href="%s">' % self.u("/feeds/new.xml"),
+            '<script src="https://rsio.org/vital.js" defer></script>',
         ]
         if any("map" in s or "listing" in s for s in scripts):
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/leaflet.css"))
@@ -149,13 +150,33 @@ class Site(object):
         cur = cat.current()
         n_src = sum(1 for s in cat.status.get("sources", {}).values() if s.get("count"))
         states = sorted({r["state"] for r in cur})
-        lede = ("<strong>%s</strong> land offerings from %d official sources in %s, read from the agencies' own sites and checked "
-                "every day. Every listing links to the agency's page." % ("{:,}".format(len(cur)), n_src,
-                                                                         ", ".join(STATE_NAMES[s] for s in states) or "no states yet"))
+        state_list = ", ".join(STATE_NAMES[s] for s in states) or "participating states"
+        lede = ("<strong>%s</strong> rural, municipal, and government auction land offerings from %d official agencies in %s, "
+                "read daily from public inventories—covering raw acreage, tax-forfeited parcels, surplus state trust land, and city lots, "
+                "with GIS parcel outlines, county land value context, and direct official agency links." % ("{:,}".format(len(cur)), n_src, state_list))
         state_links = " · ".join('<a href="%s">%s</a> (%s)' % (self.u(cat.state_path(st)), esc(st["name"]), "{:,}".format(
             sum(1 for r in st["listings"] if r["available"]))) for st in sorted(cat.states.values(), key=lambda s: s["name"]))
         new = cat.new()[:8]
         closing = cat.closing()[:8]
+        faqs = [
+            (
+                "How can I research rural land, raw acreage, and county tax-sale parcels directly from government agencies?",
+                "Landosaur maps %s active public-agency land offerings across %s from %d official government agencies—covering rural state trust acreage, tax-forfeited county auction parcels, and municipal land-bank lots—with state/price/acreage filters, agency GIS parcel outlines, county USDA/FHFA land value context, and direct official agency links." % ("{:,}".format(len(cur)), state_list, n_src),
+            ),
+            (
+                "Does Landosaur sell, broker, or take commissions on government land?",
+                "No. Landosaur is an independent public reference map, not an offer to sell and not a broker. Every listing links directly to the source government agency's official page so buyers verify terms, liens, and deadlines directly.",
+            ),
+            (
+                "How does Landosaur differ from commercial land marketplaces?",
+                "Landosaur reads only official public-agency inventories (never commercial brokerage scrapes), never invents asking prices where an agency publishes none, labels minimum bids separately from fixed prices, and provides free bulk CSV/JSON downloads and Atom feeds.",
+            ),
+            (
+                "How often are official agency land inventories updated?",
+                "Each official agency inventory is checked daily. Failed or partial reads preserve the last verified snapshot, and a parcel leaves the active map only after two consecutive complete agency reads omit it.",
+            ),
+        ]
+        faq_html = "".join("<details><summary>%s</summary><p>%s</p></details>" % (esc(q), esc(a)) for q, a in faqs)
         body = [
             '<section class="hero"><img src="%s" alt="" width="96" height="96" class="mascot"><div><h1>Government and auction land for sale, on one map</h1>'
             '<p class="lede">%s</p></div></section>' % (self.u("/assets/mascot.png"), lede),
@@ -169,9 +190,47 @@ class Site(object):
             body.append('<section><h2>Deadlines in the next %d days</h2>%s<p><a href="%s">Everything closing soon</a></p></section>' % (
                 config.CLOSING_DAYS, self.rows(closing, True), self.u("/closing-soon/")))
         body.append(self.how_block())
-        desc = "%s government and auction land offerings on one map: city lots, tax-sale parcels and state land, each linked to the agency's own listing." % "{:,}".format(len(cur))
-        ld = [{"@context": "https://schema.org", "@type": "WebSite", "name": "Landosaur", "url": self.absu("/"), "description": config.TAGLINE}]
-        return self.layout("Landosaur: government and auction land for sale on one map", desc, "/", "".join(body), jsonld=ld,
+        body.append('<section id="faq"><h2>Frequently asked questions</h2>%s</section>' % faq_html)
+        desc = ("Explore %s official rural, tax-sale, and government auction land offerings across %s: raw acreage, county parcels, "
+                "GIS outlines, USDA/FHFA land value benchmarks, and direct agency links.") % ("{:,}".format(len(cur)), state_list)
+        ld = [{
+            "@context": "https://schema.org",
+            "@graph": [
+                {"@type": "WebSite", "@id": self.absu("/#website"), "name": "Landosaur", "url": self.absu("/"), "description": desc},
+                {
+                    "@type": "SoftwareApplication",
+                    "@id": self.absu("/#webapp"),
+                    "name": "Landosaur Public-Agency Land & County Parcel Map",
+                    "applicationCategory": "ReferenceApplication",
+                    "operatingSystem": "Web",
+                    "url": self.absu("/"),
+                    "description": desc,
+                    "isAccessibleForFree": True,
+                    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+                },
+                {
+                    "@type": "Dataset",
+                    "@id": self.absu("/#dataset"),
+                    "name": "Landosaur Official Government & Auction Land Catalog",
+                    "description": desc,
+                    "url": self.absu("/data/"),
+                    "isAccessibleForFree": True,
+                    "distribution": [
+                        {"@type": "DataDownload", "encodingFormat": "text/csv", "contentUrl": self.absu("/data/listings.csv")},
+                        {"@type": "DataDownload", "encodingFormat": "application/json", "contentUrl": self.absu("/data/map.json")},
+                    ],
+                },
+                {
+                    "@type": "FAQPage",
+                    "@id": self.absu("/#faq"),
+                    "mainEntity": [
+                        {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}}
+                        for q, a in faqs
+                    ],
+                },
+            ],
+        }]
+        return self.layout("Rural, Government & Auction Land for Sale on One Map | Landosaur", desc, "/", "".join(body), jsonld=ld,
                            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "map.js", "tables.js"], wide=True)
 
     def map_block(self, scope, title="Map"):

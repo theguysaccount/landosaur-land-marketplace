@@ -17,6 +17,10 @@
     },
     "api/search.js": {
       "maxDuration": 15
+    },
+    "api/concierge.js": {
+      "maxDuration": 30,
+      "includeFiles": "data/usda/land-index-counties.json"
     }
   },
   "redirects": [
@@ -28,8 +32,10 @@
     { "source": "/coverage/", "destination": "/sources/", "permanent": true },
     { "source": "/methodology", "destination": "/land-prices/data-methodology/", "permanent": true },
     { "source": "/methodology/", "destination": "/land-prices/data-methodology/", "permanent": true },
-    { "source": "/services", "destination": "/research/professional-work/", "permanent": true },
-    { "source": "/services/", "destination": "/research/professional-work/", "permanent": true },
+    { "source": "/concierge", "destination": "/services/", "permanent": true },
+    { "source": "/concierge/", "destination": "/services/", "permanent": true },
+    { "source": "/charts", "destination": "/land-atlas/", "permanent": true },
+    { "source": "/charts/", "destination": "/land-atlas/", "permanent": true },
     { "source": "/privacy", "destination": "/about/#privacy", "permanent": true },
     { "source": "/privacy/", "destination": "/about/#privacy", "permanent": true },
     { "source": "/terms", "destination": "/about/#terms", "permanent": true },

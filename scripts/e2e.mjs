@@ -3,7 +3,7 @@
 import { launch } from "./cdp.mjs";
 
 const base = (process.argv[2] || "http://localhost:4651").replace(/\/$/, "");
-const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/(xray|listings|offers)/;
+const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/(xray|listings|offers|concierge|search)/;
 const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)/.test(base);
 const { page, close } = await launch();
 const results = [];
@@ -29,11 +29,13 @@ try {
     assert(after > 0 && after < before, `count ${before} -> ${after}`);
     listing = await page.eval("document.querySelector('#results li a.card-title').getAttribute('href')");
   });
-  await step("parcel dossier links to official source and worksheet adds up", async () => {
+  await step("parcel dossier links to Land Agent ($20), official source, and worksheet adds up", async () => {
     assert(listing, "no listing link");
     await page.goto(new URL(listing, base).href);
-    const href = await page.eval("document.querySelector('a.button').href");
-    assert(/^https:\/\//.test(href) && !href.includes("github.io"), "button goes to " + href);
+    const agentHref = await page.eval("document.querySelector('a.button').href");
+    assert(agentHref.includes("/services/"), "primary Land Agent CTA goes to " + agentHref);
+    const officialHref = await page.eval("document.querySelector('a[data-official-source=\"1\"]').href");
+    assert(/^https:\/\//.test(officialHref) && !officialHref.includes("github.io"), "official source goes to " + officialHref);
     assert(await page.eval("document.body.innerText.includes('Not an offer to sell')"), "notice missing");
     await page.eval("(() => { const f = document.getElementById('worksheet'); f.elements.price.value = '1000'; f.elements.fees.value = '10'; f.elements.survey.value = '500'; f.elements.tax.value = '100'; f.elements.years.value = '2'; f.dispatchEvent(new Event('input')); })()");
     const total = await page.eval("document.querySelector('[data-t=total]').textContent");
@@ -66,10 +68,22 @@ try {
       assert(listOk, "live /api/listings/ Blob store check failed");
     }
   });
+  await step("Land Agent /services/ and 50-state /land-atlas/ charts load cleanly", async () => {
+    await page.goto(base + "/services/?parcel=ks-snco-0973604015014000&price=1510&state=KS");
+    assert(await page.eval("!!document.getElementById('concierge-form') && document.getElementById('fee-breakdown-live').innerText.includes('$1,661')"), "missing $1,661 (+10%) turnkey breakdown on /services/");
+    await page.goto(base + "/land-atlas/");
+    await page.waitFor("document.querySelectorAll('#atlas-cartogram .us-tile').length === 50", 12000);
+    assert(await page.eval("document.querySelectorAll('#atlas-compare-chart svg path').length >= 2"), "missing multi-state SVG comparison paths");
+    assert(await page.eval("document.querySelectorAll('#county-explorer-body tr').length >= 50"), "missing 3,115-county explorer rows");
+    if (!isLocal) {
+      const concOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/concierge/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.ok && d.initiation_fee_usd === 20 && d.concierge_fee_pct === 10))`);
+      assert(concOk, "live /api/concierge/ metadata check failed");
+    }
+  });
   await step("indexing policy matches SITE_INDEXABLE across core hubs", async () => {
     const indexable = await page.eval(`fetch(${JSON.stringify(base)} + "/data/sources.json").then(r => r.json()).then(d => !!d.site.indexable)`);
     const want = indexable ? "index" : "noindex";
-    for (const p of ["/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
+    for (const p of ["/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
       await page.goto(base + p);
       assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith(want), p + " should be " + want);
     }
@@ -78,7 +92,7 @@ try {
     await page.viewport(375, 812, true);
     const bad = [];
     const listingRel = new URL(listing, base).pathname.replace(new URL(base + "/").pathname, "/");
-    for (const p of ["/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
+    for (const p of ["/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
       const w = await page.eval("document.documentElement.scrollWidth");
       if (w > 376) bad.push(p + " is " + w + "px wide");

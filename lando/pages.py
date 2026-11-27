@@ -122,7 +122,7 @@ class Site(object):
             '<link rel="alternate" type="application/atom+xml" title="New government land listings" href="%s">' % self.u("/feeds/new.xml"),
             '<script src="https://rsio.org/vital.js" defer></script>',
         ]
-        if any(k in s for s in scripts for k in ("map", "listing", "xray", "list", "direct")):
+        if any(k in s for s in scripts for k in ("map", "listing", "xray", "list", "direct", "services")):
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/leaflet.css"))
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/MarkerCluster.css"))
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/MarkerCluster.Default.css"))
@@ -130,13 +130,14 @@ class Site(object):
             head.append('<script type="application/ld+json">%s</script>' % json.dumps(block, separators=(",", ":")).replace("</", "<\\/"))
         nav_items = (
             ("/", "Map", False),
+            ("/services/", "Land Agent", True),
             ("/xray/", "Parcel X-Ray", True),
             ("/list/", "List Land", True),
+            ("/land-atlas/", "Land Atlas", False),
             ("/land-for-sale/", "Land for Sale", False),
             ("/land-prices/", "Land Prices", False),
             ("/analyze/", "Analyzer", False),
             ("/research/", "Research", False),
-            ("/closing-soon/", "Closing Soon", False),
         )
         nav = "".join(
             '<a href="%s"%s%s>%s</a>' % (
@@ -154,16 +155,16 @@ class Site(object):
             '<footer><div class="wrap"><p class="notice">%s</p>'
             '<p>Official agencies tracked (%d): %s. <a href="%s">How sources are read</a>.</p>'
             '<p>County land values across 3,115 U.S. counties: <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
-            '<a href="%s">50-State Land Price Observatory</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
-            '<p><a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
-            '<a href="%s">Research &amp; Guides</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
+            '<a href="%s">50-State Land Data Atlas &amp; Charts</a> · <a href="%s">Land Agent Services ($20)</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
+            '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
+            '<a href="%s">Research &amp; Guides</a> · <a href="%s">Closing Soon</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
             '<a href="%s">About</a> · <a href="%s" rel="noopener">Source Code</a> · '
             '<a href="%s" rel="noopener">Report a Problem</a>%s</p></div></footer>'
         ) % (
             esc(NOTICE), len(adapters.SOURCES), ", ".join(esc(s["agency"]) for s in adapters.SOURCES), self.u("/sources/"),
-            esc(config.LAND_INDEX_URL), self.u("/land-prices/"), self.u("/xray/"),
-            self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
-            self.u("/research/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
+            esc(config.LAND_INDEX_URL), self.u("/land-atlas/"), self.u("/services/"), self.u("/xray/"),
+            self.u("/services/"), self.u("/land-atlas/"), self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
+            self.u("/research/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
         tail = "".join('<script src="%s" defer></script>' % self.u("/assets/" + s) for s in (("theme.js",) + tuple(scripts)))
@@ -343,43 +344,44 @@ class Site(object):
         closing = cat.closing()[:8]
         us_fre = market_mod.usd(us_latest.get("farm_real_estate"))
         pillars = (
-            '<section><h2>Everything you need to find, X-Ray, price, and vet land</h2><div class="card-grid">'
-            '<article class="info-card"><div class="eyebrow">All 50 States · Live Federal APIs</div>'
-            '<h3>Free U.S. Parcel X-Ray</h3>'
-            '<p>Drop a pin anywhere in America for instant USGS LiDAR slope, FEMA flood zone, USFWS wetlands, USDA soil/septic depth, NASA solar, and county value.</p>'
-            '<a class="card-link" href="%s">Open Parcel X-Ray →</a></article>'
-            '<article class="info-card"><div class="eyebrow">50-State Observatory</div>'
-            '<h3>Land Prices Per Acre (2010–%d)</h3>'
-            '<p>Compare %d USDA farm real estate (%s/acre U.S. average), cropland, pasture, and 3,115 county benchmarks across every U.S. state.</p>'
-            '<a class="card-link" href="%s">Open 50-State Land Prices →</a></article>'
-            '<article class="info-card"><div class="eyebrow">Interactive Workbench</div>'
-            '<h3>All-In Cost, Power &amp; Valuation Analyzer</h3>'
-            '<p>Model land loans with balloons, grid extension vs. off-grid solar, verified closed comps, income cap-rate, and subdivision residual budgets.</p>'
-            '<a class="card-link" href="%s">Launch Land Analyzer →</a></article>'
+            '<section><h2>Everything you need to find, X-Ray, analyze, and acquire land across all 50 states</h2><div class="card-grid">'
+            '<article class="info-card"><div class="eyebrow">Turnkey Acquisition · Listed &amp; Unlisted</div>'
+            '<h3>Land Agent Concierge ($20 + 10%%)</h3>'
+            '<p>Skip county paperwork and outreach. Pay $20 to initiate full verification, bidding or off-market landowner contact, and deed transfer for any parcel in America.</p>'
+            '<a class="card-link" href="%s">Hire Land Agent ($20 to Start) →</a></article>'
+            '<article class="info-card"><div class="eyebrow">50-State Interactive Data &amp; Charts</div>'
+            '<h3>U.S. Land Data Atlas (2010–%d)</h3>'
+            '<p>Explore our interactive 50-state cartogram, multi-state USDA growth charts (%s/ac U.S. avg), live inventory supply breakdowns, and searchable 3,115-county table.</p>'
+            '<a class="card-link" href="%s">Open Land Data Atlas &amp; Charts →</a></article>'
+            '<article class="info-card"><div class="eyebrow">All 50 States · 9 Live Federal APIs</div>'
+            '<h3>Free U.S. Parcel X-Ray &amp; Deal Analyzer</h3>'
+            '<p>Drop a pin anywhere for USGS LiDAR terrain profile, FEMA flood &amp; wildfire risk, wetlands, soil/bedrock, Census roads, public lands, solar, and full ROI modeling.</p>'
+            '<a class="card-link" href="%s">Open Parcel X-Ray →</a> · <a class="card-link" href="%s">Deal Analyzer →</a></article>'
             '</div></section>'
         ) % (
-            self.u("/xray/"), self.market.latest_year, self.market.latest_year, esc(us_fre),
-            self.u("/land-prices/"), self.u("/analyze/"),
+            self.u("/services/"), self.market.latest_year, esc(us_fre),
+            self.u("/land-atlas/"), self.u("/xray/"), self.u("/analyze/"),
         )
         body = [
             '<section class="hero-shell"><div class="hero"><div class="hero-left">'
             '<img src="%s" alt="" width="76" height="76" class="mascot"><div>'
-            '<div class="eyebrow">Open Official Land Platform · Zero Broker Spam</div>'
-            '<h1>Find, map, and X-Ray official land for sale</h1>'
+            '<div class="eyebrow">All 50 States Live · Open Land Database, Data Atlas &amp; Land Agent</div>'
+            '<h1>Find, X-Ray, and acquire land in all 50 states</h1>'
             '<p class="lede">%s</p></div></div>'
             '<div class="hero-cta-group">'
-            '<a class="button" href="%s">List Land Free (60s / AI Agent) →</a>'
-            '<a class="button ghost" href="%s">Free 50-State Parcel X-Ray</a>'
+            '<a class="button" href="%s">Hire Land Agent ($20 · Listed or Unlisted) →</a>'
+            '<a class="button ghost" href="%s">50-State Data Atlas &amp; Charts</a>'
+            '<a class="button ghost" href="%s">List Land Free</a>'
             '</div></div>'
             '<div class="hero-stats">'
             '<span class="stat-pill"><strong>%s</strong> active parcels</span>'
-            '<span class="stat-pill"><strong>%d</strong> states live + 50-state direct</span>'
+            '<span class="stat-pill"><strong>%d/50</strong> U.S. states live</span>'
             '<span class="stat-pill"><strong>%d</strong> official agencies</span>'
-            '<span class="stat-pill"><strong>3,115</strong> county price benchmarks</span>'
+            '<span class="stat-pill"><strong>3,115</strong> county benchmarks</span>'
             '<span class="stat-pill"><strong>9</strong> live federal X-Ray APIs</span>'
             '<span class="stat-pill">Updated <strong>%s</strong></span>'
             '</div></section>' % (
-                self.u("/assets/mascot.png"), lede, self.u("/list/"), self.u("/xray/"),
+                self.u("/assets/mascot.png"), lede, self.u("/services/"), self.u("/land-atlas/"), self.u("/list/"),
                 "{:,}".format(len(cur)), len(states), n_src, esc(self.updated() or "daily"),
             ),
             self.map_block("all"),
@@ -663,6 +665,224 @@ class Site(object):
             "Direct by Owner & Agent Land Marketplace — Bid or Buy It Now | Landosaur",
             desc, "/direct/", "".join(body), indexable=True, jsonld=[crumb_ld],
             scripts=["vendor/leaflet.js", "xray.js", "direct.js"], wide=True,
+        )
+
+    # ------------------------------------------------------------------ /services/ Land Agent & Buyer Services Hub
+    def services_page(self):
+        crumbs, crumb_ld = self.crumbs([("Land Agent & Buyer Services", "/services/")])
+        body = [
+            crumbs,
+            '<div id="services-app">',
+            '<div class="eyebrow">All 50 States · Listed &amp; Unlisted Land · $20 Initiation + 10% On Close</div>',
+            '<h1>Landosaur Land Agent &amp; Buyer Services</h1>',
+            '<p class="lede">Like DomainAgents for raw land. Pick <strong>any parcel listed on Landosaur</strong>—or drop a pin on <strong>any unlisted, off-market parcel in America</strong>. Pay <strong>$20 to start</strong> and our acquisition desk handles county title/tax verification, agency bidding or landowner outreach, paperwork, and licensed title/deed transfer for a transparent <strong>10% concierge fee only when your deal closes</strong>.</p>',
+
+            '<section class="dossier-card" style="margin-top:18px">'
+            '<div class="eyebrow">How Land Agent Works</div>'
+            '<div class="card-grid" style="margin-top:10px">'
+            '<article class="info-card"><div class="eyebrow">Step 1 · $20 Today</div><h3>Lock In Any Parcel</h3><p>Submit a Landosaur parcel ID, county APN, address, or satellite pin anywhere in all 50 states. Pay $20 to open your live acquisition dossier.</p></article>'
+            '<article class="info-card"><div class="eyebrow">Step 2 · We Do the Legwork</div><h3>Verify, Contact &amp; Submit</h3><p>We run 9-agency GIS screening, check county tax/lien/redemption status, prepare municipal applications or auction bids, or contact unlisted landowners directly.</p></article>'
+            '<article class="info-card"><div class="eyebrow">Step 3 · 10% Only On Close</div><h3>Licensed Title &amp; Deed Transfer</h3><p>We coordinate closing through a licensed title company or closing attorney in the parcel\'s state so your deed records cleanly into your name.</p></article>'
+            '</div></section>',
+
+            '<section><h2>Every Land Buyer Service Under One Roof</h2>'
+            '<p class="small">Click any service card below to select it and pre-configure your $20 Land Agent initiation form.</p>'
+            '<div class="card-grid">'
+            '<article class="info-card service-card" data-select-service="listed_acquisition" style="cursor:pointer">'
+            '<div class="eyebrow">$20 Start + 10% Transfer Fee</div>'
+            '<h3>Buy &amp; Transfer Listed Public Land</h3>'
+            '<p>Full hands-free acquisition for any fixed-price, OTC, or surplus government parcel in our 50-state database—application prep, payment routing, and deed recording.</p>'
+            '<span class="card-link">Select Listed Acquisition →</span></article>'
+
+            '<article class="info-card service-card" data-select-service="unlisted_outreach" style="cursor:pointer">'
+            '<div class="eyebrow">Off-Market · All 50 States · $20 + 10%</div>'
+            '<h3>Unlisted &amp; Off-Market Land Acquisition</h3>'
+            '<p>Found a parcel that isn\'t even for sale? Drop a pin or paste the APN—we pull county ownership records, run 9-agency X-Ray, make outreach with your offer, and coordinate closing.</p>'
+            '<span class="card-link">Select Unlisted Land Agent →</span></article>'
+
+            '<article class="info-card service-card" data-select-service="auction_proxy" style="cursor:pointer">'
+            '<div class="eyebrow">Tax Deeds &amp; Auctions · $20 + 10%</div>'
+            '<h3>Tax-Sale &amp; Public Auction Concierge</h3>'
+            '<p>Statutory redemption verification, back-tax &amp; municipal lien checks, bidder registration packet prep, and maximum-bid strategy across county &amp; state auctions.</p>'
+            '<span class="card-link">Select Auction Concierge →</span></article>'
+
+            '<article class="info-card service-card" data-select-service="landbank_application" style="cursor:pointer">'
+            '<div class="eyebrow">City &amp; County Land Banks · $20 + 10%</div>'
+            '<h3>Land Bank &amp; Side-Lot Application Desk</h3>'
+            '<p>Side-lot eligibility checks, municipal development/rehab packets, zoning confirmation, and board-approval tracking across 30+ city and county land banks.</p>'
+            '<span class="card-link">Select Land Bank Concierge →</span></article>'
+
+            '<article class="info-card service-card" data-select-service="diligence_packet" style="cursor:pointer">'
+            '<div class="eyebrow">Deep Field &amp; Title Audit · $20 Deposit</div>'
+            '<h3>Full Pre-Purchase Diligence Packet</h3>'
+            '<p>Recorded legal road easement check, county tax &amp; lien scan, septic/perc &amp; well depth review, utility line extension inquiry, and survey/attorney coordination.</p>'
+            '<span class="card-link">Select Diligence Audit →</span></article>'
+
+            '<article class="info-card service-card" data-select-service="custom_sourcing" style="cursor:pointer">'
+            '<div class="eyebrow">Investors &amp; Homesteaders · $20 Start</div>'
+            '<h3>Custom Acreage &amp; Portfolio Sourcing</h3>'
+            '<p>Tell us your target states, acreage, budget, and use (homestead, hunting, timber, solar, RV/glamping, subdivision)—we source both public &amp; off-market matches.</p>'
+            '<span class="card-link">Select Custom Sourcing →</span></article>'
+            '</div></section>',
+
+            '<section class="dossier-card" id="start-land-agent" style="margin-top:26px">'
+            '<div class="eyebrow">Initiate Your Acquisition · $20 Today</div>'
+            '<h2>Start Your Land Agent Acquisition &amp; Transfer</h2>'
+            '<div id="selected-parcel-banner" class="callout" hidden style="margin:10px 0 14px"></div>'
+            '<form id="concierge-form" class="worksheet">'
+            '<label style="grid-column:1/-1"><span>Buyer Service Type</span><select name="service_type">'
+            '<option value="listed_acquisition">Listed Public Land Acquisition &amp; Full Transfer ($20 + 10% on close)</option>'
+            '<option value="unlisted_outreach">Unlisted / Off-Market Parcel Acquisition ($20 + 10% on close)</option>'
+            '<option value="auction_proxy">Tax-Sale &amp; Public Auction Concierge ($20 + 10% on close)</option>'
+            '<option value="landbank_application">Land Bank &amp; Side-Lot Application Service ($20 + 10% on close)</option>'
+            '<option value="diligence_packet">Deep Pre-Purchase Title, Easement &amp; Diligence Audit ($20 deposit)</option>'
+            '<option value="custom_sourcing">Custom Acreage / Off-Market Portfolio Sourcing ($20 initiation)</option>'
+            '</select></label>'
+
+            '<div id="unlisted-pin-wrap" style="grid-column:1/-1">'
+            '<p class="small" style="margin:0 0 8px"><strong>Targeting an unlisted or off-market parcel?</strong> Click anywhere on the satellite map or search an address/town below to auto-detect county, state, elevation, flood zone, and road distance.</p>'
+            '<div id="concierge-pin-map" class="map small" style="margin-bottom:10px"></div>'
+            '<div id="concierge-xray-preview" class="callout" hidden style="margin-bottom:10px"></div>'
+            '</div>'
+
+            '<label style="grid-column:1/-1"><span>Search Address, Town, or Unlisted Location (optional)</span>'
+            '<div style="display:flex;gap:8px;flex-wrap:wrap"><input name="location" type="text" placeholder="e.g. 1206 SW Munson Ave, Topeka, KS or rural highway near Bozeman, MT" style="flex:1 1 260px">'
+            '<button type="button" id="concierge-locate-btn" class="button ghost sm">Locate &amp; X-Ray</button></div></label>'
+
+            '<label><span>Landosaur Parcel ID (if listed)</span><input name="parcel_id" type="text" placeholder="e.g. ks-snco-0973604015014000"></label>'
+            '<label><span>County Parcel / APN (if known)</span><input name="apn" type="text" placeholder="Assessor parcel number"></label>'
+            '<label><span>County</span><input name="county" type="text" placeholder="e.g. Shawnee County"></label>'
+            '<label><span>State (2-letter)</span><input name="state" type="text" maxlength="2" placeholder="e.g. KS"></label>'
+            '<label><span>Latitude (auto-filled by pin)</span><input name="lat" type="number" step="any" placeholder="39.04"></label>'
+            '<label><span>Longitude (auto-filled by pin)</span><input name="lon" type="number" step="any" placeholder="-95.69"></label>'
+            '<label><span>Parcel Title / Short Label</span><input name="parcel_title" type="text" placeholder="Optional parcel label"></label>'
+            '<label><span>Stated Acres (optional)</span><input name="acres" type="number" step="any" min="0" placeholder="e.g. 5"></label>'
+            '<label><span>Official Agency Price / Min Bid ($)</span><input name="official_price" type="number" step="any" min="0" placeholder="Leave blank if unlisted / unpriced"></label>'
+            '<label><span>Your Max Offer / Budget ($)</span><input name="max_budget" type="number" step="any" min="0" placeholder="e.g. 15000"></label>'
+            '<label><span>Funding Type</span><select name="financing"><option value="cash">All cash / wire at closing</option><option value="land_loan">Land loan</option><option value="seller_financing">Open to seller financing</option></select></label>'
+            '<label><span>Your Full Name</span><input name="buyer_name" type="text" required placeholder="Full legal name for closing"></label>'
+            '<label><span>Your Email</span><input name="buyer_email" type="email" required placeholder="you@example.com"></label>'
+            '<label><span>Phone (optional)</span><input name="buyer_phone" type="tel" placeholder="(555) 123-4567"></label>'
+            '<label style="grid-column:1/-1"><span>Special Instructions, Intended Use, or Contingencies</span>'
+            '<input name="notes" type="text" placeholder="e.g. Confirm legal road access before bidding; LLC vest title; looking for 5-20 wooded acres"></label>'
+            '<input name="website_hp" type="text" tabindex="-1" autocomplete="off" style="display:none">'
+
+            '<div class="fee-ledger" id="fee-breakdown-live" style="grid-column:1/-1"></div>'
+            '<div style="grid-column:1/-1;padding-top:4px"><button type="submit" id="concierge-submit" class="button">Start Acquisition with Land Agent — $20 →</button></div>'
+            '</form>'
+            '<div id="concierge-result" class="callout" hidden style="margin-top:14px"></div>'
+            '<p class="small" style="margin-top:14px"><strong>Transparency &amp; Licensing Notice:</strong> Landosaur is an independent land intelligence platform and acquisition concierge—not a government agency. The $20 initiation fee begins parcel-specific research, verification, paperwork prep, or off-market outreach. The transparent 10% concierge transfer fee applies only when an acquisition successfully closes. Wherever state law requires a licensed real estate broker, title agent, or closing attorney to represent a buyer or execute deed conveyance, Landosaur coordinates directly through a licensed local partner in that state.</p>'
+            '</section>',
+
+            '<section class="dossier-card" style="margin-top:20px">'
+            '<h2>Track an Existing Land Agent Order</h2>'
+            '<form id="track-order-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+            '<input name="code" type="text" placeholder="Enter confirmation code (e.g. AGT-1A2B3C4D)" style="flex:1 1 240px;padding:9px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface-2);color:var(--ink)">'
+            '<button type="submit" class="button ghost sm">Check Order Status</button></form>'
+            '<div id="track-order-out" class="callout" hidden style="margin-top:10px"></div>'
+            '</section>',
+            '</div>',
+        ]
+        desc = "Hire Landosaur's Land Agent ($20 initiation + transparent 10% transfer fee on close) to buy and transfer listed public land or acquire unlisted off-market parcels across all 50 U.S. states."
+        return self.layout(
+            "Land Agent & Buyer Services — Buy Listed or Unlisted Land ($20 to Start) | Landosaur",
+            desc, "/services/", "".join(body), indexable=True, jsonld=[crumb_ld],
+            scripts=["vendor/leaflet.js", "services.js"], wide=True,
+        )
+
+    # ------------------------------------------------------------------ /land-atlas/ U.S. Land Data Atlas & Interactive Charts
+    def land_atlas_page(self):
+        cat = self.cat
+        m = self.market
+        cur = cat.current()
+        us = m.latest_values("US")
+        chg, y0, y1 = m.span_change("US", "farm_real_estate")
+        crumbs, crumb_ld = self.crumbs([("U.S. Land Data Atlas & Charts", "/land-atlas/")])
+        body = [
+            crumbs,
+            '<div id="atlas-app">',
+            '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · 3,115 U.S. Counties · Live Public Supply</div>' % m.latest_year,
+            '<h1>U.S. Land Data Atlas &amp; Interactive Market Charts</h1>',
+            '<p class="lede">The open reference atlas for American land—combining <strong>%s live public-agency parcels across all %d U.S. states (%d agencies)</strong>, <strong>17 years of official USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks across <strong>all 3,115 U.S. counties</strong>. Zero fabricated metrics.</p>' % (
+                "{:,}".format(len(cur)), len(cat.states), len(adapters.SOURCES), m.first_year, m.latest_year),
+
+            '<div class="kpi-grid">'
+            '<div class="kpi-card"><span>Live Official Database</span><strong>%s</strong><small>Active parcels · %d/50 states · %d agencies</small></div>'
+            '<div class="kpi-card"><span>U.S. Farm Real Estate (%d)</span><strong>%s/ac</strong><small>USDA NASS national benchmark</small></div>'
+            '<div class="kpi-card"><span>%d–%d Nominal Growth</span><strong>%s</strong><small>U.S. agricultural land appreciation</small></div>'
+            '<div class="kpi-card"><span>County Benchmark Coverage</span><strong>3,115</strong><small>Every U.S. county searchable &amp; CSV-ready</small></div>'
+            '</div>' % (
+                "{:,}".format(len(cur)), len(cat.states), len(adapters.SOURCES),
+                m.latest_year, esc(market_mod.usd(us.get("farm_real_estate"))),
+                y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)),
+            ),
+
+            '<section class="dossier-card" style="margin-top:24px">'
+            '<div class="eyebrow">Interactive 50-State Cartogram</div>'
+            '<h2>Compare All 50 States at a Glance</h2>'
+            '<div class="atlas-controls">'
+            '<button type="button" class="mode-btn active" data-carto-metric="fre">2026 Price ($/acre)</button>'
+            '<button type="button" class="mode-btn" data-carto-metric="chg16">2010–%d Appreciation (%%)</button>'
+            '<button type="button" class="mode-btn" data-carto-metric="chg5">5-Year Growth (%%)</button>'
+            '<button type="button" class="mode-btn" data-carto-metric="active">Live Landosaur Parcels</button>'
+            '</div>'
+            '<div id="atlas-cartogram" class="us-cartogram" aria-label="Interactive 50-state U.S. land data cartogram"></div>'
+            '<p id="cartogram-readout" class="small" style="margin-top:10px">Hover any state tile to inspect 2026 $/acre, historical appreciation, and live official parcel count. Click any state to explore.</p>'
+            '</section>' % m.latest_year,
+
+            '<section class="dossier-card" style="margin-top:24px">'
+            '<div class="eyebrow">Interactive Multi-State Time Series (%d–%d)</div>'
+            '<h2>Compare Land Value Growth Across Any 4 States</h2>'
+            '<div class="atlas-controls">'
+            '<label>Series 1 <select id="cmp-st-1"></select></label>'
+            '<label>Series 2 <select id="cmp-st-2"></select></label>'
+            '<label>Series 3 <select id="cmp-st-3"></select></label>'
+            '<label>Series 4 <select id="cmp-st-4"></select></label>'
+            '<label>Land Class <select id="cmp-metric"><option value="farm_real_estate">Farm Real Estate</option><option value="cropland">Cropland</option><option value="pasture">Pasture</option></select></label>'
+            '<label>Scale <select id="cmp-scale"><option value="usd">Nominal $/acre</option><option value="index">Indexed Growth (Start = 100)</option></select></label>'
+            '</div>'
+            '<div id="atlas-compare-chart" style="margin-top:12px"></div>'
+            '<div id="atlas-compare-stats" class="kpi-grid" style="margin-top:12px"></div>'
+            '</section>' % (m.first_year, m.latest_year),
+
+            '<section class="dossier" style="margin-top:24px">'
+            '<div class="dossier-card"><div class="eyebrow">Live 50-State Official Supply</div><h2>Top States by Active Official Parcels</h2><div id="atlas-top-states"></div></div>'
+            '<div class="dossier-card"><div class="eyebrow">Inventory Structure</div><h2>Deal Modes &amp; Acreage Size Distribution</h2>'
+            '<h3 style="margin-top:10px">By Sale Type</h3><div id="atlas-mode-split"></div>'
+            '<h3 style="margin-top:18px">By Stated Acreage Tier</h3><div id="atlas-acre-tiers"></div></div>'
+            '</section>',
+
+            '<section class="dossier-card" style="margin-top:24px">'
+            '<div class="eyebrow">Public-Sale Pricing vs. Market Averages</div>'
+            '<h2>Live Priced Public Offerings vs. USDA State Averages</h2>'
+            '<p class="small">Computed strictly from live official listings carrying both a published price/minimum bid and stated acreage—never blended with unpriced land-bank parcels.</p>'
+            '<div id="atlas-discount-table"></div>'
+            '</section>',
+
+            '<section class="dossier-card" style="margin-top:24px">'
+            '<div class="eyebrow">All 3,115 U.S. Counties · Searchable &amp; Exportable</div>'
+            '<h2>U.S. County Land Value Explorer (%d)</h2>'
+            '<div class="atlas-controls">'
+            '<label>State <select id="county-st-filter"></select></label>'
+            '<label>Search County <input id="county-q-filter" type="search" placeholder="e.g. Gallatin, Shawnee, Coconino"></label>'
+            '<label>Sort <select id="county-sort"><option value="val_asc">Lowest $/acre first</option><option value="val_desc">Highest $/acre first</option><option value="name_asc">County A–Z</option></select></label>'
+            '<button type="button" id="county-export-csv" class="button ghost sm" style="margin-left:auto">Export Filtered CSV</button>'
+            '</div>'
+            '<p id="county-explorer-count" class="small" style="margin:8px 0"></p>'
+            '<div class="scroll"><table class="data"><thead><tr><th>County</th><th>State</th><th class="n">2026 Benchmark</th><th class="n">vs. State Avg</th><th>Action</th></tr></thead><tbody id="county-explorer-body"></tbody></table></div>'
+            '</section>',
+
+            '<section class="callout" style="margin-top:24px"><h2>Want to buy land in any county above—even if it isn\'t listed yet?</h2>'
+            '<p>Use our <a href="%s"><strong>$20 Land Agent Concierge</strong></a> for listed or unlisted off-market parcels across all 50 states, download raw datasets on <a href="%s">/data/</a>, or inspect individual state histories on <a href="%s">/land-prices/</a>.</p></section>' % (
+                self.u("/services/"), self.u("/data/"), self.u("/land-prices/")),
+            '</div>',
+        ]
+        desc = "Interactive U.S. Land Data Atlas: 50-state land value cartogram, 2010–%d USDA multi-state appreciation charts, live supply breakdowns across %s parcels, and searchable 3,115-county price explorer." % (
+            m.latest_year, "{:,}".format(len(cur)))
+        return self.layout(
+            "U.S. Land Data Atlas — 50-State Charts, 3,115 County Prices & Live Supply | Landosaur",
+            desc, "/land-atlas/", "".join(body), indexable=True, jsonld=[crumb_ld],
+            scripts=["atlas.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /land-for-sale/ (national directory)
@@ -1666,15 +1886,25 @@ class Site(object):
         ) if v != ""})
         others = [x for x in county["listings"] if x["id"] != r["id"] and x["available"]][:6]
 
-        kpi_price = esc(money(r["price"])) if r["price"] is not None else "Offer / app"
-        kpi_price_sub = esc(adapters.PRICE_KIND.get(r["price_kind"], "No asking price"))
+        has_price = r.get("price") is not None and r["price"] > 0
+        concierge_fee = round(r["price"] * 0.10, 2) if has_price else None
+        turnkey_total = round(r["price"] + concierge_fee, 2) if has_price else None
+
+        kpi_price = esc(money(turnkey_total)) if has_price else "$20 to start"
+        kpi_price_lbl = "Est. Turnkey Total (+10%)" if has_price else "Land Agent Acquisition"
+        kpi_price_sub = (
+            "%s official + %s (10%% Land Agent)" % (esc(money(r["price"])), esc(money(concierge_fee)))
+            if has_price else "10% concierge transfer fee on close"
+        )
         kpi_acres = esc(acres_text(r["acres"])) if r["acres"] else "Not stated"
-        kpi_ppa = esc(money(r["price"] / r["acres"]) + "/ac") if (r.get("price") and r.get("acres")) else (
+        kpi_ppa = esc(money(r["price"])) if has_price else (
             esc(money(cv["value"]) + "/ac") if (cv and cv.get("value")) else "–"
         )
-        kpi_ppa_lbl = "Implied $/Acre" if (r.get("price") and r.get("acres")) else "County Benchmark"
-        kpi_ppa_sub = "Listing figure ÷ stated acres" if (r.get("price") and r.get("acres")) else (
-            esc(cv["name"] + " avg") if (cv and cv.get("value")) else "See agency terms"
+        kpi_ppa_lbl = ("Official Min Bid" if r["price_kind"] == "min_bid" else "Official Agency Price") if has_price else "County Benchmark"
+        kpi_ppa_sub = (
+            esc(money(r["price"] / r["acres"]) + "/ac official") if (has_price and r.get("acres"))
+            else (esc(adapters.PRICE_KIND.get(r["price_kind"], "Agency figure")) if has_price
+                  else (esc(cv["name"] + " avg") if (cv and cv.get("value")) else "See agency terms"))
         )
         kpi_right = esc(zoning_val) if zoning_val else (esc("Buildable: " + buildable_val) if buildable_val else esc(r["status_label"]))
         kpi_right_lbl = "Zoning" if zoning_val else ("Agency Flag" if buildable_val else "Offering Status")
@@ -1688,7 +1918,7 @@ class Site(object):
             '<div class="kpi-card"><span>%s</span><strong style="font-size:19px">%s</strong><small>%s</small></div>'
             '</div>'
         ) % (
-            "Minimum Bid" if r["price_kind"] == "min_bid" else "Published Price", kpi_price, kpi_price_sub,
+            kpi_price_lbl, kpi_price, kpi_price_sub,
             kpi_acres, kpi_ppa_lbl, kpi_ppa, kpi_ppa_sub, kpi_right_lbl, kpi_right, kpi_right_sub,
         )
 
@@ -1704,30 +1934,77 @@ class Site(object):
         ) % esc(r["title"])
 
         if r["price_kind"] == "cash":
-            official_cta = "Buy It Now on Official Agency Portal ↗"
+            agent_mode = "buy_now"
+            agent_cta = "Buy &amp; Transfer with Land Agent — $20 →"
+            agent_head = "Buy &amp; Transfer This Parcel Hands-Free"
+            official_cta = "Prefer DIY? View official %s portal ↗" % esc(src.get("agency", "agency"))
         elif r["offering"] == "auction" or r["price_kind"] == "min_bid":
-            official_cta = "Place Bid on Official Agency Portal ↗"
-        elif r["offering"] == "proposal":
-            official_cta = "Submit Proposal on Official Agency Portal ↗"
+            agent_mode = "auction"
+            agent_cta = "Bid &amp; Transfer with Land Agent — $20 →"
+            agent_head = "Let Our Land Agent Vet, Bid &amp; Transfer"
+            official_cta = "Prefer DIY? Bid directly on %s portal ↗" % esc(src.get("agency", "agency"))
         else:
-            official_cta = "Apply / Buy on Official Agency Portal ↗"
+            agent_mode = "landbank"
+            agent_cta = "Acquire &amp; Transfer with Land Agent — $20 →"
+            agent_head = "Let Our Land Agent Handle Application &amp; Deed Transfer"
+            official_cta = "Prefer DIY? Apply directly on %s portal ↗" % esc(src.get("agency", "agency"))
+
+        svc_q = urllib.parse.urlencode({k: v for k, v in (
+            ("parcel", r["id"]), ("title", r["title"]),
+            ("price", "" if not has_price else r["price"]),
+            ("acres", "" if not r.get("acres") else r["acres"]),
+            ("county", r["county_label"]), ("state", r["state"]),
+            ("apn", r.get("apn") or ""), ("mode", agent_mode),
+            ("lat", "" if r.get("lat") is None else r["lat"]),
+            ("lon", "" if r.get("lon") is None else r["lon"]),
+        ) if v != ""})
+
+        if has_price:
+            ledger_html = (
+                '<div class="fee-ledger">'
+                '<div class="fee-line"><span>Official agency %s</span><strong>%s</strong></div>'
+                '<div class="fee-line"><span>Landosaur Land Agent fee (10%% on close)</span><strong>+%s</strong></div>'
+                '<div class="fee-line total"><span>Estimated Turnkey Total</span><strong>%s</strong></div>'
+                '<div class="fee-line due"><span>Due today to initiate full acquisition &amp; transfer</span><strong>$20.00</strong></div>'
+                '</div>'
+            ) % ("min bid" if r["price_kind"] == "min_bid" else "price", esc(money(r["price"])), esc(money(concierge_fee)), esc(money(turnkey_total)))
+        else:
+            ledger_html = (
+                '<div class="fee-ledger">'
+                '<div class="fee-line"><span>Official agency price</span><strong>Set via agency review / offer</strong></div>'
+                '<div class="fee-line"><span>Landosaur Land Agent fee</span><strong>10%% only upon successful closing</strong></div>'
+                '<div class="fee-line due"><span>Due today to initiate full acquisition &amp; transfer</span><strong>$20.00</strong></div>'
+                '</div>'
+            )
+
+        agent_box = (
+            '<div class="agent-checkout-card">'
+            '<div class="eyebrow">Landosaur Land Agent · Full Acquisition &amp; Deed Transfer</div>'
+            '<h3>%s</h3>%s'
+            '<div class="btn-row" style="margin:12px 0 8px">'
+            '<a class="button" href="%s?%s">%s</a>'
+            '</div>'
+            '<p class="small" style="margin:0">Includes county tax/lien &amp; redemption verification, agency paperwork or bid prep, and licensed title/deed closing coordination. '
+            '<a data-official-source="1" href="%s" rel="noopener">%s</a></p>'
+            '</div>'
+        ) % (agent_head, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
 
         body = [
             crumbs,
             '<h1>%s</h1>' % esc(r["title"]),
             summary_strip,
-            '<div class="dossier"><div class="dossier-card"><dl class="kv">%s</dl>'
+            '<div class="dossier"><div class="dossier-card">%s<dl class="kv" style="margin-top:16px">%s</dl>'
             '<div class="btn-row">'
-            '<a class="button" href="%s" rel="noopener">%s</a>'
             '<a id="dossier-analyze-link" class="button ghost" href="%s?%s">Full Analyzer</a>'
             '<button type="button" id="print-dossier" class="button ghost sm">Print / Save Field PDF</button>'
             '<button type="button" id="save-parcel" class="button ghost sm" data-id="%s">Save ☆</button>'
             '<button type="button" id="compare-parcel" class="button ghost sm" data-id="%s">Compare</button>'
             '</div>'
-            '<p class="callout"><strong>Not an offer to sell.</strong> Landosaur does not sell or broker government land. %s\'s official bidding rules, deadlines and '
-            'eligibility terms apply; complete bidding or checkout directly on the agency\'s portal.</p></div><div>%s</div></div>' % (
+            '<p class="callout"><strong>Not an offer to sell.</strong> Landosaur is an independent land database and acquisition concierge, not the government agency. %s\'s official rules, deadlines and '
+            'eligibility terms apply; where state law requires a licensed broker or closing attorney, transfer is coordinated through a licensed local partner.</p></div><div>%s</div></div>' % (
+                agent_box,
                 "".join("<dt>%s</dt><dd>%s</dd>" % (k, v) for k, v in kv),
-                esc(r["url"]), official_cta, self.u("/analyze/"), esc(aq), esc(r["id"]), esc(r["id"]),
+                self.u("/analyze/"), esc(aq), esc(r["id"]), esc(r["id"]),
                 esc(src.get("agency", "The agency")), mapbox,
             ),
             xray_section,

@@ -242,6 +242,17 @@
       var cta = el("a", "chip-btn chip-link", r[13] ? (r[5] === "min_bid" ? "Bid Now →" : "Buy Now →") : (isAuc ? "Bid Info →" : "Details →"));
       cta.href = parcelHref(r);
       acts.appendChild(cta);
+      if (!r[13] && r[8]) {
+        var agQ = "?parcel=" + encodeURIComponent(r[0]) + "&title=" + encodeURIComponent(r[9]) +
+          (r[4] != null ? "&price=" + r[4] : "") + (r[6] ? "&acres=" + r[6] : "") +
+          "&county=" + encodeURIComponent(r[10] || "") + "&state=" + encodeURIComponent(r[3] || "") +
+          (r[11] ? "&apn=" + encodeURIComponent(r[11]) : "") +
+          (r[1] != null ? "&lat=" + r[1] + "&lon=" + r[2] : "") +
+          "&mode=" + (isAuc ? "auction" : (r[5] === "cash" ? "buy_now" : "landbank"));
+        var agBtn = el("a", "chip-btn chip-link", "Land Agent ($20)");
+        agBtn.href = base + "/services/" + agQ;
+        acts.appendChild(agBtn);
+      }
       var isSaved = savedIds.indexOf(r[0]) >= 0;
       var sBtn = el("button", "chip-btn" + (isSaved ? " on" : ""), isSaved ? "Saved ★" : "Save ☆");
       sBtn.type = "button";

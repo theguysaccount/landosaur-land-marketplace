@@ -95,8 +95,8 @@ def main(dist, data_dir=None):
                 visible = re.sub(r"(?s)<[^>]+>", " ", doc)
                 if re.search(r"\bOwner\b", visible):
                     problems.append("%s: mentions an owner field" % rel)
-                button = re.search(r'<a class="button" href="([^"]+)"', doc)
-                if not button or not button.group(1).startswith("https://") or not any(h in button.group(1) for h in OFFICIAL):
+                official_link = re.search(r'<a[^>]*data-official-source="1"[^>]*href="([^"]+)"', doc) or re.search(r'<a class="button" href="([^"]+)"', doc)
+                if not official_link or not official_link.group(1).startswith("https://") or not any(h in official_link.group(1) for h in OFFICIAL):
                     problems.append("%s: no official https source link" % rel)
 
     for t, where in titles.items():
@@ -136,7 +136,7 @@ def main(dist, data_dir=None):
                     len(locs), len(indexable), sorted(locs ^ indexable)[:5]))
         if "Sitemap: %s/sitemap.xml" % config.BASE_URL not in robots_txt:
             problems.append("robots.txt does not point at the sitemap")
-        for req_path in ("/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
+        for req_path in ("/", "/xray/", "/list/", "/direct/", "/services/", "/land-atlas/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
             if req_path not in indexable:
                 problems.append("core hub not indexable: %s" % req_path)
     elif os.path.exists(smap) or "Disallow: /" not in robots_txt:

@@ -32,7 +32,7 @@ done
 cd "$ROOT"
 
 echo "==> 1/7 Syntax & unit tests"
-for f in api/xray.js api/listings.js api/offers.js api/search.js site/theme.js site/map.js site/listing.js site/xray.js site/list.js site/direct.js site/tables.js site/analyze.js scripts/e2e.mjs; do
+for f in api/xray.js api/listings.js api/offers.js api/search.js api/concierge.js site/theme.js site/map.js site/listing.js site/xray.js site/list.js site/direct.js site/services.js site/atlas.js site/tables.js site/analyze.js scripts/e2e.mjs; do
   node --check "$f"
 done
 python3 -m unittest discover -s tests -t .

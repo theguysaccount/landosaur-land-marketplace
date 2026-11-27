@@ -17,13 +17,14 @@ import io
 import json
 import os
 import shutil
+import statistics
 import sys
 
 from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "theme.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "theme.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 
 
 class Writer(object):
@@ -116,6 +117,8 @@ def build_llms_txt(cat, site, updated):
         "## Primary Hub URLs",
         "",
         "- [Interactive Land Map](%s/)" % base,
+        "- [Land Agent & Buyer Services ($20 Initiation + 10%% Transfer — Listed & Unlisted Land)](%s/services/)" % base,
+        "- [U.S. Land Data Atlas & Interactive 50-State Charts](%s/land-atlas/)" % base,
         "- [Free U.S. Parcel X-Ray (All 50 States — 9 Live Federal APIs)](%s/xray/)" % base,
         "- [List Land Free (Owners, Real Estate Agents & AI Agents)](%s/list/)" % base,
         "- [Direct by Owner & Agent Marketplace (Live Auctions & Buy It Now)](%s/direct/)" % base,
@@ -147,7 +150,9 @@ def build_llms_txt(cat, site, updated):
         "- [Listings CSV](%s/data/listings.csv)" % base,
         "- [Map JSON](%s/data/map.json)" % base,
         "- [Sources Status JSON](%s/data/sources.json)" % base,
+        "- [50-State Land Data Atlas JSON (USDA 2010-2026 + 3,115 Counties + Supply)](%s/data/atlas.json)" % base,
         "- [Live Two-Sided Land Search API (JSON)](%s/api/search/?limit=25)" % base,
+        "- [Land Agent Concierge API ($20 + 10%% Acquisition & Transfer)](%s/api/concierge/)" % base,
         "- [Buy It Now Atom Feed](%s/feeds/buy-now.xml)" % base,
         "- [Auctions Atom Feed](%s/feeds/auctions.xml)" % base,
         "- [New Listings Atom Feed](%s/feeds/new.xml)" % base,
@@ -167,6 +172,106 @@ def _urlset_xml(paths, updated):
     return "\n".join(out) + "\n"
 
 
+def _build_atlas_payload(cat, site):
+    m = site.market
+    cur = cat.current()
+    years = list(range(m.first_year, m.latest_year + 1))
+
+    buy_now = sum(1 for r in cur if r["price_kind"] == "cash")
+    auction = sum(1 for r in cur if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms"))
+    offer = len(cur) - buy_now - auction
+
+    tiers_def = [
+        ("< 0.25 ac (infill lot)", 0.0, 0.25),
+        ("0.25 – 1 ac", 0.25, 1.0),
+        ("1 – 5 ac", 1.0, 5.0),
+        ("5 – 20 ac", 5.0, 20.0),
+        ("20 – 100 ac", 20.0, 100.0),
+        ("100+ ac", 100.0, 1e9),
+    ]
+    acre_tiers = []
+    for lbl, lo, hi in tiers_def:
+        cnt = sum(1 for r in cur if r.get("acres") and lo <= r["acres"] < hi)
+        acre_tiers.append({"label": lbl, "count": cnt})
+
+    def five_yr_chg(code):
+        pts = [o for o in m.series(code, "farm_real_estate") if o.get("valueUsdPerAcre") is not None]
+        target_yr = m.latest_year - 5
+        p0 = next((o for o in pts if o["year"] == target_yr), None)
+        p1 = next((o for o in reversed(pts) if o["year"] == m.latest_year), None)
+        if not p0 or not p1 or not p0["valueUsdPerAcre"]:
+            return None
+        return round((p1["valueUsdPerAcre"] / float(p0["valueUsdPerAcre"]) - 1.0) * 100.0, 1)
+
+    series = {}
+    for code in ["US"] + sorted(STATE_NAMES.keys()):
+        st_ser = {}
+        has_any = False
+        for metric in ("farm_real_estate", "cropland", "pasture"):
+            by_y = {o["year"]: o.get("valueUsdPerAcre") for o in m.series(code, metric)}
+            arr = [by_y.get(y) for y in years]
+            if any(v is not None for v in arr):
+                has_any = True
+            st_ser[metric] = arr
+        if has_any:
+            series[code] = st_ser
+
+    states_out = []
+    priced_states = []
+    for st in site.all_states:
+        code = st["code"]
+        chg_all, _, _ = m.span_change(code, "farm_real_estate")
+        states_out.append({
+            "code": code,
+            "name": st["name"],
+            "slug": st["slug"],
+            "fre": st["values"].get("farm_real_estate"),
+            "chg_all": chg_all,
+            "chg_5yr": five_yr_chg(code),
+            "county_median": st["county_median"],
+            "active": st["active_count"],
+            "browse_path": st["browse_path"] or st["path"],
+            "price_path": st["path"],
+        })
+        st_rows = [r for r in cur if r["state"] == code and r.get("price") is not None and r["price"] > 0]
+        if st_rows:
+            ppas = [r["price"] / r["acres"] for r in st_rows if r.get("acres") and r["acres"] > 0]
+            priced_states.append({
+                "code": code,
+                "name": st["name"],
+                "priced_count": len(st_rows),
+                "min_price": round(min(r["price"] for r in st_rows), 2),
+                "median_ppa": round(statistics.median(ppas), 2) if ppas else None,
+                "usda_fre": st["values"].get("farm_real_estate") or st["county_median"],
+                "browse_path": st["browse_path"] or st["path"],
+            })
+    priced_states.sort(key=lambda x: -x["priced_count"])
+
+    counties = []
+    for st in site.all_states:
+        for c in m.counties_by_state.get(st["code"], []):
+            counties.append([c["fips"], c["name"], st["code"], st["slug"], c["value"]])
+
+    return {
+        "first_year": m.first_year,
+        "latest_year": m.latest_year,
+        "years": years,
+        "supply": {
+            "total_active": len(cur),
+            "buy_now": buy_now,
+            "auction": auction,
+            "offer": offer,
+            "states_covered": len(cat.states),
+            "agencies_covered": len(adapters.SOURCES),
+            "acre_tiers": acre_tiers,
+        },
+        "states": states_out,
+        "series": series,
+        "priced_states": priced_states,
+        "counties": counties,
+    }
+
+
 def build(dist, data_dir=None, now=None, log=print):
     cat = Catalog(data_dir, now)
     site = Site(cat)
@@ -184,6 +289,8 @@ def build(dist, data_dir=None, now=None, log=print):
 
     # Core hubs
     w.page("/", site.home(), indexable=True, group="core")
+    w.page("/services/", site.services_page(), indexable=True, group="core")
+    w.page("/land-atlas/", site.land_atlas_page(), indexable=True, group="core")
     w.page("/xray/", site.xray_page(), indexable=True, group="core")
     w.page("/list/", site.list_page(), indexable=True, group="core")
     w.page("/direct/", site.direct_page(), indexable=True, group="core")
@@ -246,13 +353,16 @@ def build(dist, data_dir=None, now=None, log=print):
                      r["price_kind"], r["status"], "yes" if r["available"] else "no", r.get("deadline") or "", r.get("lat") or "",
                      r.get("lon") or "", r.get("first_seen") or "", r["checked"], r["url"], config.BASE_URL + cat.listing_path(r)])
     w.write("data/listings.csv", out.getvalue())
+    w.write("data/atlas.json", json.dumps(_build_atlas_payload(cat, site), separators=(",", ":")))
 
     w.page("/data/", site.data_page([
         ("/data/listings.csv", "Every active and recent official listing: facts, status, coordinates, official agency URL"),
         ("/data/map.json", "Compact geospatial point table powering the interactive map"),
+        ("/data/atlas.json", "50-state USDA 2010-2026 time series, 3,115 county benchmarks, and national supply analytics"),
         ("/data/sources.json", "Source status: last successful read, counts, failures, and site stats"),
         ("/api/search/?limit=25", "Live JSON search API across official public parcels and direct owner/agent listings"),
-        ("/.well-known/landosaur-agent.json", "Machine-readable AI Agent API schema (search, X-Ray, publish, bid/reserve)"),
+        ("/api/concierge/", "Land Agent Acquisition Concierge API ($20 initiation + 10% transfer fee)"),
+        ("/.well-known/landosaur-agent.json", "Machine-readable AI Agent API schema (search, X-Ray, publish, bid/reserve, hire Land Agent)"),
         ("/feeds/buy-now.xml", "Atom feed of fixed-price Buy It Now official land parcels"),
         ("/feeds/auctions.xml", "Atom feed of active public land auctions and tax sales"),
     ]), indexable=True, group="core")

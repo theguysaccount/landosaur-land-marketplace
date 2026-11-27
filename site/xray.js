@@ -204,7 +204,7 @@
   function loadXray(container, lat, lon, parcelCtx, onDone) {
     if (!container) return;
     container.innerHTML = skeletonHtml();
-    var url = base + "/api/xray?lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon);
+    var url = base + "/api/xray/?lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon);
     fetch(url)
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -292,7 +292,7 @@
     if (!q) return;
     if (statusEl) statusEl.textContent = "Locating \"" + q + "\" and running 6-agency Federal X-Ray…";
     outEl.innerHTML = skeletonHtml();
-    fetch(base + "/api/xray?q=" + encodeURIComponent(q))
+    fetch(base + "/api/xray/?q=" + encodeURIComponent(q))
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         if (!res.ok || res.d.error) {

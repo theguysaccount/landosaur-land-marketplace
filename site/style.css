@@ -248,7 +248,7 @@ code {
   padding: 14px 16px;
 }
 .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.filters label.grow { flex: 1 1 200px; }
+.filters label.grow { flex: 1 1 155px; }
 .filters label.check {
   flex-direction: row;
   align-items: center;
@@ -824,7 +824,8 @@ footer p { margin: 0 0 9px; }
   table.listings td { display: inline-block; margin: 2px 12px 0 0; font-size: 14px; }
   table.listings td.n::before, table.listings td[data-label="Deadline"]::before { content: attr(data-label) ": "; color: var(--muted); }
   body { font-size: 15px; }
-  .mascot { width: 58px; height: 58px; }
+  .hero-left { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .mascot { width: 52px; height: 52px; }
   .filters input[type=number] { width: 92px; }
   .filters label.grow { flex-basis: 100%; }
   .map-legend { display: none; }

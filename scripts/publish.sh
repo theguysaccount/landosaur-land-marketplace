@@ -82,7 +82,7 @@ rsync -a --delete \
 (cd "$STAGING" && npx --no-install vercel --prod --yes --scope persist-always)
 
 echo "==> 7/7 Post-deploy live check (IndexNow diff + live API smoke check)"
-curl -fsS "$BASE_URL/api/xray?lat=35.42&lon=-92.45" | head -c 260 && echo ""
+curl -fsS "$BASE_URL/api/xray/?lat=35.42&lon=-92.45" | head -c 260 && echo ""
 python3 scripts/indexnow.py diff "$ROOT/dist" "$BASE_URL" > /tmp/lando-changed.txt || true
 if [ -s /tmp/lando-changed.txt ]; then
   echo "Changed indexable URLs: $(wc -l < /tmp/lando-changed.txt)"

@@ -111,6 +111,7 @@ python3 -m lando.build dist
 
 echo "==> 4/7 Validating the production output"
 python3 scripts/check_dist.py dist
+python3 scripts/linkcheck.py dist
 
 if [ "$SKIP_E2E" -eq 0 ]; then
   echo "==> 5/7 Running headless Chrome E2E against local dist/"

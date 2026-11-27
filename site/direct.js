@@ -21,13 +21,14 @@
     // Directory mode: show all live direct listings (or honest empty state with CTA to /list/)
     root.innerHTML = "<p class='small'>Loading live Direct by Owner &amp; Agent listings…</p>";
     fetch(base + "/api/listings/")
-      .then(function (r) { return r.json(); })
+      .then(function (r) { if (!r.ok) throw new Error("Listings unavailable"); return r.json(); })
       .then(function (d) {
-        var list = (d && d.listings) || [];
+        if (!d.storage_configured || !Array.isArray(d.listings)) throw new Error("Listings unavailable");
+        var list = d.listings;
         if (!list.length) {
           root.innerHTML =
-            "<div class='callout'><h2>No Direct Owner / Agent Listings Yet</h2>" +
-            "<p>Landosaur never seeds fake listings. Be the first owner, real estate agent, or AI agent to publish a Buy It Now or Auction parcel in any of the 50 states—automatically enriched with 9 live federal GIS layers.</p>" +
+            "<div class='callout'><h2>No direct listings yet</h2>" +
+            "<p>Owners and agents can publish a fixed-price or auction listing with Parcel X-Ray.</p>" +
             "<p><a class='button' href='" + base + "/list/'>List Your Land Free (60 sec or AI Agent) →</a></p></div>";
           return;
         }
@@ -64,6 +65,7 @@
       var item = lWrap.listing;
       var isAuc = item.sale_mode === "auction";
       document.title = item.title + " | Landosaur Direct";
+      document.getElementById("direct-heading").textContent = item.title;
       var ppa = (item.price && item.acres) ? money(item.price / item.acres) + "/ac" : "–";
       var highBid = offers && offers.current_high_bid != null ? offers.current_high_bid : null;
       var minNext = offers && offers.minimum_next_bid != null ? offers.minimum_next_bid : item.price;
@@ -131,7 +133,6 @@
 
       root.innerHTML =
         "<div class='eyebrow'>Landosaur Direct · Listed by " + (item.seller_type === "agent" ? "Real Estate Agent" : "Owner") + "</div>" +
-        "<h1>" + esc(item.title) + "</h1>" +
         "<div class='dossier-metrics'>" +
         "<div class='kpi-card'><span>" + (isAuc ? (highBid ? "Current High Bid" : "Starting Bid") : "Buy It Now") + "</span><strong>" + money(highBid || item.price) + "</strong><small>" + (isAuc ? (bidCount == null ? "Bid status unavailable" : bidCount + " bids recorded") : "Fixed direct price") + "</small></div>" +
         "<div class='kpi-card'><span>Parcel Size</span><strong>" + esc(item.acres) + " acres</strong><small>Seller-stated acreage</small></div>" +

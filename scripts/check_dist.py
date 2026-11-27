@@ -180,7 +180,7 @@ def main(dist, data_dir=None):
                     len(locs), len(indexable), sorted(locs ^ indexable)[:5]))
         if "Sitemap: %s/sitemap.xml" % config.BASE_URL not in robots_txt:
             problems.append("robots.txt does not point at the sitemap")
-        for req_path in ("/", "/deals/", "/tax-sales/", "/xray/", "/list/", "/direct/", "/services/", "/land-atlas/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
+        for req_path in ("/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/deals/", "/tax-sales/", "/xray/", "/list/", "/direct/", "/services/", "/land-atlas/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
             if req_path not in indexable:
                 problems.append("core hub not indexable: %s" % req_path)
     elif os.path.exists(smap) or "Disallow: /" not in robots_txt:

@@ -296,10 +296,38 @@ try {
       await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: stub.identifier });
     }
   });
+  await step("budget hubs show official price tiers, 50 states and published agency sources", async () => {
+    for (const cap of [5000, 10000]) {
+      await page.goto(base + "/land-under-" + cap + "/");
+      const found = await page.eval(`(() => {
+        const tables = [...document.querySelectorAll("table.listings")];
+        const prices = tables.flatMap((t) => [...t.querySelectorAll("td[data-label=Price]")].map((cell) => Number(cell.dataset.v)));
+        const attributed = tables.every((t) => !!t.querySelector("a[data-official-source='1']"));
+        const faq = [...document.querySelectorAll("script[type='application/ld+json']")].some((x) => JSON.parse(x.textContent)["@type"] === "FAQPage");
+        const estimate = document.querySelector('[data-label="With Land Agent"]');
+        return [prices.length, Math.max(...prices), attributed, faq, document.querySelectorAll("#budget-states tbody tr").length, Boolean(estimate)];
+      })()`);
+      assert(found[0] > 0 && found[1] <= cap && found[2] && found[3] && found[4] === 50 &&
+        found[5] === (cap === 10000), "budget page shows inconsistent prices, links, or schema");
+    }
+  });
+  await step("acreage bands and all 12 state buying guides match their source links", async () => {
+    await page.goto(base + "/acreage-for-sale/");
+    assert(await page.eval(`["one-to-five", "five-to-twenty", "twenty-plus"].every((key) =>
+      document.querySelector("#" + key + " table a[data-official-source='1']"))`),"acreage groups or sources are missing");
+    await page.goto(base + "/research/");
+    const count = await page.eval(`new Set([...document.querySelectorAll('#field-guides a[href*="/buying-land-in-"]')].map((link) => link.href)).size`);
+    assert(count === 12,"expected twelve state guides");
+    await page.goto(base + "/research/buying-land-in-texas/");
+    assert(await page.eval(`["/land-for-sale/texas/", "/land-prices/texas/", "/tax-sales/#state-TX", "/services/?state=TX"].every((p) =>
+      document.querySelector('article.prose') && document.querySelector('a[href="' + p + '"]')) &&
+      !!document.querySelector('article.prose') && [...document.querySelectorAll("main .notes a")].some((a) => a.href.includes("statutes.capitol.texas.gov"))`),
+      "missing official source or state guide links");
+  });
   await step("indexing policy matches SITE_INDEXABLE across core hubs", async () => {
     const indexable = await page.eval(`fetch(${JSON.stringify(base)} + "/data/sources.json").then(r => r.json()).then(d => !!d.site.indexable)`);
     const want = indexable ? "index" : "noindex";
-    const paths = ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"];
+    const paths = ["/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/research/buying-land-in-texas/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"];
     const actual = await page.eval(`Promise.all(${JSON.stringify(paths)}.map(async (path) => {
       const response = await fetch(${JSON.stringify(base)} + path);
       if (!response.ok) throw new Error(path + " HTTP " + response.status);
@@ -312,7 +340,7 @@ try {
     await page.viewport(375, 812, true);
     const bad = [];
     const listingRel = new URL(listing, base).pathname.replace(new URL(base + "/").pathname, "/");
-    for (const p of ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
+    for (const p of ["/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/research/buying-land-in-texas/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
       if (p === "/") await page.waitFor("/listings match/.test(document.getElementById('map-count').textContent)");
       if (p === "/land-atlas/") await page.waitFor("document.querySelector('#county-explorer-body tr')");

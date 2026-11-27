@@ -1,0 +1,250 @@
+[
+  {
+    "state": "TX",
+    "slug": "texas",
+    "name": "Texas",
+    "description": "Read Texas tax foreclosure notices, separate redemption windows by parcel type, and check frontage, water and deed language before bidding.",
+    "sources": [
+      [
+        "Texas Legislature · Tax Code chapter 34",
+        "https://statutes.capitol.texas.gov/docs/TX/htm/TX.34.htm"
+      ],
+      [
+        "Texas Department of Insurance · Title insurance questions",
+        "https://www.tdi.texas.gov/title/titlefaqs.html"
+      ],
+      [
+        "Texas Comptroller · Agricultural, timberland and wildlife special appraisal",
+        "https://comptroller.texas.gov/taxes/property-tax/ag-timber/"
+      ]
+    ],
+    "body": "## Start with the sale notice and judgment\nRequest the county's current notice, cause number, legal description, and payment rules. Ask whether the county is offering a judgment sale or reselling property previously struck off to a taxing unit. Obtain the governing documents for the route stated in the notice before calculating cash due.\n\n## Account for the redemption window\nTexas Tax Code § 34.21 distinguishes qualifying homestead, agricultural and mineral interests from other property. The statute generally gives the first group two years from filing the purchaser's deed and the other group 180 days. Have the parcel's recorded deed date and tax status verified before you budget for improvements or resale.\n\n## Check the rural tract itself\nAsk the county to confirm lawful frontage and driveway permits, then get the recorded access instrument and title exceptions. Request the appraisal district's current treatment and check whether a use change could trigger additional tax. Compare a written well or utility estimate against the bid and closing budget."
+  },
+  {
+    "state": "FL",
+    "slug": "florida",
+    "name": "Florida",
+    "description": "Follow Florida tax deed sales through the county clerk and verify payment, remaining governmental liens, and usable building area.",
+    "sources": [
+      [
+        "Florida Legislature · Chapter 197 tax collections, certificates and deeds",
+        "https://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&URL=0100-0199/0197/0197.html"
+      ],
+      [
+        "Florida Legislature · § 197.542 tax deed sales",
+        "https://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&URL=0100-0199/0197/Sections/0197.542.html"
+      ],
+      [
+        "Florida Department of Revenue · Property tax statutes",
+        "https://floridarevenue.com/property/Documents/statutes.pdf"
+      ]
+    ],
+    "body": "## Confirm whether the sale is for a certificate or a deed\nChapter 197 covers separate tax-certificate and tax-deed procedures. For a deed sale, open the county clerk's entry and reconcile its number and legal description with the property appraiser's parcel. Read the sale instructions for deposits, settlement, available-land procedures, and the applicable redemption cutoff.\n\n## Review the liens and records\nCheck § 197.552 with a title professional before assuming which interests a deed will extinguish. Ask about governmental liens, recorded easements and access, and whether a title insurer will insure the anticipated conveyance. A parcel's assessed value does little to establish its buildable footprint.\n\n## Check the usable footprint\nOverlay flood and wetland layers on the parcel and its approach. Ask the local permitting office to identify the usable building envelope, water and sewer availability, and any fill or septic requirements. Price the parcel with those constraints and the clerk's actual charges."
+  },
+  {
+    "state": "GA",
+    "slug": "georgia",
+    "name": "Georgia",
+    "description": "Read the Georgia tax-sale route and redemption notice, then verify title clearance, access and county approvals.",
+    "sources": [
+      [
+        "Fulton County Sheriff · Tax sales and process",
+        "https://www.fultoncountyga.gov/inside-fulton-county/fulton-county-departments/sheriff/tax-sales"
+      ],
+      [
+        "Georgia Department of Revenue · Deed fundamentals and tax-sale statutes",
+        "https://dor.georgia.gov/document/document/deed-fundamentals/download"
+      ]
+    ],
+    "body": "## Identify the procedure before valuing the deed\nGeorgia counties can sell through different tax foreclosure procedures. Begin with the sheriff or tax commissioner's notice and ask which process and deed apply. For a sale under ordinary tax execution, review O.C.G.A. §§ 48-4-40 and 48-4-45 with the person handling title. Have counsel check the current rules and sale date for that specific procedure.\n\n## Trace the right of redemption\nAsk which parties may redeem, how notice must be delivered, and whether the county or court file shows that each required step has been completed. Keep the recorded tax deed, notice, service evidence and payment receipt together. Ask the title insurer when it can issue a policy for the intended transaction.\n\n## Evaluate access and parcel use with the county\nUse the legal description to compare the deed with the mapping layer. Ask the planning office about lot legality and the intended building or agricultural use. Confirm road maintenance and utility availability independently before treating nearby development as evidence of service."
+  },
+  {
+    "state": "CA",
+    "slug": "california",
+    "name": "California",
+    "description": "Find California county tax-defaulted auctions and check redemption, public access and desert or rural permitting constraints.",
+    "sources": [
+      [
+        "California State Controller · Public auctions and bidder information",
+        "https://sco.ca.gov/ardtax_public_auction.html"
+      ],
+      [
+        "California State Controller · Chapter 7 tax sale FAQ",
+        "https://www.sco.ca.gov/Files-ARD-Tax-Info/chapter7_faq.pdf"
+      ],
+      [
+        "California State Controller · County tax collector reference manual, chapter 6000",
+        "https://www.sco.ca.gov/Files-ARD-Tax-Info/Tax-Collector-Ref-Man/ctcrm_chapter6.pdf"
+      ]
+    ],
+    "body": "## Verify the property is still offered\nUse the State Controller's auction directory to find the county tax collector, then check whether the lot remains in that specific sale. Revenue and Taxation Code § 3707 governs termination of the right to redeem for these sales. Read the county's final instructions for the applicable date and local time before sending funds.\n\n## Read the exceptions to the tax deed\nMatch the APN to the legal description and ask the county what interest it is offering. Ask a title professional to review easements, restrictions, reservations and any outstanding interests. Request the exact deed and payment process from the county selling the parcel.\n\n## Cost the site from its actual access point\nFor desert or remote acreage, trace the route from a maintained public road to the usable part of the tract. Ask the relevant county about water supply, septic, grading, wildfire access, and building permits where applicable. A map line can help identify the questions to ask the county and surveyor."
+  },
+  {
+    "state": "AR",
+    "slug": "arkansas",
+    "name": "Arkansas",
+    "description": "Distinguish Arkansas Commissioner of State Lands auctions from unsold-property sales and review deed and access requirements before bidding.",
+    "sources": [
+      [
+        "Arkansas Commissioner of State Lands · Real estate sales",
+        "https://cosl.org/Home/Realestate"
+      ],
+      [
+        "Arkansas Bureau of Legislative Research · 26 CAR Part 400",
+        "https://webftp.blr.arkansas.gov/Home/FTPDocument?path=CAR%2FParts%2F26CARpt400.pdf"
+      ],
+      [
+        "Code of Arkansas Rules · § 400-108 redemption",
+        "https://codeofarrules.arkansas.gov/Rules/Rule?chapterID=223&levelType=section&partID=1001&sectionID=38052&subChapterID=272&subPartID=5832&titleID=26"
+      ]
+    ],
+    "body": "## Check the auction route and the live catalog\nThe Commissioner of State Lands publishes in-person auction notices and a separate process for unsold parcels. Read the lot's current status, payment instructions, and legal description in the state catalog. Under 26 CAR § 400-108, redemption petitions and payments are subject to a cutoff tied to the preceding business day and the petition's expiration.\n\n## Understand the limited warranty deed\nSection 400-107 describes the limited warranty deed the state issues. Ask an Arkansas title professional what additional work would be required for the proposed purchase and title insurance. Obtain the county's current parcel map, deed description and any recorded access or easement documents.\n\n## Estimate costs before committing\nCheck whether the parcel is a narrow strip, a hillside, a floodplain lot, or acreage with an approach worth surveying. Ask the utilities serving the tract for location-specific quotes and confirm plans with the permitting authority. Use the state's published lot amount as a bid input and keep site costs separate."
+  },
+  {
+    "state": "AZ",
+    "slug": "arizona",
+    "name": "Arizona",
+    "description": "Understand Arizona tax lien certificates and the separate path to foreclosure, then check county access, water and intended use.",
+    "sources": [
+      [
+        "Arizona Legislature · A.R.S. § 42-18101 sale of tax liens",
+        "https://www.azleg.gov/ars/42/18101.htm"
+      ],
+      [
+        "Arizona Legislature · A.R.S. § 42-18201 foreclosure",
+        "https://www.azleg.gov/ars/42/18201.htm"
+      ],
+      [
+        "Maricopa County Treasurer · Delinquent taxes and tax liens",
+        "https://www.maricopacountyaz.org/Treasurers_Office/Delinquent-Taxes-And-Tax-Liens.html"
+      ]
+    ],
+    "body": "## Identify the interest being auctioned\nA treasurer's tax lien sale under A.R.S. Title 42 concerns delinquent tax liens. The certificate establishes the purchaser's interest in the lien. If your objective is to buy acreage outright, look for a deed or conventional purchase and confirm the exact interest in the notice.\n\n## Check the waiting period and court process\nA.R.S. § 42-18201 generally permits a foreclosure action beginning three years after the lien sale if the lien remains unredeemed, subject to statutory exceptions and deadlines. Consult the treasurer on redemption status, subsequent taxes and certificates. Any foreclosure requires the applicable superior court process.\n\n## Test whether a deeded tract will meet your needs\nAsk the county about parcel legality, energy and water options, septic feasibility and any development overlays. Verify the physical and recorded road route separately. On remote land, ask the relevant water and planning agencies what supplies and permits apply to the legal parcel."
+  },
+  {
+    "state": "MI",
+    "slug": "michigan",
+    "name": "Michigan",
+    "description": "Identify Michigan's foreclosing governmental unit, compare tax foreclosure and land-bank terms, and check deed restrictions before buying.",
+    "sources": [
+      [
+        "Michigan Legislature · MCL § 211.78m",
+        "https://www.legislature.mi.gov/Laws/MCL?objectName=MCL-211-78M"
+      ],
+      [
+        "Michigan Treasury · Tax foreclosure and auction links",
+        "https://www.michigan.gov/taxes/property/forfeiture-foreclosure/county/auctions"
+      ],
+      [
+        "Michigan Treasury · Foreclosure process timelines",
+        "https://www.michigan.gov/taxes/property/forfeiture-foreclosure/county/foreclosure-process-timelines"
+      ]
+    ],
+    "body": "## Locate the foreclosing governmental unit\nStart with Michigan Treasury's county auction directory and confirm whether the county or another foreclosing governmental unit administers the auction. Read the parcel terms under the relevant MCL § 211.78m process. Ask for payment forms, bid deadlines, the deed language and any obligations missed in the catalog listing.\n\n## Separate the land-bank application from the foreclosure sale\nA land-bank lot may have adjacency, residency, rehabilitation or redevelopment conditions. Obtain the program rules and proposed agreement for your APN. Confirm which restrictions are recorded and whether they affect financing, permitted use, transfer, and your closing timeline.\n\n## Verify the site after parcel identification\nAsk the city or township about lot legality, zoning, utilities and outstanding assessments. In wooded or seasonal locations, verify year-round legal access and a feasible septic area. If you intend to combine adjoining city lots, confirm the required municipal approvals before paying the application price."
+  },
+  {
+    "state": "OH",
+    "slug": "ohio",
+    "name": "Ohio",
+    "description": "Read Ohio delinquent-land foreclosure notices, confirm court and redemption steps, and compare municipal land-bank agreements.",
+    "sources": [
+      [
+        "Ohio Revised Code · § 5721.19 foreclosure and sale",
+        "https://codes.ohio.gov/ohio-revised-code/section-5721.19"
+      ],
+      [
+        "Ohio Revised Code · § 5721.25 redemption",
+        "https://codes.ohio.gov/ohio-revised-code/section-5721.25"
+      ],
+      [
+        "Ohio Revised Code · Chapter 5721",
+        "https://codes.ohio.gov/ohio-revised-code/chapter-5721"
+      ]
+    ],
+    "body": "## Read the authority in the notice\nAsk the county treasurer and clerk which proceeding produced the sale, then match the court case, party notice, APN and legal description. Ohio Revised Code § 5721.19 sets rules for delinquent-land foreclosure sales. Confirm which official or authorized venue runs the auction and how the sale is confirmed.\n\n## Determine the parcel's redemption and closing posture\nSection 5721.25 addresses redemption before the filing of the entry confirming the sale for covered proceedings. Have the clerk or a title professional confirm the last legal step for the sale route you are considering. Ask when funds are due and obtain the deed type, recorded easements and assessment history.\n\n## Treat land-bank conditions as part of the price\nFor a separate land-bank parcel, request the disposition agreement and review lot-use, maintenance or construction milestones. Verify zoning, service connections and access before committing. Any required work belongs in the acquisition budget alongside the published amount."
+  },
+  {
+    "state": "PA",
+    "slug": "pennsylvania",
+    "name": "Pennsylvania",
+    "description": "Compare Pennsylvania upset, judicial and repository sales and check exactly which liens survive the advertised sale.",
+    "sources": [
+      [
+        "Pennsylvania General Assembly · Real Estate Tax Sale Law",
+        "https://www.legis.state.pa.us/WU01/LI/LI/US/HTM/1947/0/0542..HTM"
+      ],
+      [
+        "Pennsylvania General Assembly · Article VI sale procedures",
+        "https://www.palegis.us/statutes/unconsolidated/law-information/view-statute?act=542&chpt=6&iFrame=true&sessInd=0&smthLwInd=0&txtType=HTM&yr=1947"
+      ],
+      [
+        "Fayette County · Tax Claim Bureau sale information",
+        "https://www.fayettecountypa.org/269/Tax-Claim-Bureau"
+      ]
+    ],
+    "body": "## Identify the sale category shown by the Tax Claim Bureau\nPennsylvania's Real Estate Tax Sale Law sets separate routes for upset sales, judicial sales and repository dispositions. Ask the county which rules apply to the parcel and whether its sale requires registration or governmental approval. Some counties may operate under separate statutory authority.\n\n## Ask which encumbrances remain\nAn upset sale can leave the buyer responsible for existing mortgages, liens or other interests. For a judicial sale, review the court's order and notice history to see exactly which interests are affected. Ask the closing professional to review easements and exceptions from the actual case and the recorded chain of title.\n\n## Call the correct land-use office\nCheck township or municipal zoning, access and lot configuration. If intended use needs on-lot sewage, ask the local agency about the application and feasible absorption area. Bring the recorded legal description and survey evidence when the county GIS outlines are ambiguous."
+  },
+  {
+    "state": "WI",
+    "slug": "wisconsin",
+    "name": "Wisconsin",
+    "description": "Find Wisconsin county tax-deeded properties, check local bid and quitclaim terms, and verify access, shoreland and sanitary constraints.",
+    "sources": [
+      [
+        "Wisconsin Legislature · Chapter 75 tax delinquency proceedings",
+        "https://docs.legis.wisconsin.gov/statutes/statutes/75"
+      ],
+      [
+        "Dane County Treasurer · Tax deed sale procedures",
+        "https://treasurer.danecounty.gov/Tax-Deed-Details"
+      ],
+      [
+        "Marathon County · Tax-deed properties",
+        "https://www.marathoncounty.gov/services/tax-deed-property"
+      ]
+    ],
+    "body": "## Find the county's tax-deed listing and terms\nUse the treasurer's current parcel notice and identify the actual sale mechanism. For example, Dane County schedules sealed bids with parcel-specific bid due dates. Ask whether the listing is being offered under Wis. Stat. ch. 75 or a separate local or surplus authority, and obtain the county's full instructions.\n\n## Confirm the interest and any prior interests\nAsk for the deed form, title record and legal description before bidding. Dane County describes recording a quitclaim deed for its auction purchases. Review the actual county documentation with a title professional and confirm when the buyer receives the deed.\n\n## Review shoreland and sanitary rules early\nAsk the county or local zoning authority about shoreland boundaries, wetland screening, setbacks, permitted driveway locations and sanitary permits. For a parcel with limited usable area, confirm the above constraints on a common site plan before treating the gross acreage as buildable."
+  },
+  {
+    "state": "UT",
+    "slug": "utah",
+    "name": "Utah",
+    "description": "Find Utah county May tax sales, review redemption and bidding procedures, then verify road access and water before pricing a tract.",
+    "sources": [
+      [
+        "Utah Legislature · Utah Code § 59-2-1351",
+        "https://le.utah.gov/xcode/Title59/Chapter2/59-2-S1351.html?v=C59-2-S1351_2023031320230313"
+      ],
+      [
+        "Utah Legislature · Utah Code § 59-2-1346 redemption",
+        "https://le.utah.gov/xcode/Title59/Chapter2/C59-2-S1346_2022050420220504.pdf"
+      ],
+      [
+        "Utah County Auditor · May tax sale policies",
+        "https://auditor.utahcounty.gov/may-tax-sale/policies"
+      ]
+    ],
+    "body": "## Verify the May sale from the county auditor\nUnder Utah Code § 59-2-1351, follow the county's notice and final sale list. Read registration, deposit, bid and settlement requirements and confirm the applicable redemption deadline. Some surplus opportunities are administered by a different office and use different terms.\n\n## Ask about the parcel's deed and title path\nReview the proposed conveyance and the legal description before bidding. Ask the county about any parcel grouping, additional charges and confirmation required after payment. Ask a title professional about recorded interests and insurance requirements for the proposed deed.\n\n## Confirm physical and legal access and water\nAsk the county about frontage, recorded access, grade and intended land use. For an undeveloped tract, obtain evidence for a viable water supply and check whether claimed water rights will transfer. Verify electric service, septic feasibility, and other project costs for the identified parcel."
+  },
+  {
+    "state": "OR",
+    "slug": "oregon",
+    "name": "Oregon",
+    "description": "Read Oregon county tax foreclosure and resale documents and verify zoning, access and wastewater feasibility for rural acreage.",
+    "sources": [
+      [
+        "Oregon Legislature · ORS chapter 312 real property tax foreclosure",
+        "https://www.oregonlegislature.gov/bills_laws/ors/ors312.html"
+      ],
+      [
+        "Oregon Legislature · ORS chapter 275 county lands",
+        "https://www.oregonlegislature.gov/bills_laws/ors/ors275.html"
+      ],
+      [
+        "Oregon Department of Revenue · Real property foreclosure",
+        "https://www.oregon.gov/dor/forms/FormsPubs/real-property-foreclosure_310-671.pdf"
+      ]
+    ],
+    "body": "## Distinguish tax foreclosure from county resale\nORS chapter 312 governs real property tax foreclosure and redemption. Identify when the foreclosure judgment was entered and confirm whether the property has already been conveyed to the county. For a county-owned resale, read the county land office's notice and applicable ORS chapter 275 procedures.\n\n## Check the interest specified by the county\nFind the APN and legal description, then request deed terms, reservation language and any surviving easements. Ask about the deposit, timing and bidder eligibility for the actual county sale. Discuss title insurance and any remaining actions with a title professional before committing.\n\n## Verify allowed uses before valuing improvements\nAsk county planning which zoning and overlays apply, including farm or forest use rules when relevant. Verify legal access and design constraints for driveway, water and onsite wastewater. Obtain written information for the intended use before estimating how much of the tract can support it."
+  }
+]

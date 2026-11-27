@@ -187,7 +187,7 @@ class RefreshAndBuildTest(unittest.TestCase):
             if any(host in href for host in portfolio_hosts):
                 self.assertIn("nofollow", tag.lower(), "portfolio link missing nofollow: %s" % tag)
 
-    def test_real_catalog_benchmarks_50_states_and_29_guides(self):
+    def test_real_catalog_benchmarks_50_states_and_state_guides(self):
         cat = Catalog(config.DATA, now=NOW)
         b = research.compute_benchmarks(cat)
         self.assertGreater(b["active_count"], 10000)
@@ -198,7 +198,8 @@ class RefreshAndBuildTest(unittest.TestCase):
         self.assertEqual(len(b["home_faqs"]), 6)
         site = Site(cat)
         self.assertEqual(len(site.all_states), 50)
-        self.assertEqual(len(site.guides), 29)
+        self.assertEqual(len(site.guides), 41)
+        self.assertEqual(set(site.state_guides), {"TX", "FL", "GA", "CA", "AR", "AZ", "MI", "OH", "PA", "WI", "UT", "OR"})
         doc = site.research()
         self._assert_faq_parity(doc, expected_count=6, required_types={"Organization", "BreadcrumbList", "Article", "Dataset", "FAQPage"})
         self._assert_zero_pbn_dofollow(doc)

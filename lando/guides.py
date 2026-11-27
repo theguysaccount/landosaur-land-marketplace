@@ -1,5 +1,6 @@
-"""29 source-cited Land Buyer Research Guides ported from data/research/*.md."""
+"""Source-cited Land Buyer Research Guides ported from data/research/*.md."""
 import html
+import json
 import os
 import re
 
@@ -246,4 +247,20 @@ def load_guides(data_dir=None, base_prefix=""):
             "sources": [{"title": SOURCES[k][0], "url": SOURCES[k][1]} for k in src_keys if k in SOURCES],
             "body_html": markdown_to_html(raw, base_prefix),
         })
+    state_path = os.path.join(root, "state-buying.json")
+    if os.path.isfile(state_path):
+        with open(state_path, encoding="utf-8") as fh:
+            for guide in json.load(fh):
+                slug = "buying-land-in-" + guide["slug"]
+                out.append({
+                    "slug": slug,
+                    "path": "/research/%s/" % slug,
+                    "title": "Buying Land in %s: Tax Sales and Due Diligence" % guide["name"],
+                    "category": "State buying guides",
+                    "description": guide["description"],
+                    "updated": "2026-11-27",
+                    "state": guide["state"],
+                    "sources": [{"title": label, "url": url} for label, url in guide["sources"]],
+                    "body_html": markdown_to_html(guide["body"], base_prefix),
+                })
     return out

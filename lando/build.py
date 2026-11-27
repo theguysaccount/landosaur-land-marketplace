@@ -5,7 +5,7 @@
 Generates:
   - Interactive Zillow-for-Land explorer (/), national directory (/land-for-sale/), state & county hubs
   - 50-State Land Price Observatory (/land-prices/* — 56 pages backed by USDA NASS 2010-2026 + 3,115 counties)
-  - Research & Benchmarks (/research/) + 29 source-cited buyer guides (/research/<slug>/)
+  - Research & Benchmarks (/research/) + source-cited buyer guides (/research/<slug>/)
   - Interactive Valuation, Financing & Off-Grid Power Workbench (/analyze/)
   - Individual GIS parcel dossiers (/land/<id>/)
   - CSV/JSON downloads, Atom feeds, Sitemap Index (/sitemap.xml -> /sitemaps/{core,places,listings}.xml),
@@ -258,13 +258,16 @@ def build_llms_txt(cat, site, updated):
         "- [Agent API Discovery](%s/.well-known/landosaur-agent.json)" % base,
         "- [OpenAPI 3.1 Specification](%s/openapi.json)" % base,
         "- [Landosaur MCP Server (stdio npm package)](%s/data/landosaur-mcp.tgz)" % base,
+        "- [Land Under $5,000](%s/land-under-5000/)" % base,
+        "- [Land Under $10,000](%s/land-under-10000/)" % base,
+        "- [Acreage for Sale](%s/acreage-for-sale/)" % base,
         "- [Land for Sale by State (50-State Directory)](%s/land-for-sale/)" % base,
         "- [50-State Land Price Observatory](%s/land-prices/)" % base,
         "- [50-State Land Price Rankings](%s/land-prices/states/)" % base,
         "- [Cheapest Official Land Per Acre](%s/land-prices/cheapest-land-per-acre/)" % base,
         "- [U.S. Land Price History (2010-%d)](%s/land-prices/history/)" % (site.market.latest_year, base),
         "- [Land Deal, Electricity & Valuation Analyzer](%s/analyze/)" % base,
-        "- [US Public-Agency Benchmarks & 29 Buyer Guides](%s/research/)" % base,
+        "- [US Public-Agency Benchmarks & Buyer Guides](%s/research/)" % base,
         "- [Closing Soon Auctions & Proposals](%s/closing-soon/)" % base,
         "- [New Listings](%s/new/)" % base,
         "- [Official Sources & Read Health](%s/sources/)" % base,
@@ -278,6 +281,9 @@ def build_llms_txt(cat, site, updated):
         avail = sum(1 for r in st["listings"] if r["available"])
         lines.append("- [%s](%s%s): %s active offerings (Atom feed: %s/feeds/%s.xml)" % (
             st["name"], base, cat.state_path(st), "{:,}".format(avail), base, st["code"].lower()))
+    lines.extend(["", "## State Land Buying and Tax Sales", ""])
+    lines.extend("- [%s](%s%s)" % (guide["title"], base, guide["path"])
+                 for guide in site.guides if guide.get("state"))
     lines.extend([
         "",
         "## Machine-Readable Data & Discovery",
@@ -465,6 +471,9 @@ def build(dist, data_dir=None, now=None, log=print):
     # Core hubs
     w.page("/", site.home(), indexable=True, group="core")
     w.page("/services/", site.services_page(), indexable=True, group="core")
+    for ceiling in (5000, 10000):
+        w.page("/land-under-%d/" % ceiling, site.budget_land_page(ceiling), indexable=True, group="core")
+    w.page("/acreage-for-sale/", site.acreage_land_page(), indexable=True, group="core")
     w.page("/deals/", site.deals_page(), indexable=True, group="core")
     w.page("/tax-sales/", site.tax_sales_page(), indexable=True, group="core")
     w.page("/land-atlas/", site.land_atlas_page(), indexable=True, group="core")

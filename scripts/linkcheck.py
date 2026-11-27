@@ -1,6 +1,6 @@
 """Weekly link check: the site's own pages, every source's catalogue page, and a sample of listings' official links.
 
-    python3 scripts/linkcheck.py [base_url]
+    python3 scripts/linkcheck.py [base_url | dist]
 
 Internal failures fail the run. Official links are fetched politely (one at a time, robots respected, a pause
 between requests); a failure there is a warning, because agencies move pages and the daily crawl is the real test.
@@ -53,5 +53,30 @@ def main(base):
     return 1 if failed else 0
 
 
+def local_links(dist):
+    """Verify all internal URLs in the release's buyer hubs and state guides."""
+    from check_dist import HREF, resolve
+    from pathlib import Path
+    root = Path(dist)
+    inputs = [root / path / "index.html" for path in ("land-under-5000", "land-under-10000", "acreage-for-sale")]
+    inputs.extend(sorted((root / "research").glob("buying-land-in-*/index.html")))
+    bad, checked = [], set()
+    for page in inputs:
+        if not page.is_file():
+            bad.append("Missing page %s" % page.relative_to(root))
+            continue
+        for raw in HREF.findall(page.read_text(encoding="utf-8")):
+            target = resolve(config.base_path(), raw)
+            if target and target not in checked:
+                checked.add(target)
+                if not (root / target).is_file():
+                    bad.append("%s → %s" % (page.relative_to(root), raw))
+    for error in bad:
+        print(error)
+    print("Checked %d local buyer pages and %d distinct internal links: %d problems" % (len(inputs), len(checked), len(bad)))
+    return bool(bad)
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else config.BASE_URL))
+    target = sys.argv[1] if len(sys.argv) > 1 else config.BASE_URL
+    sys.exit(local_links(target) if os.path.isdir(target) else main(target))

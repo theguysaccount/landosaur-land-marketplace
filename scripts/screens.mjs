@@ -6,7 +6,7 @@ import { launch } from "./cdp.mjs";
 
 const base = (process.argv[2] || "http://127.0.0.1:4651").replace(/\/$/, "");
 const out = path.resolve(process.argv[3] || "docs/screens");
-const defaults = ["/", "/deals/", "/tax-sales/", "/land-atlas/", "/services/", "/xray/", "/land/ks-snco-0973604015014000/"];
+const defaults = ["/", "/deals/", "/tax-sales/", "/land-atlas/", "/services/", "/xray/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/land/ks-snco-0973604015014000/"];
 const routes = process.argv.length > 4 ? process.argv.slice(4) : defaults;
 const ready = {
   "/": "/listings match/.test(document.querySelector('#map-count')?.textContent)",

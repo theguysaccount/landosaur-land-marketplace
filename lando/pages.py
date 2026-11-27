@@ -1,9 +1,10 @@
 """Page templates for Landosaur — Zillow-for-Land explorer, 50-state Land Price Observatory,
-29 buyer research guides, interactive Valuation Workbench, and GIS parcel dossiers.
+source-cited buyer research guides, interactive Valuation Workbench, and GIS parcel dossiers.
 
 Every number on every page comes strictly from stored official agency inventories,
 USDA NASS 2010-2026 datasets, or the 3,115-county US County Land Index. Zero fabricated figures.
 """
+from collections import Counter
 from functools import cached_property
 import html
 from itertools import islice
@@ -79,7 +80,9 @@ class Site(object):
         self.benchmarks = research.compute_benchmarks(catalog)
         self.market = market_mod.MarketData(catalog)
         self.all_states = self.market.all_states()
-        self.guides = guides_mod.load_guides(catalog.data_dir, self.base)
+        self.guides = [guide for guide in guides_mod.load_guides(catalog.data_dir, self.base)
+                       if not guide.get("state") or guide["state"] in catalog.states]
+        self.state_guides = {guide["state"]: guide for guide in self.guides if guide.get("state")}
         portals_path = os.path.join(catalog.data_dir, "market", "state-land-portals.json")
         if os.path.exists(portals_path):
             with open(portals_path, encoding="utf-8") as fh:
@@ -175,6 +178,7 @@ class Site(object):
             '<a href="%s">Below-Market Land Deals</a> · <a href="%s">50-State Tax-Sale Atlas</a> · '
             '<a href="%s">50-State Land Data Atlas &amp; Charts</a> · <a href="%s">Land Agent Services ($20)</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
             '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Deals Scanner</a> · <a href="%s">50-State Tax Sales</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
+            '<a href="%s">Land under $5,000</a> · <a href="%s">Land under $10,000</a> · <a href="%s">Acreage for sale</a> · '
             '<a href="%s">Research &amp; Guides</a> · <a href="%s">Closing Soon</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
             '<a href="%s">About</a> · <a href="%s" rel="noopener">Source Code</a> · '
             '<a href="%s" rel="noopener">Report a Problem</a>%s</p></div></footer>'
@@ -182,6 +186,7 @@ class Site(object):
             esc(NOTICE), len(adapters.SOURCES), ", ".join(esc(s["agency"]) for s in adapters.SOURCES), self.u("/sources/"),
             esc(config.LAND_INDEX_URL), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/services/"), self.u("/xray/"),
             self.u("/services/"), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
+            self.u("/land-under-5000/"), self.u("/land-under-10000/"), self.u("/acreage-for-sale/"),
             self.u("/research/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
@@ -202,7 +207,7 @@ class Site(object):
         label = r["status_label"] if r["fresh"] else "Not re-checked recently"
         return '<span class="badge %s">%s</span>' % (cls if r["fresh"] else "off", esc(label))
 
-    def rows(self, listings, show_state=False, show_ppa=False):
+    def rows(self, listings, show_state=False, show_ppa=False, turnkey=False, official=False):
         out = []
         for r in listings:
             where = r["county_label"] + (", " + r["state"] if show_state else "")
@@ -213,22 +218,31 @@ class Site(object):
                     "%.2f" % ppa if ppa is not None else "",
                     esc(money(ppa)) + "/ac" if ppa is not None else "–",
                 )
+            estimate_td = ""
+            if turnkey:
+                estimate = r["price"] * 1.10 if r["price"] else None
+                estimate_td = '<td class="n" data-label="With Land Agent" data-v="%s">%s</td>' % (
+                    "%.2f" % estimate if estimate is not None else "", esc(money(estimate)) if estimate is not None else "–",
+                )
+            source_link = (' <a data-official-source="1" href="%s" rel="noopener">Official notice ↗</a>' %
+                           esc(r["url"]) if official else "")
             out.append(
-                '<tr><th scope="row"><a href="%s">%s</a><span class="sub">%s</span></th><td data-label="Status">%s</td>'
+                '<tr><th scope="row"><a href="%s">%s</a><span class="sub">%s%s</span></th><td data-label="Status">%s</td>'
                 '<td class="n" data-label="Price" data-v="%s">%s</td><td class="n" data-label="Acres" data-v="%s">%s</td>'
-                '%s<td data-label="Deadline">%s</td></tr>' % (
-                    self.u(self.cat.listing_path(r)), esc(r["title"]), esc(where), self.badge(r),
+                '%s%s<td data-label="Deadline">%s</td></tr>' % (
+                    self.u(self.cat.listing_path(r)), esc(r["title"]), esc(where), source_link, self.badge(r),
                     r["price"] if r["price"] is not None else "", esc(price_line(r)) if r["price"] is not None else "–",
                     r["acres"] or "", esc(acres_text(r["acres"])) if r["acres"] else "–",
-                    ppa_td, esc(date_text(r.get("deadline"))) or "–",
+                    ppa_td, estimate_td, esc(date_text(r.get("deadline"))) or "–",
                 )
             )
         ppa_th = '<th scope="col" class="n">$/acre</th>' if show_ppa else ""
+        estimate_th = '<th scope="col" class="n">With Land Agent</th>' if turnkey else ""
         return (
             '<div class="scroll"><table class="data sortable listings"><thead><tr>'
             '<th scope="col">Listing</th><th scope="col">Status</th>'
             '<th scope="col" class="n">Price or min bid</th><th scope="col" class="n">Acres</th>'
-            '%s<th scope="col">Deadline</th></tr></thead><tbody>%s</tbody></table></div>' % (ppa_th, "".join(out))
+            '%s%s<th scope="col">Deadline</th></tr></thead><tbody>%s</tbody></table></div>' % (ppa_th, estimate_th, "".join(out))
         )
 
     def updated(self):
@@ -776,9 +790,9 @@ class Site(object):
         crumbs, crumb_ld = self.crumbs([("Direct Marketplace", "/direct/")])
         body = [
             crumbs,
+            '<h1 id="direct-heading">Direct by Owner &amp; Agent Land Marketplace</h1>'
             '<div id="direct-app">'
-            '<h1>Direct by Owner &amp; Agent Land Marketplace</h1>'
-            '<p class="lede">Live Buy It Now and Auction parcels listed directly by landowners, real estate agents, and AI agents across all 50 states—each auto-screened with 9 live federal GIS services. <a href="%s"><strong>List your land free →</strong></a></p>'
+            '<p class="lede">Live Buy It Now and Auction parcels listed directly by landowners, real estate agents, and AI agents across all 50 states—with federal Parcel X-Ray. <a href="%s"><strong>List your land free →</strong></a></p>'
             '</div>' % self.u("/list/"),
         ]
         desc = "Browse, bid on, or Buy It Now direct owner and real estate agent land listings across all 50 U.S. states, complete with live federal Parcel X-Ray and real-time bidding."
@@ -1038,6 +1052,105 @@ class Site(object):
         )
 
     # ------------------------------------------------------------------ /deals/ Live Below-Market Land Bargain Scanner
+    def budget_land_page(self, ceiling):
+        path = "/land-under-%d/" % ceiling
+        label = money(ceiling)
+        eligible = [r for r in self.cat.current() if r["price"] is not None and 0 < r["price"] <= ceiling]
+        by_state = Counter(r["state"] for r in eligible)
+        counts = Counter(r["price_kind"] for r in eligible)
+        kinds = (
+            ("cash", "Fixed-price listings", "See each agency’s published purchase requirements."),
+            ("min_bid", "Tax sales and other auctions", "The agency figure is an opening or minimum bid. The winning amount may be higher."),
+            ("application", "Land bank and program prices", "Eligibility, application review and permitted uses vary by program."),
+        )
+        sections = []
+        for kind, heading, description in kinds:
+            seen = Counter()
+            examples = []
+            for row in sorted((r for r in eligible if r["price_kind"] == kind), key=lambda r: (r["price"], r["id"])):
+                if seen[row["state"]] < 6:
+                    examples.append(row)
+                    seen[row["state"]] += 1
+                if len(examples) == 48:
+                    break
+            if examples:
+                sections.append('<section><h2>%s</h2><p>%s %s matches nationwide.</p>%s</section>' % (
+                    esc(heading), esc(description), format(counts[kind], ","), self.rows(examples, True, True, turnkey=ceiling == 10000, official=True)))
+        all_url = self.u("/#max=%d" % ceiling)
+        compare_budget = self.u("/land-under-10000/" if ceiling == 5000 else "/land-under-5000/")
+        affordability = "".join(
+            '<tr><th scope="row"><a href="%s">%s</a></th><td class="n" data-v="%d">%s</td><td>%s</td></tr>' % (
+                self.u(self.cat.state_path(state)), esc(state["name"]), by_state[code], format(by_state[code], ","),
+                '<a href="%s#state=%s&amp;max=%d">View matches</a>' % (self.u("/"), code, ceiling) if by_state[code] else "No published prices in range",
+            )
+            for code, state in sorted(self.cat.states.items(), key=lambda pair: pair[1]["name"])
+        )
+        faqs = [
+            ("Can I buy land for %s or less?" % label,
+             "Landosaur tracks %s active official parcels with a published figure at or below %s across %s states. Check the listing type for a fixed asking price, auction minimum, or program price. Eligibility and final costs vary by parcel." %
+             (format(len(eligible), ","), label, len(by_state))),
+            ("What should I budget beyond the published price?",
+             "Confirm deposits, recording, title, survey, taxes and any agency fees from the applicable sources. Optional Land Agent services cost $20 to start and 10% of the purchase price at successful closing."),
+            ("Why can a land bank lot cost less than other land?",
+             "A public program may limit who can buy a lot and how it may be used. Read the agency's requirements for adjacency, applications or required improvements before paying a fee."),
+        ]
+        title = "Land Under %s for Sale" % label
+        crumbs, crumb_ld = self.crumbs([(title, path)])
+        body = [
+            crumbs, '<h1>%s</h1>' % esc(title),
+            '<p class="lede">Compare %s active official listings with published prices, auction minimums, or program prices at or below %s across %s states.</p>' % (
+                format(len(eligible), ","), esc(label), len(by_state)),
+            '<div class="btn-row"><a class="button" href="%s">See all matches on the map</a>'
+            '<a class="button ghost" href="%s">Compare another price range</a>'
+            '<a class="button ghost" href="%s">Browse acreage</a></div>' % (all_url, compare_budget, self.u("/acreage-for-sale/")),
+            "".join(sections) if sections else '<p>No active qualifying official listings in the current snapshot.</p>',
+            '<section id="affordability"><h2>Published prices by state</h2>'
+            '<div class="scroll"><table class="data sortable" id="budget-states"><thead><tr><th>State</th><th class="n">Parcels in range</th><th>Inventory</th></tr></thead><tbody>%s</tbody></table></div></section>' % affordability,
+            self.faq_block(faqs),
+        ]
+        if ceiling == 10000:
+            body.insert(4, '<p class="small">The Land Agent estimate shows the published figure plus the 10% closing fee. The $20 initiation fee and any title, agency or other costs are separate.</p>')
+        return self.layout(title + " · Official Listings & Auctions | Landosaur",
+                           "Find official land listed for %s or less. Compare agency prices, auction minimums, and land bank eligibility by state." % label,
+                           path, "".join(body), jsonld=[crumb_ld, self.faq_jsonld(faqs, path + "#faq")], scripts=["tables.js"])
+
+    def acreage_land_page(self):
+        title = "Acreage for Sale"
+        path = "/acreage-for-sale/"
+        crumbs, crumb_ld = self.crumbs([(title, path)])
+        tracts = [r for r in self.cat.current() if r.get("acres") and r["acres"] >= 1]
+        bands = [
+            ("one-to-five", "1 to under 5 acres", 1, 5),
+            ("five-to-twenty", "5 to under 20 acres", 5, 20),
+            ("twenty-plus", "20 acres and up", 20, float("inf")),
+        ]
+        body = [
+            crumbs, '<h1>Acreage for Sale</h1>',
+            '<p class="lede">Browse %s active official tracts with at least one published acre. Compare by size and published dollars per acre.</p>' % format(len(tracts), ","),
+            '<div class="btn-row"><a class="button" href="%s">Search 1+ acres on the map</a>'
+            '<a class="button ghost" href="%s">Land under $5,000</a><a class="button ghost" href="%s">Land under $10,000</a></div>' % (
+                self.u("/#acres=1"), self.u("/land-under-5000/"), self.u("/land-under-10000/")),
+            '<p class="small">Filter by intended use with the relevant agency. Acreage comes from the source. Minimum auction bids appear as published and can rise during bidding.</p>',
+        ]
+        for anchor, heading, lower, upper in bands:
+            band = [r for r in tracts if lower <= r["acres"] < upper]
+            priced = sorted((r for r in band if r.get("price")), key=lambda r: (r["price"] / r["acres"], r["id"]))
+            body.append('<section id="%s"><h2>%s</h2><p>%s published tracts, %s with prices or minimum bids.</p>%s</section>' % (
+                anchor, esc(heading), format(len(band), ","), format(len(priced), ","),
+                self.rows(priced[:36], True, True, official=True) if priced else '<p>No priced tracts in this group at the last refresh.</p>'))
+        faqs = [
+            ("How much does 10, 20 or 40 acres cost?",
+             "The cost depends on location, legal access, water, improvements and sale terms. Compare the table for your acreage band, then check the state and county benchmarks for context. Confirm the agency's current price or bidding terms."),
+            ("What does price per acre include?",
+             "Each entry divides the official published figure by the stated acreage. Check bidding and closing costs, taxes, and the area that fits your intended use before comparing total costs."),
+        ]
+        body.append('<p>See historical and state benchmarks in the <a href="%s">U.S. Land Atlas</a>.</p>' % self.u("/land-atlas/"))
+        body.append(self.faq_block(faqs))
+        return self.layout(
+            "Acreage for Sale · Compare 1–5, 5–20 and 20+ Acre Tracts | Landosaur",
+            "Browse current public-agency acreage for sale by tract size and published price per acre, with source and auction details.",
+            path, "".join(body), jsonld=[crumb_ld, self.faq_jsonld(faqs, path + "#faq")], scripts=["tables.js"])
+
     def deals_page(self):
         cat = self.cat
         m = self.market
@@ -2036,7 +2149,7 @@ class Site(object):
                 esc(research.fmt_money_exact(b["median_price"], "N/A")), "{:,}".format(b["priced_count"]),
             ),
             '<nav class="research-jumps" aria-label="Research sections">'
-            '<a href="#field-guides">29 Buyer Guides</a>'
+            '<a href="#field-guides">Buyer Guides</a>'
             '<a href="#key-findings">Key Findings</a>'
             '<a href="#state-benchmarks">By State</a>'
             '<a href="#agency-breakdown">By Agency</a>'
@@ -2126,7 +2239,7 @@ class Site(object):
             self.faq_jsonld(b["research_faqs"], "/research/#faq"),
         ]}]
         return self.layout(
-            "US Public-Agency Land Benchmarks & 29 Land Buying Guides | Landosaur",
+            "US Public-Agency Land Benchmarks & Land Buying Guides | Landosaur",
             desc, "/research/", "".join(body), indexable=True, jsonld=ld, og="research", scripts=["tables.js"], wide=True,
         )
 
@@ -2145,11 +2258,23 @@ class Site(object):
                 for x in related
             )
             rel_html = '<section><h2>Related guides in %s</h2><div class="card-grid">%s</div></section>' % (esc(g["category"]), cards)
+        state_links = ""
+        if g.get("state"):
+            code = g["state"]
+            state = self.cat.states[code]
+            links = ((self.cat.state_path(state), state["name"] + " land for sale"),
+                     ("/land-prices/%s/" % state["slug"], state["name"] + " land price history"),
+                     ("/tax-sales/#state-" + code, state["name"] + " tax-sale rules"),
+                     ("/services/?state=" + code, "Land Agent in " + state["name"]))
+            state_links = '<nav class="btn-row" aria-label="%s buyer resources">%s</nav>' % (
+                esc(state["name"]), "".join('<a class="button ghost sm" href="%s">%s</a>' % (
+                    self.u(url), esc(label)) for url, label in links))
         body = [
             crumbs,
             '<div class="eyebrow">%s · Updated %s</div>' % (esc(g["category"]), esc(g["updated"])),
             '<h1>%s</h1>' % esc(g["title"]),
             '<p class="lede">%s</p>' % esc(g["description"]),
+            state_links,
             '<article class="prose">%s</article>' % g["body_html"],
             src_html,
             '<section class="callout"><h2>Apply this to a real parcel</h2>'
@@ -2526,8 +2651,11 @@ class Site(object):
             )
             for c in counties
         )
+        guide = self.state_guides.get(st["code"])
+        guide_link = '<p><a href="%s">%s →</a></p>' % (self.u(guide["path"]), esc(guide["title"])) if guide else ""
         body = [
             crumbs,
+            guide_link,
             "<h1>Government and auction land for sale in %s</h1>" % esc(st["name"]),
             '<p class="lede"><strong>%s</strong> current offerings: %s. Compare with <a href="%s">%s %d land prices per acre &amp; county values →</a></p>' % (
                 "{:,}".format(len(cur)), src_text or "none right now",
@@ -2711,7 +2839,7 @@ class Site(object):
         body = [
             crumbs, "<h1>About Landosaur</h1>",
             """
-<p class="lede">Landosaur is building an open, evidence-first platform for finding, pricing, and vetting land: official city, county, state trust, and tax-sale parcels on one GIS map, paired with 50-state USDA/FHFA land price benchmarks, 29 due-diligence guides, and a deterministic valuation workbench.</p>
+<p class="lede">Landosaur is building an open, evidence-first platform for finding, pricing, and vetting land: official city, county, state trust, and tax-sale parcels on one GIS map, paired with 50-state USDA/FHFA land price benchmarks, source-cited due-diligence guides, and a deterministic valuation workbench.</p>
 <section><h2>Who it is for</h2><p>Land buyers the residential portals underserve: neighbors who want the adjoining lot, homesteaders, small builders, farmers, community gardens, and land investors comparing rural acreage and government auctions.</p></section>
 <section id="terms"><h2>What it is not (Terms &amp; Disclosures)</h2><p>Landosaur is not an offer to sell and does not sell, broker, or hold any land. It is not affiliated with the agencies it lists. It gives no legal, tax, title, or investment advice and does not appraise land. Minimum bids are not sale prices. Tax-sale land can carry redemption rights, title defects, liens, and unknown physical condition; confirm all terms directly with the agency and consult local title, survey, and legal professionals before bidding or buying.</p></section>
 <section><h2>Ecosystem &amp; Open Data</h2><p>Landosaur reads official public land inventories daily and links every listing back to its authoritative government source. County-level land values per acre across 3,115 counties come from our sister reference, the <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a>.</p></section>

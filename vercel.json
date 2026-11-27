@@ -21,7 +21,8 @@
     { "source": "/sell", "destination": "/about/", "permanent": true },
     { "source": "/sell/", "destination": "/about/", "permanent": true },
     { "source": "/workspace", "destination": "/analyze/", "permanent": true },
-    { "source": "/workspace/:path*", "destination": "/analyze/", "permanent": true }
+    { "source": "/workspace/", "destination": "/analyze/", "permanent": true },
+    { "source": "/workspace/:path+", "destination": "/analyze/", "permanent": true }
   ],
   "headers": [
     {

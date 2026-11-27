@@ -154,7 +154,7 @@ table.facts td:first-of-type { overflow-wrap: anywhere; }
 .tab-bar button[aria-selected="true"] { background: var(--forest); color: #fff; border-color: var(--forest); }
 @media (prefers-color-scheme: dark) { .tab-bar button[aria-selected="true"] { color: #0e1812; } }
 .comp-table input { width: 100%; min-width: 80px; font: inherit; font-size: 13.5px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); }
-.inline-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
+.inline-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; max-width: 100%; }
 
 /* Observatory, Charts, State Grids & Guides */
 .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }

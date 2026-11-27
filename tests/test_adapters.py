@@ -1,4 +1,6 @@
 import datetime
+import html
+import json
 import unittest
 
 from lando import adapters
@@ -168,6 +170,65 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
                     "PID 1:  24-687-0020 4.06 Acres\nPID 2:  24-687-0030 6.28 Acres")
         self.assertEqual(adapters.parse_princeton_industrial(brochure),
                          [("24-687-0020", 4.06, 203000), ("24-687-0030", 6.28, 314000)])
+
+    def test_burlington_requires_a_sale_lot_and_parcel_number(self):
+        page = ('<main><h2>City-Owned Lots - For Sale (Structure Required):</h2><ul>'
+                '<li><a href="https://www.dmcgis.com/apps/gma?parcelid=11-31-453-034">306 Test Road</a></li>'
+                '<li>Parcel: 16-06-126-003</li><li>Unknown parcel</li>'
+                '<li><a href="https://www.dmcgis.com/apps/gma?parcelid=11-31-453-035">305 Test Road (pending)</a></li>'
+                '</ul><h2>City-Owned Property - For Sale:</h2><ul><li>House</li></ul></main>')
+        rows = adapters.parse_burlington_lots(page)
+        self.assertEqual([(r["apn"], r["price"], r["address"]) for r in rows],
+                         [("11-31-453-034", None, "306 Test Road"), ("16-06-126-003", None, "")])
+
+    def test_desoto_matches_vacancy_and_uses_the_clerks_auction_time(self):
+        offers = [{"parcel": f"05-39-25-0000-0180-{i:04d}", "status": status,
+                   "iso_sale_date": date, "opening_bid": "1234.50", "sale_time": "12:00 am",
+                   "owner": "Private Test Name"}
+                  for i, status, date in [(1, "scheduled", "2026-12-09"), (2, "scheduled", "2026-12-09"),
+                                          (3, "sold", "2026-12-09"), (4, "scheduled", "2026-10-07"),
+                                          (5, "scheduled", "2026-12-09"), (6, "scheduled", "2026-12-09")]]
+        page = ('<p>All sales start at 11:00 AM.</p><tax-deed-sales :taxdeeds="' +
+                html.escape(json.dumps(offers), quote=True) + '"></tax-deed-sales>')
+
+        class Fetch:
+            def text(self, url):
+                return page
+
+            def json(self, url):
+                return {"features": [{"attributes": {"PARCELNO": f"05392500000180{i:04d}",
+                                                     "NO_BULDNG": buildings, "DOR_UC": use, "LND_SQFOOT": 43560}}
+                                     for i, buildings, use in [(1, 0, "000"), (2, 1, "010"), (3, 0, "000"),
+                                                               (4, 0, "000"), (5, 0, "002"), (6, None, "000")]]}
+
+        rows, _ = adapters.desoto_fl_auctions(Fetch(), NOW, print)
+        self.assertEqual([(row["apn"], row["price"], row["deadline"]) for row in rows],
+                         [("05-39-25-0000-0180-0001", 1234.50, "2026-12-09T16:00:00Z")])
+        self.assertNotIn("Private Test Name", repr(rows))
+
+    def test_greenburgh_uses_one_starting_bid_for_a_combined_lot(self):
+        page = ("Town of Greenburgh Online Only Tax Foreclosure Real Estate Auction "
+                "lots.lotsById[1] = lot1; Closes: Dec 2, 2026 10:00:00 AM EST Starting Bid: $81,858.00 "
+                '<a href="/servlet/Search.do?auctionId=5&amp;itemId=1">More Info / Bid</a> '
+                "Residential vacant land. Combined lot. Tax Map #: 6.50-35-12 6.50-35-13 Lot Size: .41 Acres "
+                "lots.lotsById[2] = lot2; Closes: Dec 2, 2026 10:02:00 AM EST Starting Bid: $164,678.00 "
+                "Single family residence. Tax Map #: 6.50-35-16 Lot Size: .75 Acres")
+        rows = adapters.parse_greenburgh_catalog(page, "https://aarauctions.com/servlet/Search.do?auctionId=5", NOW)
+        self.assertEqual([(r["id"], r["price"], r["apn"], r["acres"], r["deadline"]) for r in rows],
+                         [("ny-greenburgh-auction-1", 81858, "", 0.41, "2026-12-02T15:00:00Z")])
+        self.assertEqual(rows[0]["url"], "https://aarauctions.com/servlet/Search.do?auctionId=5&itemId=1")
+        self.assertIn("6.50-35-12 · 6.50-35-13", repr(rows[0]["facts"]))
+
+    def test_rochester_omits_demolition_and_keeps_bid_estimates_in_facts(self):
+        report = ("SBL Property Address Zipcode Lot Size Use Code Description Assessed Value Estimated Minimum Bid Demolition Status (Y/N)\n"
+                  "091.77-5-24 00162 TEST AVE 14621 50 X 100 Residential, Vacant Land $10,000.00 $81,862.04\n"
+                  "091.77-5-25 00163 TEST AVE 14621 50 X 100 Residential, Vacant Land $10,000.00 $81,862.04 Y\n"
+                  "091.77-5-26 00164 TEST AVE 14621 50 X 100 Residential, Single Family $10,000.00 $81,862.04\n")
+        rows = adapters.parse_rochester_environmental_pdf(report, datetime.date(2026, 12, 14), "https://www.cityofrochester.gov/test.pdf")
+        self.assertEqual([(r["apn"], r["address"], r["price"], r["acres"]) for r in rows],
+                         [("091.77-5-24", "162 Test Ave", None, None)])
+        self.assertIn("City estimate $81,862.04", repr(rows[0]["facts"]))
+        self.assertIn("contamination", repr(rows[0]["facts"]))
 
 
 class ArkansasTest(unittest.TestCase):

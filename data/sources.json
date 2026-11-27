@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T23:30:47Z",
+ "checked": "2026-11-27T23:42:50Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -255,6 +255,24 @@
    "upstream_total": 66,
    "url": "https://www.burleigh.gov/"
   },
+  "burlington-ia-lots": {
+   "about": "Parcels on the city's active vacant lot sale list. Review city bidding and construction requirements.",
+   "agency": "City of Burlington, Iowa",
+   "complete": true,
+   "count": 27,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:38:37Z",
+   "last_success": "2026-11-27T23:38:37Z",
+   "message": "",
+   "name": "Burlington, Iowa vacant city lots for sale",
+   "notes": [],
+   "ok": true,
+   "read": 27,
+   "seconds": 2,
+   "state": "IA",
+   "upstream_total": 27,
+   "url": "https://www.burlingtoniowa.org/2545/City-Owned-Properties-For-Sale"
+  },
   "california-dgs": {
    "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines.",
    "agency": "California Department of General Services",
@@ -417,6 +435,24 @@
    "upstream_total": 342,
    "url": "https://delawarecounty.in.gov/"
   },
+  "desoto-fl-auctions": {
+   "about": "Scheduled tax deed sales with a published opening bid, matched by parcel number to vacant Florida assessment records with no buildings.",
+   "agency": "DeSoto County Clerk of the Circuit Court and Comptroller",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:38:37Z",
+   "last_success": "2026-11-27T23:38:37Z",
+   "message": "",
+   "name": "DeSoto County, Florida vacant tax deed auctions",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 10,
+   "state": "FL",
+   "upstream_total": 12,
+   "url": "https://www.desotoclerk.com/clerk-services/tax-deeds/"
+  },
   "detroit-commercial-land": {
    "about": "Fixed-price City of Detroit vacant land parcels for sale with published asking prices and square footage.",
    "agency": "City of Detroit Housing & Revitalization Dept.",
@@ -488,6 +524,24 @@
    "state": "GA",
    "upstream_total": 2,
    "url": "https://www.gblba.org/properties"
+  },
+  "greenburgh-ny-auctions": {
+   "about": "Vacant residential land in the town's linked auction catalog with published starting bids and individual closing times.",
+   "agency": "Town of Greenburgh, New York",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:41:47Z",
+   "last_success": "2026-11-27T23:41:47Z",
+   "message": "",
+   "name": "Greenburgh, New York town tax foreclosure land auctions",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 4,
+   "state": "NY",
+   "upstream_total": 3,
+   "url": "https://www.greenburghny.com/m/newsflash/Home/Detail/3871"
   },
   "harris-county-tax-sales": {
    "about": "County sale cards marked For Sale, matched to vacant HCAD land classes with zero recorded building and improvement value.",
@@ -1174,6 +1228,24 @@
    "state": "VA",
    "upstream_total": 73,
    "url": "https://www.rva.gov/"
+  },
+  "rochester-ny-environmental": {
+   "about": "Vacant land in the city's environmental auction with known or suspected contamination. The city's estimated minimum bids are shown in the parcel facts.",
+   "agency": "City of Rochester Finance Department",
+   "complete": true,
+   "count": 25,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:42:50Z",
+   "last_success": "2026-11-27T23:42:50Z",
+   "message": "",
+   "name": "Rochester, New York environmental foreclosure land auction",
+   "notes": [],
+   "ok": true,
+   "read": 25,
+   "seconds": 3,
+   "state": "NY",
+   "upstream_total": 25,
+   "url": "https://www.cityofrochester.gov/departments/finance-department/tax-foreclosure-auctions-environmental-auctions"
   },
   "salt-lake-county-surplus": {
    "about": "Active county surplus offers matched to assessor parcels with zero recorded building value.",

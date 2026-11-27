@@ -5473,6 +5473,214 @@ def princeton_mn_lots(fetch, now, warn):
     return result, {"complete": True, "upstream_total": len(result)}
 
 
+BURLINGTON_IA_SALE = "https://www.burlingtoniowa.org/2545/City-Owned-Properties-For-Sale"
+
+
+def parse_burlington_lots(page):
+    sections = re.findall(r"<h2\b[^>]*>(.*?)</h2>(.*?)(?=<h2\b|</main>)", page, re.I | re.S)
+    rows = {}
+    found = False
+    for heading, section in sections:
+        title = clean(heading)
+        if not title.startswith("City-Owned Lots - For Sale"):
+            continue
+        found = True
+        listing = re.search(r"<ul\b[^>]*>(.*?)</ul>", section, re.I | re.S)
+        if not listing:
+            continue
+        for item in re.findall(r"<li\b[^>]*>(.*?)</li>", listing[1], re.I | re.S):
+            location = clean(item)
+            if re.search(r"\b(?:sold|pending|withdrawn|under contract)\b", location, re.I):
+                continue
+            source = re.search(r'\bhref="(https://www\.dmcgis\.com/[^\"]+\bparcelid=(\d{2}-\d{2}-\d{3}-\d{3}))"', item, re.I)
+            inline_id = re.fullmatch(r"Parcel:\s*(\d{2}-\d{2}-\d{3}-\d{3})", location, re.I)
+            if not source and not inline_id:
+                continue
+            pid = source[2] if source else inline_id[1]
+            url = html.unescape(source[1]) if source else BURLINGTON_IA_SALE
+            rows[pid] = {
+                "id": "ia-burlington-" + pid, "source": "burlington-ia-lots",
+                "title": ("Burlington parcel " + pid if inline_id else "%s, Burlington" % location) + " (city land sale)",
+                "state": "IA", "county": "Des Moines", "locality": "Burlington", "apn": pid,
+                "address": "" if inline_id else location, "acres": None, "price": None, "price_kind": "none",
+                "offering": "auction", "status": "auction_terms", "deadline": None,
+                "url": BURLINGTON_IA_SALE, "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("parcel_number", pid, url), fact("availability", "City accepts bids at council meetings", "=")],
+                "tags": ["city-owned vacant lot", "construction required" if "Structure Required" in title else "check buildability"],
+            }
+    if not found:
+        raise StructureError("Burlington city sale lot sections changed")
+    return list(rows.values())
+
+
+def burlington_ia_lots(fetch, now, warn):
+    rows = parse_burlington_lots(fetch.text(BURLINGTON_IA_SALE))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+DESOTO_FL_SALE = "https://www.desotoclerk.com/clerk-services/tax-deeds/"
+FL_PARCEL_GIS = "https://services9.arcgis.com/Gh9awoU677aKree0/ArcGIS/rest/services/Florida_Statewide_Cadastral/FeatureServer/0/query"
+FL_VACANT_USE = {"000": "Vacant residential", "010": "Vacant commercial", "040": "Vacant industrial"}
+
+
+def parse_desoto_auctions(page, now):
+    from zoneinfo import ZoneInfo
+
+    catalog = re.search(r'<tax-deed-sales\b[^>]*:taxdeeds="([^\"]+)"', page, re.I)
+    timing = re.search(r"\bAll sales start at (\d{1,2}:\d{2} [AP]M)\b", clean(page), re.I)
+    if not catalog or not timing:
+        raise StructureError("DeSoto County scheduled tax deed catalog or auction time changed")
+    local_time = datetime.datetime.strptime(timing[1], "%I:%M %p").time()
+    zone = ZoneInfo("America/New_York")
+    rows = {}
+    for item in json.loads(html.unescape(catalog[1])):
+        if item.get("status") != "scheduled":
+            continue
+        apn = item.get("parcel") or ""
+        if not re.fullmatch(r"\d{2}-\d{2}-\d{2}-[A-Z0-9]{4}-[A-Z0-9]{4}-\d{4}", apn):
+            continue
+        date = datetime.date.fromisoformat(item["iso_sale_date"])
+        start = datetime.datetime.combine(date, local_time, zone)
+        price = number(item.get("opening_bid"))
+        if start > now and price:
+            rows[apn.replace("-", "")] = (apn, price, start)
+    return rows
+
+
+def desoto_fl_auctions(fetch, now, warn):
+    sale = parse_desoto_auctions(fetch.text(DESOTO_FL_SALE), now)
+    rows = []
+    if sale:
+        match = "CO_NO=24 AND PARCELNO IN (%s)" % quote_list(sorted(sale))
+        _, features = arcgis_query(fetch, FL_PARCEL_GIS, match, "PARCELNO,DOR_UC,NO_BULDNG,LND_SQFOOT")
+        seen = set()
+        for feature in features:
+            a = feature["attributes"]
+            parcel = a.get("PARCELNO")
+            use = FL_VACANT_USE.get(a.get("DOR_UC"))
+            if parcel not in sale or parcel in seen or not use or a.get("NO_BULDNG") != 0:
+                continue
+            seen.add(parcel)
+            apn, price, start = sale[parcel]
+            rings = (feature.get("geometry") or {}).get("rings") or []
+            sqft = number(a.get("LND_SQFOOT"))
+            acres = round(sqft / 43560, 4) if sqft else None
+            gis = one_parcel_url(FL_PARCEL_GIS, "CO_NO=24 AND PARCELNO='%s'" % parcel)
+            row = {
+                "id": "fl-desoto-" + apn.lower(), "source": "desoto-fl-auctions",
+                "title": "DeSoto County parcel %s (Florida tax deed sale)" % apn,
+                "state": "FL", "county": "DeSoto", "locality": "", "apn": apn, "address": "",
+                "acres": acres, "price": price, "price_kind": "min_bid", "offering": "auction",
+                "status": "auction_terms", "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "url": DESOTO_FL_SALE, "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("parcel_number", apn, "="), fact("use_code", use + " with no assessed buildings", gis),
+                          fact("auction_start", start.strftime("%B %d, %Y at %I:%M %p %Z"), "=")],
+                "tags": ["county tax deed auction", "in-person bidding"],
+            }
+            if rings:
+                apply_geometry(row, rings, gis, "Florida Department of Revenue parcel map")
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(sale)}
+
+
+GREENBURGH_NY_NOTICE = "https://www.greenburghny.com/m/newsflash/Home/Detail/3871"
+
+
+def parse_greenburgh_catalog(page, catalog_url, now):
+    from zoneinfo import ZoneInfo
+
+    if "Town of Greenburgh Online Only Tax Foreclosure Real Estate Auction" not in page:
+        raise StructureError("Greenburgh auction catalog identity changed")
+    cards = re.split(r"lots\.lotsById\[(\d+)\] = lot\d+;", page)[1:]
+    rows = []
+    for item, card in zip(cards[::2], cards[1::2]):
+        detail = clean(card)
+        if not re.search(r"\bResidential vacant land\. (?:Combined lot\. )?Tax Map #:", detail, re.I):
+            continue
+        time = re.search(r"\bCloses\s*:\s*([A-Za-z]{3} \d{1,2}, \d{4} \d{1,2}:\d{2}:\d{2} [AP]M)\s+E[SD]T\b", detail)
+        price = re.search(r"\bStarting Bid:\s*\$([\d,.]+)", detail, re.I)
+        parcels = re.search(r"Tax Map #:\s*([\d. -]+)\s+Lot Size:\s*([\d.]+)\s*(?:\+/-\s*)?Acres", detail, re.I)
+        link = re.search(r'<a\b[^>]*href="([^\"]+\bitemId=' + item + r')"[^>]*>\s*More Info / Bid', card, re.I)
+        if not (time and price and parcels and link):
+            continue
+        start = datetime.datetime.strptime(time[1], "%b %d, %Y %I:%M:%S %p").replace(tzinfo=ZoneInfo("America/New_York"))
+        if start <= now:
+            continue
+        ids = parcels[1].split()
+        url = urllib.parse.urljoin(catalog_url, html.unescape(link[1]))
+        rows.append({
+            "id": "ny-greenburgh-auction-" + item, "source": "greenburgh-ny-auctions",
+            "title": "Greenburgh %s %s (town tax foreclosure auction)" % ("parcel" if len(ids) == 1 else "parcels", " and ".join(ids)),
+            "state": "NY", "county": "Westchester", "locality": "Greenburgh", "apn": ids[0] if len(ids) == 1 else "",
+            "address": "", "acres": number(parcels[2]), "price": number(price[1]), "price_kind": "min_bid",
+            "offering": "auction", "status": "auction_terms", "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", " · ".join(ids), "="),
+                      fact("sale_program", "Two parcels offered as one lot" if len(ids) == 2 else "Town tax foreclosure sale", GREENBURGH_NY_NOTICE)],
+            "tags": ["town tax foreclosure", "online bidding"],
+        })
+    return rows
+
+
+def greenburgh_ny_auctions(fetch, now, warn):
+    notice = fetch.text(GREENBURGH_NY_NOTICE)
+    link = re.search(r'href="(https://aarauctions\.com/servlet/Search\.do\?auctionId=\d+)"', notice, re.I)
+    if not link:
+        raise StructureError("Greenburgh town notice no longer links to an auction catalog")
+    rows = parse_greenburgh_catalog(fetch.text(link[1]), link[1], now)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+ROCHESTER_NY_SALE = "https://www.cityofrochester.gov/departments/finance-department/tax-foreclosure-auctions-environmental-auctions"
+
+
+def parse_rochester_environmental_pdf(report, sale_date, url):
+    if "Estimated Minimum Bid" not in report or "Demolition Status" not in report:
+        raise StructureError("Rochester environmental auction property list changed")
+    rows = []
+    for line in report.splitlines():
+        match = re.fullmatch(r"(\d{3}\.\d{2}-\d+-\d+(?:\.\d+)?)\s+(.+?)\s+(\d{5})\s+"
+                             r"([\d.]+\s*X\s*[\d.]+)\s+(?:Residential,|Commercial,) Vacant Land\s+"
+                             r"\$[\d,.]+\s+\$([\d,.]+)\s*", line.strip(), re.I)
+        if not match:
+            continue
+        pid, address, zipcode, dimensions, estimated_bid = match.groups()
+        address = re.sub(r"^0+(?=\d)", "", address).title()
+        rows.append({
+            "id": "ny-rochester-land-" + slug(pid), "source": "rochester-ny-environmental",
+            "title": "%s, Rochester (environmental auction lot)" % address,
+            "state": "NY", "county": "Monroe", "locality": "Rochester", "apn": pid, "address": address,
+            "acres": None, "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+            "deadline": None, "offer_close_date": sale_date.isoformat(), "url": ROCHESTER_NY_SALE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", pid, url), fact("lot_dimensions", dimensions + " feet", url),
+                      fact("auction_start", sale_date.strftime("%B %d, %Y") + " at 10:00 a.m. Eastern", "="),
+                      fact("minimum_bid", "City estimate $%s. Confirm before bidding." % estimated_bid, url),
+                      fact("sale_program", "The city reports known or suspected contamination or other environmental hazards.", "=")],
+            "tags": ["environmental auction", "known or suspected contamination"],
+        })
+    return rows
+
+
+def rochester_ny_environmental(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    source = fetch.text(ROCHESTER_NY_SALE)
+    text = clean(source)
+    date = re.search(r"environmental sale will be held on \w+,\s*([A-Za-z]+ \d{1,2})(?:st|nd|rd|th)?,? (20\d{2})", text, re.I)
+    if not date:
+        return [], {"complete": True, "upstream_total": 0}
+    auction = datetime.datetime.strptime(date[1] + " " + date[2], "%B %d %Y").date()
+    if auction < now.astimezone(ZoneInfo("America/New_York")).date():
+        return [], {"complete": True, "upstream_total": 0}
+    report = re.search(r'<a\b[^>]*href="(/sites/default/files/[^\"]+\.pdf)"[^>]*>\s*City of Roc Auction List\b', source, re.I)
+    if not report or not re.search(r"Auctions will begin at 10\s*AM\b", text, re.I):
+        raise StructureError("Rochester auction lot sheet or start time changed")
+    url = urllib.parse.urljoin(ROCHESTER_NY_SALE, report[1])
+    rows = parse_rochester_environmental_pdf(pdf_text(fetch, url, extraction_mode="plain"), auction, url)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -5727,8 +5935,32 @@ SOURCES = [
      "agency": "City of Princeton, Minnesota", "url": PRINCETON_MN_SALE, "state": "MN",
      "run": princeton_mn_lots, "requires_sale_match": True,
      "about": "City and economic development authority industrial and commercial lots currently posted for sale."},
+    {"id": "burlington-ia-lots", "name": "Burlington, Iowa vacant city lots for sale",
+     "agency": "City of Burlington, Iowa", "url": BURLINGTON_IA_SALE, "state": "IA",
+     "run": burlington_ia_lots, "requires_sale_match": True,
+     "about": "Parcels on the city's active vacant lot sale list. Review city bidding and construction requirements."},
+    {"id": "desoto-fl-auctions", "name": "DeSoto County, Florida vacant tax deed auctions",
+     "agency": "DeSoto County Clerk of the Circuit Court and Comptroller", "url": DESOTO_FL_SALE, "state": "FL",
+     "run": desoto_fl_auctions, "requires_sale_match": True,
+     "about": "Scheduled tax deed sales with a published opening bid, matched by parcel number to vacant Florida assessment records with no buildings."},
+    {"id": "greenburgh-ny-auctions", "name": "Greenburgh, New York town tax foreclosure land auctions",
+     "agency": "Town of Greenburgh, New York", "url": GREENBURGH_NY_NOTICE, "state": "NY",
+     "run": greenburgh_ny_auctions, "requires_sale_match": True,
+     "about": "Vacant residential land in the town's linked auction catalog with published starting bids and individual closing times."},
+    {"id": "rochester-ny-environmental", "name": "Rochester, New York environmental foreclosure land auction",
+     "agency": "City of Rochester Finance Department", "url": ROCHESTER_NY_SALE, "state": "NY",
+     "run": rochester_ny_environmental, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Vacant land in the city's environmental auction with known or suspected contamination. The city's estimated minimum bids are shown in the parcel facts."},
 ]
 NOT_CARRIED = [
+    ("City of Durham surplus property listings", "https://www.durhamnc.gov/810/Surplus-Properties",
+     "The city robots.txt endpoint returned HTTP 403."),
+    ("Florida RealTaxDeed auction catalogs", "https://volusia.realtaxdeed.com/",
+     "The Lee, Polk, Volusia and Washington county auction portals returned HTTP 403 for robots.txt."),
+    ("Scribner's linked LocationOne inventory", "https://www.scribner-ne.gov/lots-for-sale/",
+     "The city lists an overall price and number of available lots. Its linked inventory returned HTML at robots.txt and was skipped."),
+    ("Henderson, Nebraska Highland Addition lots", "https://www.cityofhenderson.org/highland-addition/",
+     "The city site did not serve a verifiable HTTPS certificate for robots.txt."),
     ("Los Angeles County 2026B follow-up auction", "https://ttc.lacounty.gov/schedule-of-upcoming-auctions/",
      "The county links to a separate GovEase catalog for this sale. Its robots.txt disallows the listing path."),
     ("Navajo County back-tax auction notice", "https://www.navajocountyaz.gov/197/Back-Tax-Land",

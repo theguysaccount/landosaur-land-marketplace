@@ -611,7 +611,7 @@ class Site(object):
             '<div class="preset-bar" style="border-radius:12px;border:1px solid var(--line);margin-bottom:14px">'
             '<span class="small" style="font-weight:650;margin-right:4px">Try a real parcel:</span>'
             '<button type="button" class="pill-btn" data-xray-preset="35.42,-92.45" data-xray-label="Van Buren County, AR" data-vital-event="tool_used">Ozark Rural Tract (AR)</button>'
-            '<button type="button" class="pill-btn" data-xray-preset="34.4160,-118.4352" data-xray-label="Santa Clarita, CA" data-vital-event="tool_used">LA County Auction Lot (CA)</button>'
+            '<button type="button" class="pill-btn" data-xray-preset="34.4160,-118.4352" data-xray-label="Santa Clarita, CA" data-vital-event="tool_used">Los Angeles County Parcel (CA)</button>'
             '<button type="button" class="pill-btn" data-xray-preset="34.8689,-111.7614" data-xray-label="Sedona, AZ" data-vital-event="tool_used">High Desert Parcel (AZ)</button>'
             '<button type="button" class="pill-btn" data-xray-preset="41.6639,-83.5379" data-xray-label="Toledo, OH" data-vital-event="tool_used">Toledo Land Bank Lot (OH)</button>'
             '</div>',

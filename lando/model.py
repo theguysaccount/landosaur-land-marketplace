@@ -72,7 +72,7 @@ class Catalog(object):
                         "deadline", "bid_deadline", "auction_start",
                     )]
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
-                if r["status"] in ("auction_open", "proposal_open") and r.get("deadline"):
+                if r["status"] in ("auction_open", "auction_terms", "proposal_open") and r.get("deadline"):
                     dl = parse_time(r["deadline"])
                     if dl and dl < self.now:      # the deadline passed since the last read
                         r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]

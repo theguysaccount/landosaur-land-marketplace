@@ -14,7 +14,7 @@
       : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   }
   function esc(s) {
-    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   if (!id) {
@@ -67,10 +67,18 @@
       var ppa = (item.price && item.acres) ? money(item.price / item.acres) + "/ac" : "–";
       var highBid = offers && offers.current_high_bid != null ? offers.current_high_bid : null;
       var minNext = offers && offers.minimum_next_bid != null ? offers.minimum_next_bid : item.price;
-      var bidCount = (offers && offers.bid_count) || 0;
+      var bidCount = offers ? offers.bid_count : null;
+      var active = item.status === "active";
+      var auctionOpen = active && isAuc && (!item.deadline || Date.parse(item.deadline) > Date.now());
+      var canBuyNow = active && (!isAuc || auctionOpen && item.buy_now_price);
+      var agentParams = new URLSearchParams({ service: "direct_closing", mode: "direct", parcel: item.id, title: item.title,
+        state: item.state, county: item.county, price: highBid || item.buy_now_price || item.price, acres: item.acres,
+        lat: item.lat, lon: item.lon, apn: item.apn || "" });
+      var agentLink = base + "/services/?" + agentParams + "#start-land-agent";
 
       var dealBadge = isAuc
-        ? "<span class='badge auction'>Live Auction · " + bidCount + " " + (bidCount === 1 ? "bid" : "bids") + "</span>"
+        ? "<span class='badge auction'>" + (auctionOpen ? "Auction open" : "Auction closed") +
+          (bidCount == null ? "" : " · " + bidCount + " " + (bidCount === 1 ? "bid" : "bids")) + "</span>"
         : "<span class='badge ok'>Buy It Now · Fixed Price</span>";
       var sellerLine = item.seller_type === "agent"
         ? (esc(item.contact_name) + (item.brokerage ? " · " + esc(item.brokerage) : "") + (item.agent_license ? " (Lic #" + esc(item.agent_license) + ")" : ""))
@@ -83,7 +91,7 @@
             offers.recent_bids.map(function (b) {
               return "<tr><td>" + esc(b.bidder) + " <code>" + esc(b.code) + "</code></td><td class='n'>" + money(b.amount) + "</td><td>" + esc((b.created_at || "").slice(0, 16).replace("T", " ")) + "</td></tr>";
             }).join("") + "</tbody></table></div>";
-        } else {
+        } else if (offers) {
           bidTapeHtml = "<p class='small' style='margin-top:10px'>0 bids placed yet — opening bid is <strong>" + money(item.price) + "</strong>.</p>";
         }
       }
@@ -93,11 +101,14 @@
         "<div class='eyebrow'>" + (isAuc ? "Live Auction Bidding" : "Direct Buy It Now / Checkout") + "</div>" +
         "<h2 style='margin-bottom:8px'>" + (isAuc ? (highBid != null ? ("Current High Bid: " + money(highBid)) : ("Starting Bid: " + money(item.price))) : ("Buy It Now: " + money(item.price))) + "</h2>" +
         (isAuc && item.deadline ? "<p class='small'>Auction closes: <strong>" + esc(item.deadline.slice(0, 16).replace("T", " ")) + " UTC</strong>" + (item.buy_now_price ? (" · Optional Buy It Now: <strong>" + money(item.buy_now_price) + "</strong>") : "") + "</p>" : "") +
-        (item.checkout_url ? "<p><a class='button' href='" + esc(item.checkout_url) + "' target='_blank' rel='noopener noreferrer'>Proceed to Seller Escrow / Checkout ↗</a></p>" : "") +
-        "<form id='offer-form' class='worksheet' style='margin-top:10px'>" +
+        (active ? "<p class='small'>Your request goes to the listing desk. Confirm the price and wiring instructions with the seller and closing professional before payment.</p>" : "") +
+        (canBuyNow ? "<p class='small'>" + (item.checkout_url
+          ? "The seller provided checkout instructions for " + esc(new URL(item.checkout_url).hostname) + "."
+          : "The listing has no online escrow link. Confirm closing details with the seller.") + "</p>" : "") +
+        (active ? "<form id='offer-form' class='worksheet' style='margin-top:10px'>" +
         "<label><span>Action</span><select name='action'>" +
-        (isAuc ? "<option value='bid'>Place Auction Bid (min " + money(minNext) + ")</option>" : "") +
-        (item.buy_now_price || !isAuc ? "<option value='buy_now'>Buy It Now — Reserve at " + money(item.buy_now_price || item.price) + "</option>" : "") +
+        (auctionOpen ? "<option value='bid'>Place Auction Bid (min " + money(minNext) + ")</option>" : "") +
+        (canBuyNow ? "<option value='buy_now'>Buy It Now — Reserve at " + money(item.buy_now_price || item.price) + "</option>" : "") +
         "<option value='offer'>Submit Written Offer</option>" +
         "</select></label>" +
         "<label id='offer-amt-wrap'><span>Amount ($)</span><input name='amount' type='number' min='1' step='any' value='" + (isAuc ? minNext : item.price) + "' required></label>" +
@@ -108,9 +119,12 @@
         "<label style='grid-column:1/-1'><span>Notes / closing timeline</span><input name='notes' type='text' placeholder='e.g. 14-day title close, proof of funds ready'></label>" +
         "<input name='website_hp' type='text' tabindex='-1' autocomplete='off' style='display:none'>" +
         "<div style='grid-column:1/-1'><button type='submit' id='offer-submit' class='button'>" + (isAuc ? "Place Live Bid →" : "Reserve / Buy It Now →") + "</button></div>" +
-        "</form>" +
+        "</form>" : "<p>This listing is " + esc(item.status.replace(/_/g, " ")) + ".</p>") +
         "<div id='offer-receipt' class='callout' hidden style='margin-top:12px'></div>" +
         bidTapeHtml +
+        (active || item.status === "under_contract" ?
+          "<p class='no-print'><a class='button ghost sm' href='" + esc(agentLink) +
+          "'>Request Land Agent closing coordination · $20 →</a></p>" : "") +
         "</div>";
 
       var anaQ = "?title=" + encodeURIComponent(item.title) + "&price=" + encodeURIComponent(item.price) + "&acres=" + encodeURIComponent(item.acres);
@@ -119,7 +133,7 @@
         "<div class='eyebrow'>Landosaur Direct · Listed by " + (item.seller_type === "agent" ? "Real Estate Agent" : "Owner") + "</div>" +
         "<h1>" + esc(item.title) + "</h1>" +
         "<div class='dossier-metrics'>" +
-        "<div class='kpi-card'><span>" + (isAuc ? (highBid ? "Current High Bid" : "Starting Bid") : "Buy It Now") + "</span><strong>" + money(highBid || item.price) + "</strong><small>" + (isAuc ? (bidCount + " bids recorded") : "Fixed direct price") + "</small></div>" +
+        "<div class='kpi-card'><span>" + (isAuc ? (highBid ? "Current High Bid" : "Starting Bid") : "Buy It Now") + "</span><strong>" + money(highBid || item.price) + "</strong><small>" + (isAuc ? (bidCount == null ? "Bid status unavailable" : bidCount + " bids recorded") : "Fixed direct price") + "</small></div>" +
         "<div class='kpi-card'><span>Parcel Size</span><strong>" + esc(item.acres) + " acres</strong><small>Seller-stated acreage</small></div>" +
         "<div class='kpi-card'><span>Implied $/Acre</span><strong>" + ppa + "</strong><small>" + esc(item.county) + ", " + esc(item.state) + "</small></div>" +
         "<div class='kpi-card'><span>Deal Status</span><strong style='font-size:19px'>" + esc(item.status) + "</strong><small>" + (item.financing_offered ? "Seller financing available" : "Title / escrow close") + "</small></div>" +
@@ -161,7 +175,7 @@
         "<div style='grid-column:1/-1'><button type='submit' id='manage-btn' class='button ghost'>Save Listing Changes →</button></div>" +
         "</form><div id='manage-msg' class='callout' hidden style='margin-top:10px'></div></div></details></section>" +
         "<section class='xray-section' style='margin-top:24px'>" +
-        "<div class='xray-header'><div><div class='eyebrow'>Live 9-Agency Federal Screening</div><h2>Live Parcel X-Ray, Terrain Profile &amp; Land Potential</h2></div>" +
+        "<div class='xray-header'><div><div class='eyebrow'>Live Federal Screening</div><h2>Live Parcel X-Ray, Terrain Profile &amp; Land Potential</h2></div>" +
         "<a class='button ghost sm no-print' href='" + base + "/xray/#lat=" + item.lat + "&amp;lon=" + item.lon + "'>Open full-screen X-Ray →</a></div>" +
         "<div id='direct-xray-body'></div></section>";
 
@@ -194,18 +208,26 @@
       var oRec = document.getElementById("offer-receipt");
       var amtWrap = document.getElementById("offer-amt-wrap");
       if (oForm) {
-        oForm.action.addEventListener("change", function () {
-          var act = oForm.action.value;
-          if (amtWrap) amtWrap.hidden = act === "buy_now";
-          if (oBtn) oBtn.textContent = act === "bid" ? "Place Live Bid →" : (act === "buy_now" ? "Confirm Buy It Now Reservation →" : "Submit Written Offer →");
-        });
+        var action = oForm.elements.action, amountInput = oForm.elements.amount;
+        var lastRequest = "", requestKey = "";
+        function syncAction() {
+          var act = action.value;
+          amtWrap.hidden = act === "buy_now";
+          amountInput.disabled = act === "buy_now";
+          amountInput.min = act === "bid" ? minNext : "0.01";
+          if (act === "bid" && (!amountInput.value || Number(amountInput.value) < minNext)) amountInput.value = minNext;
+          if (act === "bid") action.querySelector("[value=bid]").textContent = "Place auction bid (min " + money(minNext) + ")";
+          oBtn.textContent = act === "bid" ? "Place live bid →" : act === "buy_now" ? "Request Buy It Now reservation →" : "Submit written offer →";
+        }
+        action.addEventListener("change", syncAction);
+        syncAction();
         oForm.addEventListener("submit", function (ev) {
           ev.preventDefault();
           oBtn.disabled = true;
           oBtn.textContent = "Recording…";
           var payload = {
             listing_id: item.id,
-            action: oForm.action.value,
+            action: action.value,
             amount: parseFloat(oForm.amount.value),
             buyer_name: oForm.buyer_name.value.trim(),
             buyer_email: oForm.buyer_email.value.trim(),
@@ -214,6 +236,12 @@
             notes: oForm.notes.value.trim(),
             website_hp: oForm.website_hp.value,
           };
+          var serialized = JSON.stringify(payload);
+          if (serialized !== lastRequest) {
+            requestKey = crypto.randomUUID();
+            lastRequest = serialized;
+          }
+          payload.request_key = requestKey;
           fetch(base + "/api/offers/", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -223,12 +251,15 @@
             .then(function (r2) {
               oRec.hidden = false;
               if (!r2.ok || !r2.d || !r2.d.ok) {
+                if (r2.d?.minimum_next_bid) minNext = r2.d.minimum_next_bid;
                 oRec.innerHTML = "<strong>Not recorded:</strong> " + esc((r2.d && r2.d.error) || "Please check your inputs.");
                 return;
               }
               oRec.innerHTML = "<strong>Confirmed (" + esc(r2.d.confirmation_code) + "):</strong> " + esc(r2.d.message) +
-                (r2.d.checkout_url ? (" <a class='button sm' style='margin-left:8px' href='" + esc(r2.d.checkout_url) + "' target='_blank' rel='noopener noreferrer'>Complete Checkout ↗</a>") : "");
+                (r2.d.checkout_url ? (" <a class='button sm' style='margin-left:8px' href='" + esc(r2.d.checkout_url) + "' target='_blank' rel='noopener noreferrer'>Open seller-provided escrow link ↗</a>") : "");
+              minNext = r2.d.summary?.minimum_next_bid ?? minNext;
               oForm.reset();
+              lastRequest = "";
             })
             .catch(function () {
               oRec.hidden = false;
@@ -236,7 +267,7 @@
             })
             .finally(function () {
               oBtn.disabled = false;
-              oBtn.textContent = "Submit →";
+              syncAction();
             });
         });
       }

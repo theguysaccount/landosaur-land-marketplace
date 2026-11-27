@@ -7,6 +7,9 @@
 import crypto from "node:crypto";
 import { list, put } from "@vercel/blob";
 
+import "../site/geo.js";
+const { decode, matcher, measure } = globalThis.LandosaurGeo;
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -83,7 +86,7 @@ async function loadDirectRows() {
       it.lat,
       it.lon,
       it.state,
-      it.current_high_bid || it.price,
+      it.price,
       it.sale_mode === "auction" ? "min_bid" : "cash",
       it.acres,
       it.sale_mode === "auction" ? "auction_open" : "listed",
@@ -107,10 +110,11 @@ function filterRows(rows, crit) {
   const minAc = posNum(crit.min_acres);
   const q = (crit.q || "").toLowerCase();
   const belowBench = Boolean(crit.below_benchmark);
+  const area = crit.area ? matcher(decode(crit.area)) : null;
 
   const out = [];
   for (const r of rows) {
-    if (!r[8]) continue; // active only
+    if (!r[8] || area && !area(r[2], r[1])) continue;
     if (st && r[3] !== st) continue;
     if (maxP != null && (r[4] == null || r[4] > maxP)) continue;
     if (minAc != null && (!r[6] || r[6] < minAc)) continue;
@@ -259,6 +263,10 @@ export async function POST(request) {
       return jsonResp({ error: "Enter a valid email address (or leave blank for RSS/JSON feed only)." }, 400);
     }
 
+    const area = typeof body.area === "string" ? body.area : "";
+    if (body.area != null && (!area || area.length > 1200 || !measure(decode(area)))) {
+      return jsonResp({ error: "Provide a valid drawn search area." }, 400);
+    }
     const criteria = {
       state: cleanStr(body.state, 4).toUpperCase(),
       mode: cleanStr(body.mode, 24).toLowerCase(),
@@ -266,6 +274,7 @@ export async function POST(request) {
       min_acres: posNum(body.min_acres),
       below_benchmark: Boolean(body.below_benchmark),
       q: cleanStr(body.q, 100),
+      ...(area ? { area } : {}),
     };
 
     const parts = [];
@@ -278,6 +287,7 @@ export async function POST(request) {
     if (criteria.max_price) parts.push(`<= $${Math.round(criteria.max_price).toLocaleString("en-US")}`);
     if (criteria.min_acres) parts.push(`${criteria.min_acres}+ ac`);
     if (criteria.q) parts.push(`"${criteria.q}"`);
+    if (criteria.area) parts.push("Drawn search area");
     const label = cleanStr(body.label, 120) || parts.join(" · ");
 
     const alertId = `ALR-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;

@@ -3,6 +3,8 @@
 // Queries BOTH 23,500+ official public-agency parcels (/data/map.json) AND live Direct Owner/Agent listings (Vercel Blob).
 
 import { list } from "@vercel/blob";
+import "../site/geo.js";
+const { decode, matcher, measure } = globalThis.LandosaurGeo;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -80,7 +82,7 @@ async function loadDirectRows() {
       it.lat,
       it.lon,
       it.state,
-      it.current_high_bid || it.price,
+      it.price,
       it.sale_mode === "auction" ? "min_bid" : "cash",
       it.acres,
       it.sale_mode === "auction" ? "auction_open" : "listed",
@@ -114,6 +116,10 @@ export async function GET(request) {
     const origin = `${reqUrl.protocol}//${reqUrl.host}`;
     const sp = reqUrl.searchParams;
 
+    const areaParam = sp.get("area");
+    const boundary = areaParam ? decode(areaParam) : [];
+    if (areaParam && !measure(boundary)) return jsonResp({ error: "Invalid drawn search area." }, 400);
+    const area = boundary.length ? matcher(boundary) : null;
     const state = (sp.get("state") || "").trim().toUpperCase().slice(0, 2);
     const mode = (sp.get("mode") || sp.get("kind") || "").trim().toLowerCase();
     const q = (sp.get("q") || "").trim().toLowerCase();
@@ -135,7 +141,7 @@ export async function GET(request) {
 
     for (let i = 0; i < all.length; i++) {
       const r = all[i];
-      if (!includeClosed && !r[8]) continue;
+      if ((!includeClosed && !r[8]) || (area && !area(r[2],r[1]))) continue;
       if (state && r[3] !== state) continue;
       if (Number.isFinite(minPrice) && (r[4] == null || r[4] < minPrice)) continue;
       if (Number.isFinite(maxPrice) && (r[4] == null || r[4] > maxPrice)) continue;

@@ -1,0 +1,1681 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Landosaur API",
+    "version": "1.0.0",
+    "description": "Official public inventory, direct seller listings, parcel intelligence, saved searches and Land Agent orders. Published figures retain their source definitions. It is not an offer."
+  },
+  "servers": [
+    {
+      "url": "https://landosaur.com"
+    }
+  ],
+  "paths": {
+    "/api/search/": {
+      "get": {
+        "operationId": "searchLand",
+        "summary": "Search current official and direct land",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "buy_now",
+                "auction",
+                "offer",
+                "direct"
+              ]
+            }
+          },
+          {
+            "name": "min_price",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "max_price",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "min_acres",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "max_acres",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "area",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 1200,
+              "description": "3\u201340 longitude,latitude vertices joined by semicolons."
+            }
+          },
+          {
+            "name": "include_closed",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "recommended",
+                "price_asc",
+                "price_desc",
+                "ppa_asc",
+                "acres_desc",
+                "deadline"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ]
+      }
+    },
+    "/api/xray/": {
+      "get": {
+        "operationId": "parcelXray",
+        "summary": "Read federal parcel and electric utility intelligence",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Xray"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "minimum": 18,
+              "maximum": 72
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": -65
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A U.S. place or both lat and lon are required."
+          }
+        ]
+      }
+    },
+    "/api/listings/": {
+      "get": {
+        "operationId": "getDirectListings",
+        "summary": "Read direct listings or a single listing by ID",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "storage_configured": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "listings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DirectListing"
+                      }
+                    },
+                    "listing": {
+                      "$ref": "#/components/schemas/DirectListing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            }
+          },
+          {
+            "name": "sale_mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "buy_now",
+                "auction"
+              ]
+            }
+          },
+          {
+            "name": "include_closed",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "publishDirectListing",
+        "summary": "Publish a seller-authorized direct listing",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "edit_token": {
+                      "type": "string"
+                    },
+                    "listing": {
+                      "$ref": "#/components/schemas/DirectListing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListingInput"
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "editDirectListing",
+        "summary": "Update a listing with its seller token",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "listing": {
+                      "$ref": "#/components/schemas/DirectListing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListingPatch"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sellerToken": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/offers/": {
+      "get": {
+        "operationId": "getListingOffers",
+        "summary": "Read current bids and reservation count",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BidSummary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "listing",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ]
+      },
+      "post": {
+        "operationId": "recordListingOffer",
+        "summary": "Submit a real bid, Buy It Now reservation request, or written offer",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "confirmation_code": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "number"
+                    },
+                    "summary": {
+                      "$ref": "#/components/schemas/BidSummary"
+                    },
+                    "checkout_url": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfferInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/concierge/": {
+      "get": {
+        "operationId": "getLandAgentOrder",
+        "summary": "Read Land Agent pricing or a tracked order",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "storage_configured": {
+                      "type": "boolean"
+                    },
+                    "stripe_checkout_configured": {
+                      "type": "boolean"
+                    },
+                    "initiation_fee_usd": {
+                      "type": "number"
+                    },
+                    "concierge_fee_pct": {
+                      "type": "number"
+                    },
+                    "services": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "order": {
+                      "$ref": "#/components/schemas/Order"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^AGT-[0-9A-F]{8}$"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "openLandAgentOrder",
+        "summary": "Open a dossier and return the separate $20 Stripe checkout link",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alerts/": {
+      "get": {
+        "operationId": "getLandAlert",
+        "summary": "Read alert metadata or a specific alert feed",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "storage_configured": {
+                      "type": "boolean"
+                    },
+                    "formats": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "alert_id": {
+                      "type": "string"
+                    },
+                    "criteria": {
+                      "$ref": "#/components/schemas/AlertInput"
+                    },
+                    "total_matches": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Parcel"
+                      }
+                    }
+                  }
+                }
+              },
+              "application/atom+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "atom",
+                "rss",
+                "xml"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createLandAlert",
+        "summary": "Save filters and obtain live JSON and Atom feeds",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/atlas.json": {
+      "get": {
+        "operationId": "getLandAtlas",
+        "summary": "Read USDA agricultural benchmarks, county values and live supply",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "states": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "counties": {
+                      "type": "array",
+                      "items": {
+                        "type": "array"
+                      }
+                    },
+                    "regions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "minimum_next_bid": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Parcel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "county": {
+            "type": "string"
+          },
+          "apn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deal_mode": {
+            "type": "string"
+          },
+          "is_direct": {
+            "type": "boolean"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_kind": {
+            "type": "string"
+          },
+          "acres": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usd_per_acre": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Parcel"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "total",
+          "results"
+        ]
+      },
+      "Xray": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number",
+            "minimum": 18,
+            "maximum": 72
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": -65
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "usgs": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fema": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nwi": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "soil": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "climate": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roads": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "public_land": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hazards": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "county": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "utility": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "providers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "ownership": {
+                          "type": "string"
+                        },
+                        "residential_usd_per_kwh": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "state_residential_usd_per_kwh": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disclaimer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "lat",
+          "lon",
+          "checked_at"
+        ]
+      },
+      "ListingInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "lat": {
+            "type": "number",
+            "minimum": 18,
+            "maximum": 72
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": -65
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "county": {
+            "type": "string"
+          },
+          "locality": {
+            "type": "string"
+          },
+          "apn": {
+            "type": "string"
+          },
+          "acres": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "sale_mode": {
+            "type": "string",
+            "enum": [
+              "buy_now",
+              "auction"
+            ]
+          },
+          "price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "starting_bid": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "buy_now_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "reserve_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "auction_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "seller_type": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "agent"
+            ]
+          },
+          "contact_name": {
+            "type": "string"
+          },
+          "contact_email": {
+            "type": "string",
+            "format": "email"
+          },
+          "contact_phone": {
+            "type": "string"
+          },
+          "brokerage": {
+            "type": "string"
+          },
+          "agent_license": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "zoning": {
+            "type": "string"
+          },
+          "road_access": {
+            "type": "string"
+          },
+          "utilities": {
+            "type": "string"
+          },
+          "financing_offered": {
+            "type": "boolean"
+          },
+          "checkout_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "escrow_notes": {
+            "type": "string"
+          },
+          "submitted_by_agent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "acres",
+          "contact_name",
+          "contact_email"
+        ]
+      },
+      "ListingPatch": {
+        "type": "object",
+        "properties": {
+          "edit_token": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "under_contract",
+              "sold",
+              "withdrawn"
+            ]
+          },
+          "price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "buy_now_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "checkout_url": {
+            "type": "string",
+            "description": "HTTPS checkout URL or empty string to remove."
+          },
+          "escrow_notes": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "DirectListing": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "sale_mode": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "lat": {
+            "type": "number",
+            "minimum": 18,
+            "maximum": 72
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": -65
+          },
+          "acres": {
+            "type": "number"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "bid_count": {
+            "type": "integer"
+          },
+          "current_high_bid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checkout_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "xray_snapshot": {
+            "type": "object"
+          }
+        }
+      },
+      "OfferInput": {
+        "type": "object",
+        "properties": {
+          "listing_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "bid",
+              "buy_now",
+              "offer"
+            ]
+          },
+          "amount": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "buyer_name": {
+            "type": "string"
+          },
+          "buyer_email": {
+            "type": "string",
+            "format": "email"
+          },
+          "buyer_phone": {
+            "type": "string"
+          },
+          "financing": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "request_key": {
+            "type": "string",
+            "description": "Reuse the same key for a retry of the same request."
+          }
+        },
+        "required": [
+          "listing_id",
+          "action",
+          "buyer_name",
+          "buyer_email"
+        ]
+      },
+      "BidSummary": {
+        "type": "object",
+        "properties": {
+          "listing_id": {
+            "type": "string"
+          },
+          "sale_mode": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "bid_count": {
+            "type": "integer"
+          },
+          "current_high_bid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minimum_next_bid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reservation_count": {
+            "type": "integer"
+          },
+          "recent_bids": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "bidder": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "number"
+                },
+                "created_at": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "AgentRequest": {
+        "type": "object",
+        "properties": {
+          "service_type": {
+            "type": "string",
+            "enum": [
+              "listed_acquisition",
+              "unlisted_outreach",
+              "auction_proxy",
+              "landbank_application",
+              "diligence_packet",
+              "direct_closing",
+              "custom_sourcing"
+            ]
+          },
+          "buyer_name": {
+            "type": "string"
+          },
+          "buyer_email": {
+            "type": "string",
+            "format": "email"
+          },
+          "buyer_phone": {
+            "type": "string"
+          },
+          "parcel_id": {
+            "type": "string"
+          },
+          "parcel_title": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "county": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "apn": {
+            "type": "string"
+          },
+          "lat": {
+            "type": "number",
+            "minimum": 18,
+            "maximum": 72
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": -65
+          },
+          "boundary": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Longitude and latitude."
+            }
+          },
+          "official_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "max_budget": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "acres": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "financing": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "submitted_by_agent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "buyer_name",
+          "buyer_email"
+        ]
+      },
+      "OrderReceipt": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "confirmation_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "initiation_fee_usd": {
+            "type": "number"
+          },
+          "concierge_fee_pct": {
+            "type": "number"
+          },
+          "stripe_checkout_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tracking_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "xray_summary": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "confirmation_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "parcel_title": {
+            "type": "string"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "complete",
+                    "current",
+                    "pending"
+                  ]
+                },
+                "at": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "xray_summary": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stripe_checkout_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "AlertInput": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "min_acres": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "max_price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "q": {
+            "type": "string"
+          },
+          "below_benchmark": {
+            "type": "boolean"
+          },
+          "area": {
+            "type": "string",
+            "maxLength": 1200,
+            "description": "3\u201340 longitude,latitude vertices joined by semicolons."
+          },
+          "label": {
+            "type": "string"
+          },
+          "buyer_email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "AlertReceipt": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "alert_id": {
+            "type": "string"
+          },
+          "atom_feed_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "json_feed_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "land_agent_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/AlertInput"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "sellerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Listing-specific edit token. The same token may also be passed in the request body."
+      }
+    }
+  }
+}

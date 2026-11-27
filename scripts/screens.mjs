@@ -25,7 +25,7 @@ try {
         const url = new URL(route, base);
         if (ready[url.pathname]) await page.waitFor(ready[url.pathname], 15000);
         if (/^#[a-z][a-z0-9-]*$/i.test(url.hash)) {
-          await page.eval(`document.getElementById(${JSON.stringify(url.hash.slice(1))})?.scrollIntoView()`);
+          await page.eval(`document.getElementById(${JSON.stringify(url.hash.slice(1))})?.scrollIntoView({ behavior: "instant", block: "start" })`);
         }
         await page.eval(`Promise.race([
           document.fonts.ready,

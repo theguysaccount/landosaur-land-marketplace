@@ -6,6 +6,7 @@ const base = (process.argv[2] || "http://localhost:4651").replace(/\/$/, "");
 const externalResourceHosts = new Set([
   "tile.openstreetmap.org", "basemap.nationalmap.gov", "hazards.fema.gov",
   "rsio.org", "fonts.googleapis.com", "fonts.gstatic.com",
+  "edits.nationalmap.gov", "www.mrlc.gov", "fwsprimary.wim.usgs.gov",
 ]);
 function isExternalResourceError(error) {
   const url = error.match(/^log: Failed to load resource: .* (https?:\/\/\S+)$/)?.[1];
@@ -185,6 +186,114 @@ try {
     if (!isLocal) {
       const alertOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/alerts/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.ok && d.storage_configured === true))`);
       assert(alertOk, "live /api/alerts/ metadata check failed");
+    }
+  });
+  await step("drawn rectangle filters inventory and is included in a saved alert", async () => {
+    await page.goto(base + "/");
+    await page.waitFor("/listings match/.test(document.querySelector('#map-count')?.textContent)");
+    const counts = await page.eval(`(() => {
+      const count = () => parseInt(document.getElementById("map-count").textContent.replace(/,/g, ""));
+      const before = count(), map = document.getElementById("map"), rect = map.getBoundingClientRect();
+      map.querySelector("[data-draw-start]").click();
+      const shape = map.querySelector("[data-draw-shape]");
+      shape.value = "rectangle";
+      shape.dispatchEvent(new Event("change"));
+      for (const [x,y] of [[.24,.28],[.72,.78]]) {
+        map.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: rect.left + rect.width*x, clientY: rect.top + rect.height*y }));
+      }
+      document.getElementById("open-alert-modal").click();
+      return [before, count(), location.hash, document.getElementById("alert-filter-summary").textContent];
+    })()`);
+    assert(counts[1] > 0 && counts[1] < counts[0] && counts[2].includes("area=") && counts[3].includes("Drawn search area"),
+           "the drawn area did not reach the map filter and saved alert");
+  });
+  await step("official Hillshade, NLCD, PAD-US, wetlands and flood layers load", async () => {
+    const drawn = "-92.465,35.413;-92.442,35.413;-92.442,35.429;-92.465,35.429";
+    await page.goto(base + "/?map=layers#area=" + encodeURIComponent(drawn));
+    await page.waitFor("/listings match/.test(document.querySelector('#map-count')?.textContent)");
+    const layers = [
+      ["USGS 3DEP Hillshade", "USGSShadedReliefOnly"], ["NLCD Land Cover", "mrlc_Land-Cover"],
+      ["PAD-US Managed Public Lands", "PAD_US_4_1"], ["USFWS Wetlands", "/Wetlands/MapServer/export"],
+      ["FEMA Flood Zones", "NFHL"],
+    ];
+    for (const [label, urlPart] of layers) {
+      assert(await page.eval(`(() => {
+        const labels = [...document.querySelectorAll("#map .leaflet-control-layers-list label")];
+        const entry = labels.find((node) => node.textContent.trim().startsWith(${JSON.stringify(label)}));
+        const input = entry?.querySelector("input");
+        if (!input) return false;
+        input.click();
+        return input.checked;
+      })()`), "missing overlay " + label);
+      await page.waitFor(`[...document.querySelectorAll("#map .leaflet-tile")].some((tile) =>
+        tile.src.includes(${JSON.stringify(urlPart)}) && tile.complete && tile.naturalWidth > 0)`, 15000);
+    }
+  });
+  await step("watchlist compares parcels and produces valid CSV, GeoJSON, KML and GPX files", async () => {
+    await page.goto(base + "/#state=KS");
+    await page.waitFor("document.querySelectorAll('#results .card-title').length >= 2");
+    await page.eval(`(() => {
+      for (const index of [0, 1]) {
+        const card = () => document.querySelectorAll("#results li")[index];
+        card().querySelector(".card-acts button:nth-of-type(1)").click();
+        card().querySelector(".card-acts button:nth-of-type(2)").click();
+      }
+      document.querySelector("[data-open-compare]").click();
+      window.testExports = {};
+      const makeURL = URL.createObjectURL;
+      URL.createObjectURL = function (blob) {
+        blob.text().then((text) => { testExports[blob.type] = text; });
+        return makeURL.call(URL, blob);
+      };
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { if (!this.download) return click.call(this); };
+    })()`);
+    assert(await page.eval(`document.querySelector(".compare-acquisition a")?.href.includes("/services/?") &&
+      document.querySelectorAll(".compare-acquisition option").length === 2`), "comparison could not select a parcel for acquisition");
+    await page.eval(`document.querySelector("[data-close-compare]").click()`);
+    for (const [key, mime] of [["CSV","text/csv;charset=utf-8"], ["GeoJSON","application/geo+json"], ["KML","application/vnd.google-earth.kml+xml"], ["GPX","application/gpx+xml"]]) {
+      await page.eval(`document.getElementById("watchlist-format").value = ${JSON.stringify(key)};
+        document.querySelector("[data-export-saved]").click();`);
+      await page.waitFor(`testExports[${JSON.stringify(mime)}] && !document.querySelector("[data-export-saved]").disabled`);
+    }
+    assert(await page.eval(`(() => {
+      const xml = (type) => new DOMParser().parseFromString(testExports[type], "application/xml");
+      const json = JSON.parse(testExports["application/geo+json"]);
+      const kml = xml("application/vnd.google-earth.kml+xml"), gpx = xml("application/gpx+xml");
+      return json.features.length === 2 && !!json.features[0].geometry &&
+        testExports["text/csv;charset=utf-8"].trim().split(String.fromCharCode(10)).length === 3 &&
+        kml.getElementsByTagName("Placemark").length === 2 &&
+        gpx.querySelectorAll("wpt, trk").length === 2;
+    })()`), "watchlist file did not parse or omitted a parcel");
+    await page.eval("localStorage.removeItem('landosaur_saved'); localStorage.removeItem('landosaur_compare')");
+  });
+  await step("direct auction separates bid, reservation and seller-provided escrow", async () => {
+    const stub = await page.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      const realFetch = window.fetch;
+      window.fetch = (url, ...options) => {
+        if (String(url).includes("/api/listings/?id=dir-test")) return Promise.resolve(Response.json({ listing: {
+          id: "dir-test", title: "Local browser fixture", status: "active", sale_mode: "auction", seller_type: "agent",
+          price: 3000, buy_now_price: 4000, acres: 2, lat: 35.42, lon: -92.45, state: "AR", county: "Van Buren",
+          deadline: "2099-01-01T00:00:00Z", checkout_url: "https://www.escrow.com/"
+        } }));
+        if (String(url).includes("/api/offers/?listing=dir-test")) return Promise.resolve(Response.json({
+          bid_count: 0, recent_bids: [], minimum_next_bid: 3000
+        }));
+        return realFetch(url, ...options);
+      };
+    })()` });
+    try {
+      await page.goto(base + "/direct/?id=dir-test");
+      await page.waitFor("document.getElementById('offer-form')");
+      assert(await page.eval(`(() => {
+        const form = document.getElementById("offer-form"), action = form.elements.action;
+        action.value = "buy_now";
+        action.dispatchEvent(new Event("change"));
+        return form.elements.amount.disabled && document.getElementById("deal-action-box").textContent.includes("0 bids placed") &&
+          document.querySelector('a[href*="service=direct_closing"]') && !document.querySelector('a[href="https://www.escrow.com/"]');
+      })()`), "the live auction interface did not isolate escrow from an unsubmitted reservation");
+    } finally {
+      await page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: stub.identifier });
     }
   });
   await step("indexing policy matches SITE_INDEXABLE across core hubs", async () => {

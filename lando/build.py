@@ -13,6 +13,7 @@ Generates:
 """
 from concurrent.futures import ProcessPoolExecutor
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -20,12 +21,30 @@ import multiprocessing
 import os
 import statistics
 import sys
+import tarfile
 
 from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "theme.js", "geo.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "theme.js", "geo.js", "watchlist.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+
+
+def agent_download(w):
+    mcp_dir = os.path.join(config.ROOT, "mcp")
+    out = io.BytesIO()
+    with gzip.GzipFile(fileobj=out, mode="wb", mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w") as archive:
+            for name in ("package.json", "openapi.json", "landosaur-mcp.mjs"):
+                with open(os.path.join(mcp_dir, name), "rb") as fh:
+                    content = fh.read()
+                member = tarfile.TarInfo("package/" + name)
+                member.mode = 0o755 if name.endswith(".mjs") else 0o644
+                member.size = len(content)
+                archive.addfile(member, io.BytesIO(content))
+                if name == "openapi.json":
+                    w.write("openapi.json", content)
+    w.write("data/landosaur-mcp.tgz", out.getvalue())
 
 
 class Writer(object):
@@ -236,7 +255,9 @@ def build_llms_txt(cat, site, updated):
         "- [Free U.S. Parcel X-Ray (All 50 States — 9 Live Federal APIs)](%s/xray/)" % base,
         "- [List Land Free (Owners, Real Estate Agents & AI Agents)](%s/list/)" % base,
         "- [Direct by Owner & Agent Marketplace (Live Auctions & Buy It Now)](%s/direct/)" % base,
-        "- [Agent Listing API Specification (JSON)](%s/.well-known/landosaur-agent.json)" % base,
+        "- [Agent API Discovery](%s/.well-known/landosaur-agent.json)" % base,
+        "- [OpenAPI 3.1 Specification](%s/openapi.json)" % base,
+        "- [Landosaur MCP Server (stdio npm package)](%s/data/landosaur-mcp.tgz)" % base,
         "- [Land for Sale by State (50-State Directory)](%s/land-for-sale/)" % base,
         "- [50-State Land Price Observatory](%s/land-prices/)" % base,
         "- [50-State Land Price Rankings](%s/land-prices/states/)" % base,
@@ -451,6 +472,7 @@ def build(dist, data_dir=None, now=None, log=print):
     w.page("/list/", site.list_page(), indexable=True, group="core")
     w.page("/direct/", site.direct_page(), indexable=True, group="core")
     w.page("/land-for-sale/", site.land_for_sale_index(), indexable=True, group="core")
+    agent_download(w)
     agent_spec_path = os.path.join(config.SITE_SRC, "agent-api.json")
     if os.path.exists(agent_spec_path):
         with open(agent_spec_path, encoding="utf-8") as fh:
@@ -529,6 +551,8 @@ def build(dist, data_dir=None, now=None, log=print):
         ("/api/search/?limit=25", "Live JSON search API across official public parcels and direct owner/agent listings"),
         ("/api/concierge/", "Land Agent Acquisition Concierge API ($20 initiation + 10% transfer fee)"),
         ("/api/alerts/", "Saved-Search & Custom Instant Atom/RSS + JSON Land Alert API"),
+        ("/openapi.json", "OpenAPI 3.1 reference for the six public Landosaur APIs"),
+        ("/data/landosaur-mcp.tgz", "Installable Landosaur MCP server for stdio clients"),
         ("/.well-known/landosaur-agent.json", "Machine-readable AI Agent API schema (search, X-Ray, publish, bid/reserve, alerts, hire Land Agent)"),
         ("/feeds/buy-now.xml", "Atom feed of fixed-price Buy It Now official land parcels"),
         ("/feeds/auctions.xml", "Atom feed of active public land auctions and tax sales"),

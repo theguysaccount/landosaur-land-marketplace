@@ -1276,3 +1276,18 @@ footer p { margin: 0 0 9px; }
   body.print-acquisition #concierge-form,
   body.print-acquisition #acquisition-brief { display: block; padding: 0; margin: 0; border: 0; box-shadow: none; }
 }
+
+.map-draw-tools { display: grid; padding: .2rem; gap: .2rem; max-width: min(9.5rem, 42vw); background: var(--surface); }
+.map-draw-tools button, .map-draw-tools select { font: inherit; border: 1px solid var(--line); border-radius: .3rem; color: var(--ink); background: var(--surface-2); padding: .3rem .4rem; text-align: left; }
+.map-draw-tools button:disabled { opacity: .55; }
+.map-draw-tools [data-draw-status]:empty { display: none; }
+.map-draw-tools [data-draw-status] { display: block; color: var(--ink); line-height: 1.25; }
+.leaflet-container.drawing-parcel .leaflet-marker-icon,
+.leaflet-container.drawing-parcel .leaflet-overlay-pane canvas { pointer-events: none !important; }
+.watchlist-format { display: flex; gap: .35rem; align-items: center; }
+.watchlist-format select, .compare-acquisition select { min-width: 0; max-width: 100%; background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); border-radius: .4rem; padding: .24rem .35rem; }
+.watchlist-status:empty { display: none; }
+.compare-acquisition { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; align-items: center; }
+.compare-acquisition select { flex: 1 1 13rem; max-width: min(100%, 30rem); }
+
+.agent-prompt { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }

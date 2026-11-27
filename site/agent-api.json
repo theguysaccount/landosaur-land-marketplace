@@ -43,7 +43,7 @@
         "zoning": "Zoning classification",
         "road_access": "Road access note (e.g. Paved county road, recorded easement)",
         "utilities": "Utilities note (e.g. Power at road, well/septic needed)",
-        "financing_offered": "boolean — seller financing available",
+        "financing_offered": "boolean \u2014 seller financing available",
         "seller_type": "'owner' or 'agent'",
         "brokerage": "Real estate brokerage name (if listed by agent)",
         "agent_license": "State license number (optional)",
@@ -60,7 +60,12 @@
     "update_listing_status": {
       "method": "PATCH",
       "url": "https://landosaur.com/api/listings/?id=<listing_id>",
-      "body": { "edit_token": "<token returned on POST>", "status": "active | under_contract | sold | withdrawn", "price": 24000, "checkout_url": "https://buy.stripe.com/..." }
+      "body": {
+        "edit_token": "<token returned on POST>",
+        "status": "active | under_contract | sold | withdrawn",
+        "price": 24000,
+        "checkout_url": "https://buy.stripe.com/..."
+      }
     },
     "place_bid_or_buy_now": {
       "method": "POST",
@@ -124,5 +129,16 @@
       "new_listings_atom": "https://landosaur.com/feeds/new.xml",
       "state_atom_template": "https://landosaur.com/feeds/{state_code_lowercase}.xml"
     }
+  },
+  "openapi": "https://landosaur.com/openapi.json",
+  "mcp": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": [
+      "--yes",
+      "--package=https://landosaur.com/data/landosaur-mcp.tgz",
+      "landosaur-mcp"
+    ],
+    "package": "https://landosaur.com/data/landosaur-mcp.tgz"
   }
 }

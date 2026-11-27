@@ -14,7 +14,8 @@
     listed: "Buy / Apply", auction_open: "Auction open", auction_terms: "Auction terms",
     proposal_open: "Proposals open", pending: "Sale pending", auction_closed: "Closed"
   };
-  var rows = [], byId = {}, first = true, lastShown = [];
+  var rows = [], byId = Object.create(null), first = true, lastShown = [];
+  var area = [], areaMatch = null, drawControl;
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -65,6 +66,32 @@
   var fema = L.tileLayer.wms("https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer", {
     layers: "28", format: "image/png", transparent: true, opacity: 0.45, maxZoom: 20, attribution: "FEMA NFHL"
   });
+  var shade = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/tile/{z}/{y}/{x}", {
+    maxNativeZoom: 16, maxZoom: 20, attribution: "USGS 3DEP and GMTED2010",
+  });
+  var cover = L.tileLayer.wms("https://www.mrlc.gov/geoserver/mrlc_Land-Cover-Native_conus_year_data/wms", {
+    layers: "Land-Cover-Native_conus_year_data", format: "image/png", transparent: true, opacity: 0.60,
+    time: "2025-01-01", maxNativeZoom: 15, maxZoom: 20, attribution: "USGS Annual NLCD 2025, contiguous U.S.",
+  });
+  function arcgisOverlay(service, options) {
+    const ExportLayer = L.TileLayer.extend({
+      getTileUrl(coords) {
+        const size = this.getTileSize();
+        const top = this._map.options.crs.transformation.untransform(coords.scaleBy(size), this._map.options.crs.scale(coords.z));
+        const bottom = this._map.options.crs.transformation.untransform(coords.add([1, 1]).scaleBy(size), this._map.options.crs.scale(coords.z));
+        const query = new URLSearchParams({ f: "image", bbox: [top.x, bottom.y, bottom.x, top.y].join(","),
+          bboxSR: "3857", imageSR: "3857", size: size.x + "," + size.y, format: "png32", transparent: "true", layers: "show:0" });
+        return service + "/export?" + query;
+      },
+    });
+    return new ExportLayer(service, options);
+  }
+  var publicLands = arcgisOverlay("https://edits.nationalmap.gov/arcgis/rest/services/PAD-US/PAD_US_4_1/MapServer", {
+    opacity: 0.55, maxNativeZoom: 15, maxZoom: 20, attribution: "USGS PAD-US 4.1 fee-managed lands",
+  });
+  var wetlands = arcgisOverlay("https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands/MapServer", {
+    opacity: 0.58, minZoom: 11, maxNativeZoom: 16, maxZoom: 20, attribution: "USFWS National Wetlands Inventory",
+  });
   var map = L.map(box, {
     preferCanvas: true,
     scrollWheelZoom: true,
@@ -76,7 +103,10 @@
     wheelPxPerZoomLevel: 80,
     layers: [streets]
   }).setView([38.5, -96], 4);
-  L.control.layers({ "Streets": streets, "USGS Aerial": aerial, "USGS Topo": topo }, { "FEMA Flood Zones": fema }).addTo(map);
+  L.control.layers({ "Streets": streets, "USGS Aerial": aerial, "USGS Topo": topo, "USGS 3DEP Hillshade": shade }, {
+    "FEMA Flood Zones": fema, "NLCD Land Cover (2025, lower 48)": cover, "PAD-US Managed Public Lands": publicLands,
+    "USFWS Wetlands (zoom in)": wetlands,
+  }).addTo(map);
   var cluster = L.markerClusterGroup({
     chunkedLoading: true,
     showCoverageOnHover: false,
@@ -126,18 +156,23 @@
       document.addEventListener("keydown", function (ev) {
         if (ev.key === "Escape" && col.classList.contains("map-fullscreen")) toggleFs(true);
       });
+      const drawing = L.DomUtil.create("div", "map-draw-tools", wrap);
+      drawing.innerHTML = '<button type="button" data-draw-start>Draw area</button>' +
+        '<select data-draw-shape aria-label="Search area shape"><option value="polygon">Polygon</option><option value="rectangle">Rectangle</option></select>' +
+        '<button type="button" data-draw-undo>Undo</button><button type="button" data-draw-finish>Finish</button>' +
+        '<button type="button" data-draw-clear>Clear area</button><small data-draw-status aria-live="polite"></small>';
+      drawControl = LandosaurGeo.drawer(map, drawing, function (geometry, points) {
+        area = points;
+        areaMatch = geometry ? LandosaurGeo.matcher(points) : null;
+        if (!first) apply(false);
+      });
       return wrap;
     }
   });
   map.addControl(new MapTools());
 
   function hashState() {
-    var out = {};
-    (location.hash.slice(1) || "").split("&").forEach(function (kv) {
-      var p = kv.split("=");
-      if (p[0]) out[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || "");
-    });
-    return out;
+    return Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
   }
   function readForm() {
     return {
@@ -165,6 +200,7 @@
     if (f.belowBench) parts.push("deals=1");
     if (f.inview) parts.push("inview=1");
     if (f.savedOnly) parts.push("saved=1");
+    if (area.length) parts.push("area=" + encodeURIComponent(LandosaurGeo.encode(area)));
     history.replaceState(null, "", parts.length ? "#" + parts.join("&") : location.pathname + location.search);
   }
   function popup(r) {
@@ -332,6 +368,7 @@
       if (f.belowBench && (r[14] == null || r[14] >= 0)) continue;
       if (f.savedOnly && savedIds.indexOf(r[0]) < 0) continue;
       if (f.q && (r[9] + " " + r[10] + " " + r[11] + " " + r[3]).toLowerCase().indexOf(f.q) < 0) continue;
+      if (areaMatch && !areaMatch(r[2], r[1])) continue;
       if (mapBounds) {
         if (r[1] == null || !mapBounds.contains([r[1], r[2]])) continue;
       }
@@ -363,7 +400,7 @@
       cluster.clearLayers();
       cluster.addLayers(markers);
     }
-    if ((first || f.state !== apply.lastState) && !skipFit) {
+    if ((first || f.state !== apply.lastState) && !skipFit && !area.length) {
       if (f.state && bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [22, 22], maxZoom: 15, animate: false });
       else map.setView([39, -96], 4, { animate: false });
     }
@@ -423,6 +460,12 @@
     var openBtn = dock.querySelector("[data-open-compare]");
     if (openBtn) openBtn.disabled = compareIds.length < 1;
   }
+  function acquisitionHref(r) {
+    const params = { parcel: r[0], title: r[9], county: r[10], state: r[3], apn: r[11],
+      price: r[4], acres: r[6], lat: r[1], lon: r[2], service: r[13] ? "direct_closing" : null,
+      mode: r[13] ? "direct" : r[5] === "min_bid" ? "auction" : r[5] === "cash" ? "buy_now" : "landbank" };
+    return base + "/services/?" + new URLSearchParams(Object.entries(params).filter((entry) => entry[1] != null)) + "#start-land-agent";
+  }
   function openCompare() {
     if (!cmpModal) return;
     var items = compareIds.map(function (id) { return byId[id]; }).filter(Boolean);
@@ -430,25 +473,39 @@
     if (!items.length) { body.innerHTML = "<p>Select up to 4 listings to compare side by side.</p>"; }
     else {
       var cols = items.map(function (r) {
-        return '<th><a href="' + parcelHref(r) + '">' + r[9] + '</a></th>';
+        return '<th><a href="' + escHtml(parcelHref(r)) + '">' + escHtml(r[9]) + '</a></th>';
       }).join("");
       function rowHtml(label, fn) {
         return '<tr><th scope="row">' + label + '</th>' + items.map(function (r) { return '<td>' + fn(r) + '</td>'; }).join("") + '</tr>';
       }
       body.innerHTML =
         '<div class="scroll"><table class="data"><thead><tr><th>Field</th>' + cols + '</tr></thead><tbody>' +
-        rowHtml("Location", function (r) { return r[10] + ", " + r[3]; }) +
+        rowHtml("Location", function (r) { return escHtml(r[10] + ", " + r[3]); }) +
         rowHtml("Deal Mode", function (r) { return r[13] ? (r[5] === "min_bid" ? "Direct Auction" : "Direct Buy It Now") : (STATUS[r[7]] || r[7]); }) +
         rowHtml("Price / Bid", function (r) { return r[4] != null ? (KIND[r[5]] + " " + money(r[4])) : "Not published"; }) +
         rowHtml("Acreage", function (r) { return r[6] ? acres(r[6]) : "Not stated"; }) +
         rowHtml("Implied $/acre", function (r) { return (r[4] > 0 && r[6] > 0) ? money(r[4] / r[6]) + "/ac" : "–"; }) +
-        rowHtml("Deadline", function (r) { return r[12] || "–"; }) +
+        rowHtml("Deadline", function (r) { return escHtml(r[12] || "–"); }) +
         rowHtml("Analyze", function (r) {
           var q = "?id=" + encodeURIComponent(r[0]) + "&title=" + encodeURIComponent(r[9]) +
             (r[4] != null ? "&price=" + r[4] : "") + (r[6] ? "&acres=" + r[6] : "");
           return '<a href="' + base + '/analyze/' + q + '">Open in Analyzer →</a>';
         }) +
         '</tbody></table></div>';
+      const available = items.filter((row) => row[8]);
+      if (available.length) {
+        const actions = document.createElement("div");
+        actions.className = "compare-acquisition";
+        const choice = document.createElement("select");
+        choice.setAttribute("aria-label", "Choose a parcel for Land Agent");
+        available.forEach((row, index) => choice.add(new Option(row[9], index)));
+        const acquire = el("a", "button sm", "Acquire selected with Land Agent · $20 →");
+        function update() { acquire.href = acquisitionHref(available[Number(choice.value)]); }
+        choice.addEventListener("change", update);
+        update();
+        actions.append(choice, acquire);
+        body.appendChild(actions);
+      }
     }
     cmpModal.hidden = false;
   }
@@ -456,21 +513,44 @@
     var oBtn = dock.querySelector("[data-open-compare]");
     if (oBtn) oBtn.addEventListener("click", openCompare);
     var expBtn = dock.querySelector("[data-export-saved]");
-    if (expBtn) expBtn.addEventListener("click", function () {
-      var list = savedIds.map(function (id) { return byId[id]; }).filter(Boolean);
-      if (!list.length) return;
-      function qCsv(v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }
-      var header = ["id", "title", "county", "state", "status", "price_kind", "price", "acres", "implied_usd_per_acre", "deadline", "latitude", "longitude", "url"];
-      var lines = [header.join(",")].concat(list.map(function (r) {
-        var ppa = (r[4] > 0 && r[6] > 0) ? (r[4] / r[6]).toFixed(2) : "";
-        return [r[0], r[9], r[10], r[3], STATUS[r[7]] || r[7], r[5], r[4] == null ? "" : r[4], r[6] || "", ppa, r[12] || "", r[1] == null ? "" : r[1], r[2] == null ? "" : r[2], location.origin + parcelHref(r)].map(qCsv).join(",");
-      }));
-      var blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
-      var u = URL.createObjectURL(blob);
-      var a = document.createElement("a");
-      a.href = u; a.download = "landosaur-shortlist.csv";
-      document.body.appendChild(a); a.click();
-      setTimeout(function () { URL.revokeObjectURL(u); a.remove(); }, 400);
+    if (expBtn) expBtn.addEventListener("click", async function () {
+      const format = document.getElementById("watchlist-format").value.toLowerCase();
+      const status = dock.querySelector("[data-watchlist-status]");
+      const shortlist = [...new Set(savedIds.concat(compareIds))].map((id) => byId[id]).filter(Boolean);
+      if (!shortlist.length) { status.textContent = "No saved parcels remain in the inventory."; return; }
+      expBtn.disabled = true;
+      status.textContent = "Preparing " + shortlist.length + " parcels…";
+      try {
+        const items = shortlist.map((r) => ({
+          id: r[0], title: r[9], state: r[3], county: r[10], status: STATUS[r[7]] || r[7],
+          price_kind: r[5], price: r[4], acres: r[6], deadline: r[12], lat: r[1], lon: r[2],
+          usd_per_acre: r[4] > 0 && r[6] > 0 ? Number((r[4] / r[6]).toFixed(2)) : null,
+          url: new URL(parcelHref(r), location.href).href, rings: null,
+        }));
+        if (format !== "csv") {
+          // Limit concurrent dossier reads. Only agency-supplied boundary arrays are copied.
+          for (let i = 0; i < items.length; i += 6) {
+            await Promise.all(items.slice(i, i + 6).map(async (item, offset) => {
+              if (item.lat == null || shortlist[i + offset][13]) return;
+              try {
+                const response = await fetch(item.url, { signal: AbortSignal.timeout(6500) });
+                if (!response.ok) return;
+                const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+                const parcel = JSON.parse(doc.getElementById("parcel")?.textContent || "null");
+                if (parcel?.slug === item.id) item.rings = parcel.geometry;
+              } catch {}
+            }));
+          }
+        }
+        LandosaurWatchlist.download(items, format);
+        const unmapped = items.filter((item) => item.lat == null && !item.rings?.length).length;
+        status.textContent = "Exported " + items.length + " parcels." +
+          (unmapped && format !== "csv" ? " " + unmapped + " without mapped coordinates." : "");
+      } catch {
+        status.textContent = "The watchlist export could not be prepared.";
+      } finally {
+        expBtn.disabled = false;
+      }
     });
     var clrBtn = dock.querySelector("[data-clear-compare]");
     if (clrBtn) clrBtn.addEventListener("click", function () {
@@ -490,7 +570,7 @@
   var alertOut = document.getElementById("alert-modal-result");
   var alertSubmit = document.getElementById("alert-submit-btn");
   function escHtml(s) {
-    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function describeActiveFilter(f) {
     var parts = [];
@@ -500,6 +580,7 @@
     if (!isNaN(f.max)) parts.push("Max " + money(f.max));
     if (!isNaN(f.acres)) parts.push(f.acres + "+ acres");
     if (f.q) parts.push('Keyword "' + f.q + '"');
+    if (area.length) parts.push("Drawn search area");
     return parts.join(" · ");
   }
   if (alertBtn && alertModal) {
@@ -534,6 +615,7 @@
           min_acres: isNaN(f.acres) ? null : f.acres,
           below_benchmark: Boolean(f.belowBench),
           q: f.q || "",
+          area: area.length ? LandosaurGeo.encode(area) : undefined,
           label: alertForm.label.value.trim(),
           buyer_email: alertForm.buyer_email.value.trim(),
           website_hp: alertForm.website_hp ? alertForm.website_hp.value : "",
@@ -568,6 +650,16 @@
   });
 
   var h = hashState();
+  if (h.area && drawControl) {
+    const points = LandosaurGeo.decode(h.area);
+    if (drawControl.set(points)) {
+      area = points;
+      areaMatch = LandosaurGeo.matcher(points);
+      const origin = points[0][0];
+      const vertices = points.map(([lon, lat]) => [lat, origin + ((lon - origin + 540) % 360) - 180]);
+      map.fitBounds(vertices, { padding: [20, 20], maxZoom: 15, animate: false });
+    }
+  }
   if (scope && scope !== "all") form.state.value = scope;
   if (h.state) form.state.value = h.state;
   if (h.kind) form.kind.value = h.kind;
@@ -594,7 +686,7 @@
       var directItems = (pair[1] && pair[1].listings) || [];
       var directRows = directItems.map(function (it) {
         return [
-          it.id, it.lat, it.lon, it.state, it.current_high_bid || it.price,
+          it.id, it.lat, it.lon, it.state, it.price,
           it.sale_mode === "auction" ? "min_bid" : "cash", it.acres,
           it.sale_mode === "auction" ? "auction_open" : "listed",
           it.status === "active" ? 1 : 0, it.title, it.county || "",

@@ -66,6 +66,7 @@ const VALID_SERVICES = new Set([
   "auction_proxy",
   "landbank_application",
   "diligence_packet",
+  "direct_closing",
   "custom_sourcing",
 ]);
 
@@ -262,7 +263,8 @@ export async function POST(request) {
       concierge_fee_pct: 10,
       parcel_id: parcelId,
       parcel_title: parcelTitle,
-      parcel_url: parcelId ? `https://landosaur.com/land/${encodeURIComponent(parcelId)}/` : null,
+      parcel_url: parcelId ? (serviceType === "direct_closing" ? `https://landosaur.com/direct/?id=${encodeURIComponent(parcelId)}` :
+        `https://landosaur.com/land/${encodeURIComponent(parcelId)}/`) : null,
       apn,
       location: location || null,
       county: county || null,

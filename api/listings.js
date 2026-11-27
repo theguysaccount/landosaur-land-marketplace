@@ -9,10 +9,10 @@
  *   - PATCH /api/listings/?id=<id>     -> Update status (active / under_contract / sold / withdrawn) with seller edit_token
  */
 import crypto from "node:crypto";
-import { list, put } from "@vercel/blob";
+import { BlobPreconditionFailedError, list } from "@vercel/blob";
+import { bidStats, checkoutUrl, LISTING_PREFIX as PREFIX, OFFER_PREFIX, readDirect, writeDirect } from "../lib/direct-store.js";
 import { runXray } from "./xray.js";
 
-const PREFIX = "direct/listings/";
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -50,18 +50,6 @@ function sha256(s) {
   return crypto.createHash("sha256").update(String(s)).digest("hex");
 }
 
-function safeCheckoutUrl(raw) {
-  const s = cleanStr(raw, 400);
-  if (!s) return null;
-  try {
-    const u = new URL(s);
-    if (u.protocol === "https:") return u.toString();
-  } catch {
-    return null;
-  }
-  return null;
-}
-
 async function geocodeLocation(q) {
   const text = cleanStr(q, 160);
   if (!text) return null;
@@ -96,6 +84,7 @@ function publicView(item) {
   delete out.edit_token_hash;
   delete out.contact_email;
   delete out.contact_phone;
+  out.checkout_url = checkoutUrl(out.checkout_url);
   out.has_contact = true;
   return out;
 }
@@ -121,13 +110,14 @@ async function loadAllDirectListings() {
 }
 
 async function loadOneListing(id) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
   const safeId = slugify(id);
-  if (!safeId) return null;
-  const { blobs } = await list({ prefix: `${PREFIX}${safeId}.json`, limit: 5 });
-  const match = blobs.find((b) => b.pathname === `${PREFIX}${safeId}.json`);
-  if (!match) return null;
-  return readBlobJson(match.url);
+  return safeId ? readDirect(PREFIX + safeId + ".json") : null;
+}
+
+async function withBids(item) {
+  if (item.sale_mode !== "auction") return item;
+  const ledger = await readDirect(OFFER_PREFIX + item.id + ".json");
+  return { ...item, ...bidStats(ledger?.value.entries) };
 }
 
 export async function OPTIONS() {
@@ -139,9 +129,9 @@ export async function GET(request) {
     const url = new URL(request.url);
     const id = url.searchParams.get("id");
     if (id) {
-      const item = await loadOneListing(id);
-      if (!item) return jsonResp({ error: "Direct listing not found." }, 404);
-      return jsonResp({ listing: publicView(item) }, 200);
+      const record = await loadOneListing(id);
+      if (!record) return jsonResp({ error: "Direct listing not found." }, 404);
+      return jsonResp({ listing: publicView(await withBids(record.value)) }, 200);
     }
 
     const { configured, listings } = await loadAllDirectListings();
@@ -152,14 +142,14 @@ export async function GET(request) {
     const filtered = listings
       .filter((x) => (!activeOnly ? true : x.status === "active"))
       .filter((x) => (!stateFilter ? true : x.state === stateFilter))
-      .filter((x) => (!modeFilter ? true : x.sale_mode === modeFilter))
-      .map(publicView);
+      .filter((x) => (!modeFilter ? true : x.sale_mode === modeFilter));
+    const publicListings = await Promise.all(filtered.map(async (item) => publicView(await withBids(item))));
 
     return jsonResp(
       {
         storage_configured: configured,
         count: filtered.length,
-        listings: filtered,
+        listings: publicListings,
       },
       200
     );
@@ -291,7 +281,7 @@ export async function POST(request) {
       contact_phone: cleanStr(body.contact_phone || "", 40),
       brokerage: cleanStr(body.brokerage || "", 120),
       agent_license: cleanStr(body.agent_license || "", 60),
-      checkout_url: safeCheckoutUrl(body.checkout_url),
+      checkout_url: checkoutUrl(cleanStr(body.checkout_url, 500)),
       escrow_notes: cleanStr(body.escrow_notes || "", 300),
       submitted_by_agent: cleanStr(body.submitted_by_agent || "web", 60),
       bid_count: 0,
@@ -316,12 +306,7 @@ export async function POST(request) {
       },
     };
 
-    await put(`${PREFIX}${id}.json`, JSON.stringify(listing, null, 2), {
-      access: "public",
-      contentType: "application/json",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-    });
+    await writeDirect(PREFIX + id + ".json", listing);
 
     return jsonResp(
       {
@@ -330,7 +315,7 @@ export async function POST(request) {
         url: `https://landosaur.com/direct/?id=${encodeURIComponent(id)}`,
         edit_token: editToken,
         listing: publicView(listing),
-        message: "Published live on Landosaur and enriched with 9 live federal GIS signals. Save your edit_token to update or mark sold.",
+        message: "Published live on Landosaur and enriched with available federal GIS data. Save your edit_token to update or mark sold.",
       },
       201
     );
@@ -349,34 +334,33 @@ export async function PATCH(request) {
     const id = url.searchParams.get("id");
     const body = await request.json().catch(() => null);
     if (!id || !body) return jsonResp({ error: "Provide ?id=... and JSON body." }, 400);
-    const item = await loadOneListing(id);
-    if (!item) return jsonResp({ error: "Listing not found." }, 404);
+    const record = await loadOneListing(id);
+    if (!record) return jsonResp({ error: "Listing not found." }, 404);
+    const item = record.value;
     const token = cleanStr(body.edit_token || request.headers.get("authorization")?.replace(/^Bearer\s+/i, ""), 128);
     if (!token || sha256(token) !== item.edit_token_hash) {
       return jsonResp({ error: "Invalid edit_token." }, 403);
     }
     const allowed = new Set(["active", "under_contract", "sold", "withdrawn"]);
-    if (body.status && allowed.has(body.status)) item.status = body.status;
+    if (body.status && !allowed.has(body.status)) return jsonResp({ error: "Invalid listing status." }, 400);
+    if (body.status) item.status = body.status;
     if (body.price != null && posNum(body.price)) item.price = Math.round(posNum(body.price) * 100) / 100;
     if (body.buy_now_price != null && posNum(body.buy_now_price)) {
       item.buy_now_price = Math.round(posNum(body.buy_now_price) * 100) / 100;
     }
     if (body.checkout_url !== undefined) {
       const cu = cleanStr(body.checkout_url, 500);
-      item.checkout_url = !cu ? null : isSafeHttpsUrl(cu) ? cu : item.checkout_url;
+      if (cu && !checkoutUrl(cu)) return jsonResp({ error: "Provide an HTTPS checkout link." }, 400);
+      item.checkout_url = checkoutUrl(cu);
     }
     if (body.escrow_notes != null) item.escrow_notes = cleanStr(body.escrow_notes, 600);
     if (body.notes != null) item.notes = cleanStr(body.notes, 1200);
     item.updated_at = new Date().toISOString();
 
-    await put(`${PREFIX}${item.id}.json`, JSON.stringify(item, null, 2), {
-      access: "public",
-      contentType: "application/json",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-    });
+    await writeDirect(PREFIX + item.id + ".json", item, record.etag);
     return jsonResp({ ok: true, listing: publicView(item) }, 200);
   } catch (err) {
+    if (err instanceof BlobPreconditionFailedError) return jsonResp({ error: "Listing changed. Reload before editing again." }, 409);
     console.error("[listings PATCH] error:", err);
     return jsonResp({ error: "Unable to update listing." }, 502);
   }

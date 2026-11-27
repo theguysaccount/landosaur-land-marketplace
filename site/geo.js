@@ -60,16 +60,24 @@
     };
   }
 
-  function contains(points, lon, lat) {
-    if (points.length < 3 || !Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+  function matcher(points) {
+    if (points.length < 3) return () => false;
     const ring = project(points);
-    const x = points[0][0] + wrap(lon - points[0][0]);
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [ax, ay] = ring[i], [bx, by] = ring[j];
-      if ((ay > lat) !== (by > lat) && x < (bx - ax) * (lat - ay) / (by - ay) + ax) inside = !inside;
-    }
-    return inside;
+    const west = Math.min(...ring.map((p) => p[0])), east = Math.max(...ring.map((p) => p[0]));
+    const south = Math.min(...ring.map((p) => p[1])), north = Math.max(...ring.map((p) => p[1]));
+    return (lon, lat) => {
+      if (!Number.isFinite(lon) || !Number.isFinite(lat) || lat < south || lat > north) return false;
+      const x = ring[0][0] + wrap(lon - ring[0][0]);
+      if (x < west || x > east) return false;
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [ax, ay] = ring[i], [bx, by] = ring[j];
+        if (Math.abs((x - ax) * (by - ay) - (lat - ay) * (bx - ax)) < 1e-10 &&
+            x >= Math.min(ax, bx) && x <= Math.max(ax, bx) && lat >= Math.min(ay, by) && lat <= Math.max(ay, by)) return true;
+        if ((ay > lat) !== (by > lat) && x < (bx - ax) * (lat - ay) / (by - ay) + ax) inside = !inside;
+      }
+      return inside;
+    };
   }
 
   function encode(points) {
@@ -90,6 +98,9 @@
     const clear = toolbar.querySelector("[data-draw-clear]");
     const status = toolbar.querySelector("[data-draw-status]");
     const idleLabel = toggle.textContent;
+    const shape = toolbar.querySelector("[data-draw-shape]");
+    const rectangle = () => shape?.value === "rectangle";
+    shape?.addEventListener("change", () => { points = []; render(); });
     function render(message) {
       if (layer) map.removeLayer(layer);
       if (points.length) {
@@ -100,13 +111,16 @@
       }
       toggle.textContent = active ? "Cancel drawing" : idleLabel;
       toggle.setAttribute("aria-pressed", String(active));
-      finish.hidden = !active;
+      if (shape) shape.hidden = !active;
+      finish.hidden = !active || rectangle();
       undo.hidden = !active;
       clear.hidden = !points.length || active;
       finish.disabled = points.length < 3;
       undo.disabled = !points.length;
       map.getContainer().classList.toggle("drawing-parcel", active);
-      status.textContent = message || (active ? points.length + " vertices. Add points around the boundary, then finish." : "");
+      status.textContent = message || (active ? (rectangle()
+        ? points.length ? "Set the opposite corner." : "Choose the first corner."
+        : points.length + " vertices. Add points, then finish.") : "");
     }
     toggle.addEventListener("click", () => {
       active = !active;
@@ -116,7 +130,7 @@
     });
     undo.addEventListener("click", () => { points.pop(); render(); });
     clear.addEventListener("click", () => { points = []; render(); onFinish(null, []); });
-    finish.addEventListener("click", () => {
+    function complete() {
       const geometry = measure(points);
       if (!geometry) {
         render("Draw a simple boundary with at least three different vertices. Undo any crossing edges.");
@@ -125,10 +139,22 @@
       active = false;
       render();
       onFinish(geometry, points.slice());
-    });
+    }
+    finish.addEventListener("click", complete);
     map.on("click", (event) => {
       if (!active || points.length >= limit) return;
       points = normalize(points.concat([[wrap(event.latlng.lng), event.latlng.lat]]));
+      if (rectangle() && points.length === 2) {
+        const [[a, b], [c, d]] = points;
+        if (a === c || b === d) {
+          points.pop();
+          render("Choose a corner diagonal from the first point.");
+          return;
+        }
+        points = [[a, b], [c, b], [c, d], [a, d]];
+        complete();
+        return;
+      }
       render(points.length === limit ? "Vertex limit reached. Finish the boundary or undo a point." : undefined);
     });
     render();
@@ -145,5 +171,5 @@
     };
   }
 
-  window.LandosaurGeo = { contains, decode, drawer, encode, measure };
+  globalThis.LandosaurGeo = { decode, drawer, encode, matcher, measure };
 })();

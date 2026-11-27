@@ -410,7 +410,7 @@
     if (!tbody || !atlas.counties) return;
 
     if (stSel) {
-      stSel.innerHTML = "<option value=''>All 50 states (3,115 counties)</option>" +
+      stSel.innerHTML = "<option value=''>All 50 states (" + atlas.counties.length.toLocaleString("en-US") + " county benchmarks)</option>" +
         atlas.states.map(function (s) { return "<option value='" + s.code + "'>" + esc(s.name) + "</option>"; }).join("");
     }
 

@@ -6,10 +6,8 @@
  *   - POST /api/offers/              -> Place a live Auction Bid, Buy-It-Now Reservation, or Written Offer
  */
 import crypto from "node:crypto";
-import { list, put } from "@vercel/blob";
-
-const LISTING_PREFIX = "direct/listings/";
-const OFFER_PREFIX = "direct/offers/";
+import { BlobError, BlobPreconditionFailedError } from "@vercel/blob";
+import { checkoutUrl, LISTING_PREFIX, OFFER_PREFIX, readDirect, writeDirect } from "../lib/direct-store.js";
 
 function jsonResp(body, status = 200) {
   return new Response(status === 204 ? null : JSON.stringify(body), {
@@ -47,15 +45,6 @@ function initialsOf(name) {
   return `${parts[0][0].toUpperCase()}.${parts[parts.length - 1][0].toUpperCase()}.`;
 }
 
-async function readBlobByPath(pathname) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
-  const { blobs } = await list({ prefix: pathname, limit: 5 });
-  const match = blobs.find((b) => b.pathname === pathname);
-  if (!match) return null;
-  const r = await fetch(match.url, { cache: "no-store" });
-  return r.ok ? r.json() : null;
-}
-
 function summarizeLedger(listing, ledger) {
   const entries = (ledger?.entries || []).slice();
   const bids = entries.filter((e) => e.action === "bid").sort((a, b) => b.amount - a.amount);
@@ -73,7 +62,7 @@ function summarizeLedger(listing, ledger) {
     current_high_bid: currentHigh,
     minimum_next_bid: listing.sale_mode === "auction" ? minNext : null,
     reservation_count: reservations.length,
-    checkout_url: listing.checkout_url || null,
+    checkout_url: checkoutUrl(listing.checkout_url),
     recent_bids: bids.slice(0, 20).map((b) => ({
       code: b.code,
       bidder: b.initials,
@@ -81,6 +70,20 @@ function summarizeLedger(listing, ledger) {
       created_at: b.created_at,
     })),
   };
+}
+
+function receipt(listing, ledger, entry) {
+  const summary = summarizeLedger(listing, ledger);
+  const linksToEscrow = entry.action === "buy_now" && listing.status === "active";
+  const label = { bid: "Auction bid", buy_now: "Buy It Now request", offer: "Written offer" }[entry.action];
+  return jsonResp({
+    ok: true, confirmation_code: entry.code, action: entry.action, amount: entry.amount,
+    checkout_url: linksToEscrow ? checkoutUrl(listing.checkout_url) : null,
+    escrow_notes: listing.escrow_notes || null,
+    seller_contact_name: listing.contact_name, seller_brokerage: listing.brokerage || null, summary,
+    message: label + " recorded at $" + entry.amount.toLocaleString("en-US") + ". " +
+      (entry.action === "buy_now" ? "Confirm the reservation and escrow instructions with the seller or closing professional." : ""),
+  }, 201);
 }
 
 export async function OPTIONS() {
@@ -92,9 +95,9 @@ export async function GET(request) {
     const url = new URL(request.url);
     const id = slugify(url.searchParams.get("listing"));
     if (!id) return jsonResp({ error: "Provide ?listing=<id>." }, 400);
-    const listing = await readBlobByPath(`${LISTING_PREFIX}${id}.json`);
+    const listing = (await readDirect(LISTING_PREFIX + id + ".json"))?.value;
     if (!listing) return jsonResp({ error: "Listing not found." }, 404);
-    const ledger = await readBlobByPath(`${OFFER_PREFIX}${id}.json`);
+    const ledger = (await readDirect(OFFER_PREFIX + id + ".json"))?.value;
     return jsonResp(summarizeLedger(listing, ledger), 200);
   } catch (err) {
     console.error("[offers GET] error:", err);
@@ -117,18 +120,6 @@ export async function POST(request) {
       return jsonResp({ error: "Provide listing_id and action ('bid', 'buy_now', or 'offer')." }, 400);
     }
 
-    const listing = await readBlobByPath(`${LISTING_PREFIX}${id}.json`);
-    if (!listing) return jsonResp({ error: "Listing not found." }, 404);
-    if (listing.status !== "active") {
-      return jsonResp({ error: `This parcel is currently marked ${listing.status} and is not accepting new bids.` }, 409);
-    }
-    if (action === "bid" && listing.sale_mode !== "auction") {
-      return jsonResp({ error: "This parcel is a Buy It Now listing; use action='buy_now' or action='offer'." }, 400);
-    }
-    if (action === "bid" && listing.deadline && new Date(listing.deadline).getTime() <= Date.now()) {
-      return jsonResp({ error: "Bidding window has closed for this auction." }, 409);
-    }
-
     const buyerName = cleanStr(body.buyer_name, 120);
     const buyerEmail = cleanStr(body.buyer_email, 160);
     const buyerPhone = cleanStr(body.buyer_phone, 40);
@@ -136,89 +127,48 @@ export async function POST(request) {
       return jsonResp({ error: "Provide buyer_name and a valid buyer_email." }, 400);
     }
 
-    const ledgerPath = `${OFFER_PREFIX}${id}.json`;
-    const ledger = (await readBlobByPath(ledgerPath)) || { listing_id: id, entries: [] };
-    const summary = summarizeLedger(listing, ledger);
-
-    let amount = Number(body.amount);
-    if (action === "buy_now") {
-      const bn = listing.buy_now_price ?? (listing.sale_mode === "buy_now" ? listing.price : null);
-      if (!bn) return jsonResp({ error: "This auction does not have a Buy It Now price." }, 400);
-      amount = bn;
-    } else if (action === "bid") {
-      if (!Number.isFinite(amount) || amount < summary.minimum_next_bid) {
-        return jsonResp(
-          {
-            error: `Bid must be at least $${Math.round(summary.minimum_next_bid).toLocaleString("en-US")}.`,
-            minimum_next_bid: summary.minimum_next_bid,
-          },
-          400
-        );
+    const requestKey = cleanStr(body.request_key, 90);
+    const fingerprint = requestKey ? crypto.createHash("sha256")
+      .update(JSON.stringify([requestKey, action, buyerEmail.toLowerCase(), body.amount ?? null])).digest("hex") : null;
+    const ledgerPath = OFFER_PREFIX + id + ".json";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const listing = (await readDirect(LISTING_PREFIX + id + ".json"))?.value;
+      if (!listing) return jsonResp({ error: "Listing not found." }, 404);
+      const stored = await readDirect(ledgerPath);
+      const ledger = stored?.value || { listing_id: id, entries: [] };
+      const prior = fingerprint && ledger.entries.find((entry) => entry.request_hash === fingerprint);
+      if (prior) return receipt(listing, ledger, prior);
+      if (listing.status !== "active") return jsonResp({ error: "This listing is no longer accepting buyer requests." }, 409);
+      if (action === "bid" && listing.sale_mode !== "auction") {
+        return jsonResp({ error: "Use Buy It Now or send a written offer for this listing." }, 400);
       }
-    } else if (!Number.isFinite(amount) || amount <= 0) {
-      return jsonResp({ error: "Provide a positive offer amount." }, 400);
+      if (action !== "offer" && listing.sale_mode === "auction" && listing.deadline && Date.parse(listing.deadline) <= Date.now()) {
+        return jsonResp({ error: "The auction has closed." }, 409);
+      }
+      const summary = summarizeLedger(listing, ledger);
+      const amount = action === "buy_now" ? summary.buy_now_price : Math.round(Number(body.amount) * 100) / 100;
+      if (!Number.isSafeInteger(Math.round(amount * 100)) || !(amount > 0)) {
+        return jsonResp({ error: action === "buy_now" ? "No Buy It Now price is available." : "Provide a positive dollar amount." }, 400);
+      }
+      if (action === "bid" && amount < summary.minimum_next_bid) {
+        return jsonResp({ error: "The bid is below the current minimum.", minimum_next_bid: summary.minimum_next_bid }, 409);
+      }
+      const prefix = { bid: "BID", buy_now: "BUY", offer: "OFR" }[action];
+      const entry = {
+        code: prefix + "-" + crypto.randomBytes(4).toString("hex").toUpperCase(), action, amount,
+        initials: initialsOf(buyerName), buyer_name: buyerName, buyer_email: buyerEmail, buyer_phone: buyerPhone,
+        financing: cleanStr(body.financing || "cash", 40), notes: cleanStr(body.notes, 500),
+        created_at: new Date().toISOString(), ...(fingerprint ? { request_hash: fingerprint } : {}),
+      };
+      const updated = { ...ledger, entries: [...ledger.entries, entry] };
+      try {
+        await writeDirect(ledgerPath, updated, stored?.etag);
+        return receipt(listing, updated, entry);
+      } catch (err) {
+        if (!(err instanceof BlobPreconditionFailedError || !stored && err instanceof BlobError && /already exists|allowOverwrite/i.test(err.message))) throw err;
+      }
     }
-
-    const prefixCode = action === "bid" ? "BID" : action === "buy_now" ? "BUY" : "OFR";
-    const code = `${prefixCode}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-    const entry = {
-      code,
-      action,
-      amount: Math.round(amount * 100) / 100,
-      initials: initialsOf(buyerName),
-      buyer_name: buyerName,
-      buyer_email: buyerEmail,
-      buyer_phone: buyerPhone,
-      financing: cleanStr(body.financing || "cash", 40),
-      notes: cleanStr(body.notes || "", 500),
-      created_at: new Date().toISOString(),
-    };
-    ledger.entries.push(entry);
-
-    await put(ledgerPath, JSON.stringify(ledger, null, 2), {
-      access: "public",
-      contentType: "application/json",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-    });
-
-    // Keep summary fields in sync on listing blob
-    if (action === "bid") {
-      listing.bid_count = (listing.bid_count || 0) + 1;
-      listing.current_high_bid = Math.max(listing.current_high_bid || 0, entry.amount);
-      await put(`${LISTING_PREFIX}${id}.json`, JSON.stringify(listing, null, 2), {
-        access: "public",
-        contentType: "application/json",
-        addRandomSuffix: false,
-        allowOverwrite: true,
-      });
-    }
-
-    const updated = summarizeLedger(listing, ledger);
-    return jsonResp(
-      {
-        ok: true,
-        confirmation_code: code,
-        action,
-        amount: entry.amount,
-        checkout_url: listing.checkout_url || null,
-        escrow_notes: listing.escrow_notes || null,
-        seller_contact_name: listing.contact_name,
-        seller_brokerage: listing.brokerage || null,
-        summary: updated,
-        message:
-          action === "bid"
-            ? `Bid of $${entry.amount.toLocaleString("en-US")} recorded (${code}). You are currently the high bidder.`
-            : action === "buy_now"
-            ? `Buy It Now reservation recorded (${code}) at $${entry.amount.toLocaleString("en-US")}. ${
-                listing.checkout_url
-                  ? "Continue to the seller's verified title/escrow checkout link to complete earnest money."
-                  : "Seller/agent will finalize closing through a licensed title company or closing attorney."
-              }`
-            : `Written offer of $${entry.amount.toLocaleString("en-US")} submitted (${code}).`,
-      },
-      201
-    );
+    return jsonResp({ error: "New activity changed this listing. Refresh and try again." }, 409);
   } catch (err) {
     console.error("[offers POST] error:", err);
     return jsonResp({ error: "Unable to record bid or reservation." }, 502);

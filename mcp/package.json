@@ -1,0 +1,9 @@
+{
+  "name": "landosaur-mcp",
+  "version": "1.0.0",
+  "description": "Landosaur's stdio server for official U.S. land inventory and parcel intelligence",
+  "type": "module",
+  "bin": { "landosaur-mcp": "./landosaur-mcp.mjs" },
+  "engines": { "node": ">=22" },
+  "files": ["landosaur-mcp.mjs", "openapi.json"]
+}

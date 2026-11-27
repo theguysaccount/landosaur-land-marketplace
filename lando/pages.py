@@ -316,7 +316,9 @@ class Site(object):
             '<div id="compare-dock" class="compare-dock" hidden>'
             '<span>Saved: <strong data-saved-count>0</strong> · Compare: <strong data-cmp-count>0</strong>/4</span>'
             '<button type="button" data-open-compare data-vital-event="tool_used">Compare side by side</button>'
-            '<button type="button" class="ghost-dk" data-export-saved data-vital-event="tool_used">Export Saved CSV</button>'
+            '<label class="watchlist-format"><span>Watchlist format</span><select id="watchlist-format" aria-label="Watchlist export format"><option>CSV</option><option>GeoJSON</option><option>KML</option><option>GPX</option></select></label>'
+            '<button type="button" class="ghost-dk" data-export-saved data-vital-event="tool_used">Export</button>'
+            '<span class="watchlist-status" data-watchlist-status aria-live="polite"></span>'
             '<button type="button" class="ghost-dk" data-clear-compare>Clear</button>'
             '</div>'
             '<div id="compare-modal" class="compare-modal" hidden role="dialog" aria-modal="true" aria-label="Compare parcels">'
@@ -568,7 +570,7 @@ class Site(object):
         return self.layout(
             "Land for Sale Map, 50-State Land Prices & Parcel Analyzer | Landosaur",
             desc, "/", "".join(body), indexable=True, jsonld=ld,
-            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "map.js", "tables.js"], wide=True,
+            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "geo.js", "watchlist.js", "map.js", "tables.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /xray/ Universal 50-State Parcel X-Ray
@@ -704,6 +706,8 @@ class Site(object):
             '<details class="faq-item"><summary>Developer / Broker Agent cURL Payload</summary>'
             '<div style="padding:0 16px 14px"><pre id="agent-curl-text" class="code-box">%s</pre></div></details>'
             '</section>' % (self.u("/.well-known/landosaur-agent.json"), esc(agent_prompt), self.u("/direct/"), esc(curl_snippet)),
+
+            self.agent_install(),
 
             # Human / Real Estate Agent 60-Second Drop-a-Pin Form
             '<section class="xray-section" id="pin-publish" style="margin-top:24px">'
@@ -852,6 +856,7 @@ class Site(object):
             '<option value="unlisted_outreach">Unlisted / Off-Market Parcel Acquisition ($20 + 10% on close)</option>'
             '<option value="auction_proxy">Tax-Sale &amp; Public Auction Concierge ($20 + 10% on close)</option>'
             '<option value="landbank_application">Land Bank &amp; Side-Lot Application Service ($20 + 10% on close)</option>'
+            '<option value="direct_closing">Direct Listing Closing Coordination ($20 + 10% on close)</option>'
             '<option value="diligence_packet">Deep Pre-Purchase Title, Easement &amp; Diligence Audit ($20 deposit)</option>'
             '<option value="custom_sourcing">Custom Acreage / Off-Market Portfolio Sourcing ($20 initiation)</option>'
             '</select></label>'
@@ -926,6 +931,7 @@ class Site(object):
     def land_atlas_page(self):
         cat = self.cat
         m = self.market
+        county_count = format(sum(len(m.counties_by_state.get(code, [])) for code in cat.states), ",")
         cur = cat.current()
         us = m.latest_values("US")
         chg, y0, y1 = m.span_change("US", "farm_real_estate")
@@ -933,20 +939,20 @@ class Site(object):
         body = [
             crumbs,
             '<div id="atlas-app">',
-            '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · 3,115 U.S. Counties · Live Public Supply</div>' % m.latest_year,
+            '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · %s county benchmarks · Live Public Supply</div>' % (m.latest_year, county_count),
             '<h1>U.S. Land Data Atlas &amp; Interactive Market Charts</h1>',
-            '<p class="lede">The open reference atlas for American land—combining <strong>%s live public-agency parcels across all %d U.S. states (%d agencies)</strong>, <strong>17 years of official USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks across <strong>all 3,115 U.S. counties</strong>. Zero fabricated metrics.</p>' % (
-                "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}), m.first_year, m.latest_year),
+            '<p class="lede">The open reference atlas for American land—combining <strong>%s live public-agency parcels across all %d U.S. states (%d agencies)</strong>, <strong>%d years of official USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks across <strong>%s counties and county equivalents</strong>.</p>' % (
+                "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}), m.latest_year - m.first_year + 1, m.first_year, m.latest_year, county_count),
 
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>Live Official Database</span><strong>%s</strong><small>Active parcels · %d/50 states · %d agencies</small></div>'
             '<div class="kpi-card"><span>U.S. Farm Real Estate (%d)</span><strong>%s/ac</strong><small>USDA NASS national benchmark</small></div>'
             '<div class="kpi-card"><span>%d–%d Nominal Growth</span><strong>%s</strong><small>U.S. agricultural land appreciation</small></div>'
-            '<div class="kpi-card"><span>County Benchmark Coverage</span><strong>3,115</strong><small>Every U.S. county searchable &amp; CSV-ready</small></div>'
+            '<div class="kpi-card"><span>County Benchmark Coverage</span><strong>%s</strong><small>Searchable &amp; CSV-ready</small></div>'
             '</div>' % (
                 "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}),
                 m.latest_year, esc(market_mod.usd(us.get("farm_real_estate"))),
-                y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)),
+                y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)), county_count,
             ),
 
             '<section class="dossier-card" style="margin-top:24px">'
@@ -1006,7 +1012,7 @@ class Site(object):
             '</section>',
 
             '<section class="dossier-card" style="margin-top:24px">'
-            '<div class="eyebrow">All 3,115 U.S. Counties · Searchable &amp; Exportable</div>'
+            '<div class="eyebrow">Searchable &amp; Exportable</div>'
             '<h2>U.S. County Land Value Explorer (%d)</h2>'
             '<div class="atlas-controls">'
             '<label>State <select id="county-st-filter"></select></label>'
@@ -1023,10 +1029,10 @@ class Site(object):
                 self.u("/services/"), self.u("/data/"), self.u("/land-prices/")),
             '</div>',
         ]
-        desc = "Interactive U.S. Land Data Atlas: 50-state land value cartogram, 2010–%d USDA multi-state appreciation charts, live supply breakdowns across %s parcels, and searchable 3,115-county price explorer." % (
-            m.latest_year, "{:,}".format(len(cur)))
+        desc = "Interactive U.S. Land Data Atlas: 50-state land value cartogram, 2010–%d USDA multi-state appreciation charts, live supply breakdowns across %s parcels, and a searchable price explorer with %s county benchmarks." % (
+            m.latest_year, "{:,}".format(len(cur)), county_count)
         return self.layout(
-            "U.S. Land Data Atlas — 50-State Charts, 3,115 County Prices & Live Supply | Landosaur",
+            "U.S. Land Data Atlas — 50-State Charts, County Prices & Live Supply | Landosaur",
             desc, "/land-atlas/", "".join(body), indexable=True, jsonld=[crumb_ld],
             scripts=["atlas.js", "share-chart.js"], wide=True,
         )
@@ -2563,7 +2569,7 @@ class Site(object):
         return self.layout(
             "Government and Auction Land for Sale in %s | Landosaur" % st["name"], desc, cat.state_path(st), "".join(body),
             indexable=True, jsonld=[crumb_ld], og="state-%s" % st["code"].lower(),
-            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "map.js", "tables.js"], wide=True,
+            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "geo.js", "watchlist.js", "map.js", "tables.js"], wide=True,
         )
 
     def county(self, st, c, group=None):
@@ -2719,6 +2725,15 @@ class Site(object):
             "/about/", "".join(body), indexable=True, jsonld=[crumb_ld],
         )
 
+    def agent_install(self):
+        return (
+            '<section><h2>Connect Landosaur to an MCP client</h2>'
+            '<p>Use Node.js 22 or later. Configure <code>npx</code> as your client’s stdio command with the following arguments.</p>'
+            '<pre class="agent-prompt"><code>npx --yes --package=%s landosaur-mcp</code></pre>'
+            '<p><a href="%s">OpenAPI 3.1 reference</a> · <a href="%s">Download the MCP package</a></p>'
+            '<p class="small">Search, X-Ray and Atlas are read-only. Creating an alert, publishing a listing and opening a Land Agent order require approval of the submitted details.</p></section>'
+        ) % (esc(self.absu("/data/landosaur-mcp.tgz")), self.u("/openapi.json"), self.u("/data/landosaur-mcp.tgz"))
+
     def data_page(self, files):
         crumbs, crumb_ld = self.crumbs([("Data", "/data/")])
         rows = "".join('<tr><th scope="row"><a href="%s">%s</a></th><td>%s</td></tr>' % (self.u(p), esc(p.rsplit("/", 1)[-1]), esc(d)) for p, d in files)
@@ -2726,6 +2741,7 @@ class Site(object):
             crumbs, "<h1>Open Data Downloads</h1>",
             '<p class="lede">Download Landosaur\'s complete verified official land catalog as CSV or JSON. Facts belong to the public agencies that publish them; confirm terms before reusing agency data.</p>',
             '<div class="scroll"><table class="data"><thead><tr><th scope="col">File</th><th scope="col">Contents</th></tr></thead><tbody>%s</tbody></table></div>' % rows,
+            self.agent_install(),
             '<p>Atom feeds: <a href="%s">all new listings</a>, plus one feed per tracked state under <code>/feeds/</code>.</p>' % self.u("/feeds/new.xml"),
         ]
         return self.layout(

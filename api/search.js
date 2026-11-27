@@ -46,7 +46,8 @@ async function loadOfficialRows(origin) {
   if (cachedOfficial.rows.length && now - cachedOfficial.at < CACHE_TTL_MS) {
     return cachedOfficial.rows;
   }
-  const res = await fetch(`${origin}/data/map.json`, {
+  const dep = encodeURIComponent(process.env.VERCEL_DEPLOYMENT_ID || String(Math.floor(now / 60000)));
+  const res = await fetch(`${origin}/data/map.json?v=${dep}`, {
     headers: { "User-Agent": "Landosaur-Search/1.0" },
     signal: AbortSignal.timeout(8000),
   });

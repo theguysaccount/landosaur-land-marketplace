@@ -8,6 +8,7 @@ previous owners, no photographs, no marketing text. Prices are never invented: a
 """
 import csv
 import datetime
+import hashlib
 import html
 import io
 import json
@@ -5330,6 +5331,148 @@ def caltrans_surplus(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+MA_LAND_FOR_HOMES = "https://www.mass.gov/info-details/state-land-for-homes"
+MA_AUCTION_COUNTIES = {"Billerica": "Middlesex", "Milford": "Worcester", "Rowley": "Essex"}
+
+
+def parse_ma_land_for_homes(page, now):
+    from zoneinfo import ZoneInfo
+
+    section = re.search(r'<h3\b[^>]*\bid="upcoming-auction"[^>]*>(.*?)</div>', page, re.I | re.S)
+    if not section:
+        if "Development Opportunities" in page:
+            return []
+        raise StructureError("Massachusetts State Land for Homes auction section changed")
+    when = re.search(r"\bavailable at auction on (?:\w+,\s*)?"
+                     r"([A-Za-z]+ \d{1,2}, \d{4}) at (\d{1,2}(?::\d{2})?\s*[ap]m)\b", clean(section[1]), re.I)
+    if not when:
+        raise StructureError("Massachusetts public land auction time changed")
+    zone = ZoneInfo("America/New_York")
+    start_time = when[2].replace(" ", "")
+    time_pattern = "%I:%M%p" if ":" in start_time else "%I%p"
+    start = datetime.datetime.strptime(when[1] + " " + start_time, "%B %d, %Y " + time_pattern).replace(tzinfo=zone)
+    if start.date() < now.astimezone(zone).date():
+        return []
+    lots = re.split(r'<a\b[^>]*href="(/doc/state-land-for-homes-flyer-[a-z0-9-]+/download)"[^>]*>(.*?)</a>',
+                    section[1], flags=re.I | re.S)[1:]
+    rows = []
+    for link, label, description in zip(lots[::3], lots[1::3], lots[2::3]):
+        description = clean(description)
+        if not re.search(r"\b(?:vacant|undeveloped)\b", description, re.I):
+            continue
+        acres = re.search(r"\b([\d.]+)\s*-?\s*acres?\b", description, re.I)
+        address = clean(label)
+        if not acres or ", " not in address:
+            continue
+        city = address.rsplit(", ", 1)[1]
+        url = MA_LAND_FOR_HOMES + "#upcoming-auction"
+        rows.append({
+            "id": "ma-dcamm-" + slug(address), "source": "massachusetts-land-for-homes",
+            "title": "%s (Massachusetts surplus land auction)" % address,
+            "state": "MA", "county": MA_AUCTION_COUNTIES.get(city, ""), "locality": city, "apn": "",
+            "address": address, "acres": number(acres[1]), "price": None, "price_kind": "none",
+            "offering": "auction", "status": "auction_terms", "deadline": None,
+            "offer_close_date": start.date().isoformat(), "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Available at the Commonwealth's public land auction", "="),
+                      fact("sale_program", "State Land for Homes", urllib.parse.urljoin(MA_LAND_FOR_HOMES, link)),
+                      fact("auction_start", start.strftime("%B %d, %Y at %I:%M %p %Z"), "=")],
+            "tags": ["state surplus land", "housing development"],
+        })
+    return rows
+
+
+def massachusetts_land_for_homes(fetch, now, warn):
+    rows = parse_ma_land_for_homes(fetch.text(MA_LAND_FOR_HOMES), now)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+LAKOTA_ND_LOTS = "https://www.lakota-nd.com/?SEC=12104B06-4E76-49CC-934C-4ACF2D87FF55"
+LAKOTA_HULSTRAND_PLAT = "4497819287fc44b19312041ba46db37ef18f56e461973a119e41b120ee3824e3"
+# Square footage transcribed from the city's published plat. Verify the file before using it.
+LAKOTA_HULSTRAND_SQFT = {"1": 36337, "2": 34733, "3": 34733, "4": 34733}
+
+
+def parse_lakota_lots(page):
+    text = clean(page)
+    rate = re.search(r"All residential city lots are sold for \$([\d.]+)/SF\b", text, re.I)
+    section = re.search(r"<h2>Hulstrand Addition</h2>(.*?)</aside>", page, re.I | re.S)
+    if not rate or not section or not number(rate[1]):
+        raise StructureError("Lakota residential lot program format changed")
+    lots = re.search(r"\bLots? ([\d\s,&]+?) (?:is|are) for sale\.", clean(section[1]), re.I)
+    plat = re.search(r'<img\b[^>]*src="([^\"]+)"[^>]*alt="Hulstrand Addition"', section[1], re.I)
+    if not lots or not plat:
+        raise StructureError("Lakota lot availability or plat is missing")
+    numbers = re.findall(r"\d+", lots[1])
+    if any(lot not in LAKOTA_HULSTRAND_SQFT for lot in numbers):
+        raise StructureError("Lakota lists a lot absent from the verified plat")
+    return number(rate[1]), numbers, urllib.parse.urljoin(LAKOTA_ND_LOTS, html.unescape(plat[1]))
+
+
+def lakota_nd_lots(fetch, now, warn):
+    rate, lots, plat = parse_lakota_lots(fetch.text(LAKOTA_ND_LOTS))
+    if hashlib.sha256(fetch.bytes(plat)).hexdigest() != LAKOTA_HULSTRAND_PLAT:
+        raise StructureError("Lakota subdivision plat changed and the lot sizes need review")
+    rows = []
+    for lot in lots:
+        sqft = LAKOTA_HULSTRAND_SQFT[lot]
+        rows.append({
+            "id": "nd-lakota-hulstrand-" + lot, "source": "lakota-nd-lots",
+            "title": "Hulstrand Addition lot %s, Lakota" % lot,
+            "state": "ND", "county": "Nelson", "locality": "Lakota", "apn": "", "address": "",
+            "acres": round(sqft / 43560, 4), "price": round(sqft * rate, 2), "price_kind": "application",
+            "offering": "sale", "status": "listed", "deadline": None,
+            "url": LAKOTA_ND_LOTS, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", "Hulstrand Addition Lot " + lot, plat),
+                      fact("acreage", "{:,} square feet on the city plat".format(sqft), plat),
+                      fact("price", "City price of $%.2f per square foot" % rate, "="),
+                      fact("sale_program", "Construction must start within 18 months of sale", "=")],
+            "tags": ["city residential lot", "construction required"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+PRINCETON_MN_SALE = "https://princetonmn.org/city-owned-properties"
+
+
+def parse_princeton_industrial(brochure):
+    rate = re.search(r"\bSale Price Per Lot:\s*\$([\d,.]+) per acre", brochure, re.I)
+    parcels = re.findall(r"\bPID \d+:\s*(\d{2}-\d{3}-\d{4})\s+([\d.]+) acres\b", brochure, re.I)
+    if not rate or not parcels or "lots available for industrial development" not in brochure.lower():
+        raise StructureError("Princeton Business Park brochure format changed")
+    return [(pid, number(acres), round(number(acres) * number(rate[1]), 2)) for pid, acres in parcels]
+
+
+def princeton_mn_lots(fetch, now, warn):
+    page = fetch.text(PRINCETON_MN_SALE)
+    text = clean(page)
+    if "City Owned Properties For Sale" not in text:
+        raise StructureError("Princeton city lot listings format changed")
+    rows = []
+    brochure = re.search(r'<a\b[^>]*href="([^"]+)"[^>]*>\s*Two Lots Sale of Land Brochure\s*</a>', page, re.I)
+    if brochure and "two City owned lots currently for sale" in text:
+        url = urllib.parse.urljoin(PRINCETON_MN_SALE, html.unescape(brochure[1]).strip())
+        for pid, acres, price in parse_princeton_industrial(pdf_text(fetch, url, extraction_mode="plain")):
+            rows.append((pid, acres, price, "application", "Princeton Business Park", url))
+    commercial = re.search(r"Commercial Lot for Sale.{0,900}?Sale Price per Lot: Lot Size: \$([\d,.]+) "
+                           r"PID: (\d{2}-\d{3}-\d{4}) .{0,80}? or ([\d.]+) acres", text, re.I)
+    if commercial:
+        rows.append((commercial[2], number(commercial[3]), number(commercial[1]), "cash", "7th Avenue North", PRINCETON_MN_SALE))
+    result = []
+    for pid, acres, price, kind, location, proof in rows:
+        result.append({
+            "id": "mn-princeton-" + slug(pid), "source": "princeton-mn-lots",
+            "title": "%s parcel %s, Princeton" % (location, pid),
+            "state": "MN", "county": "Mille Lacs", "locality": "Princeton", "apn": pid, "address": "",
+            "acres": acres, "price": price, "price_kind": kind, "offering": "sale", "status": "listed",
+            "deadline": None, "url": PRINCETON_MN_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", pid, proof), fact("acreage", "%g acres" % acres, proof),
+                      fact("sale_program", "Industrial development required" if kind == "application" else
+                           "Commercial lot for sale by the City", "=")],
+            "tags": ["city development land", "industrial site" if kind == "application" else "commercial site"],
+        })
+    return result, {"complete": True, "upstream_total": len(result)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -5356,11 +5499,11 @@ SOURCES = [
      "url": LOU_URL, "state": "KY", "run": louisville_landbank,
      "about": "Available vacant landbank lots with official buildability flags. Eligible My New Side Yard lots carry the published conditional price."},
     {"id": "la-county-ttc", "name": "Los Angeles County Tax-Defaulted Land Auctions", "agency": "Los Angeles County Treasurer & Tax Collector",
-     "url": LA_TTC_URL, "state": "CA", "run": la_county_ttc,
-     "about": "Tax-defaulted vacant land auction parcels in Los Angeles County with published minimum bids, zoning, acreage, and GIS parcel outlines."},
+     "url": LA_TTC_URL, "state": "CA", "run": la_county_ttc, "historical_only": True,
+     "about": "The original 2026 A and B auction events closed. The County publishes a separate catalog for the follow-up auction."},
     {"id": "broward-surplus", "name": "Broward County Surplus Real Property", "agency": "Broward County Board of County Commissioners",
-     "url": "https://web.bcpa.net/BcpaClient/#/Record-Search", "state": "FL", "run": broward_surplus,
-     "about": "County-owned surplus real property parcels in Broward County with GIS polygon outlines and direct Property Appraiser folio records."},
+     "url": "https://www.broward.org/realproperty", "state": "FL", "run": broward_surplus, "historical_only": True,
+     "about": "The County surplus inventory includes multiple land uses and has no current sale status. Contact the Real Property Section for availability."},
     {"id": "orange-county-fl", "name": "Orange County Active Tax Deed Sales", "agency": "Orange County Comptroller / Tax Deed Sales",
      "url": ORANGE_FL_URL, "state": "FL", "run": orange_county_fl,
      "about": "Active scheduled tax deed auction parcels in Orange County, Florida with posted upcoming auction dates and coordinates."},
@@ -5389,11 +5532,11 @@ SOURCES = [
      "url": SANMIGUEL_CO_URL, "state": "CO", "run": san_miguel_co, "historical_only": True,
      "about": "This county ownership map needs a match to a current sale or proposal notice."},
     {"id": "navajo-county-az", "name": "Navajo County Back-Tax Auction Properties", "agency": "Navajo County, Arizona",
-     "url": NAVAJO_AZ_URL, "state": "AZ", "run": navajo_county_az,
-     "about": "Rural Arizona back-tax auction parcels with GIS outlines and direct official auction links."},
+     "url": NAVAJO_AZ_URL, "state": "AZ", "run": navajo_county_az, "historical_only": True,
+     "about": "The prior auction layer points to an earlier catalog. The County publishes a separate notice for the next sale."},
     {"id": "baton-rouge-la", "name": "East Baton Rouge Adjudicated Tax-Sale Land", "agency": "City-Parish of East Baton Rouge, Louisiana",
-     "url": EBR_LA_URL, "state": "LA", "run": baton_rouge_la,
-     "about": "Adjudicated tax-sale vacant parcels published by East Baton Rouge Parish Open Data."},
+     "url": "https://www.brla.gov/455/adjudicated-property", "state": "LA", "run": baton_rouge_la, "historical_only": True,
+     "about": "The assessor’s roll records adjudication. The Parish posts separate notices identifying properties that can be bid on at the next sale."},
     {"id": "cherry-hill-nj", "name": "Cherry Hill Township Vacant Lots", "agency": "Cherry Hill Township, New Jersey",
      "url": CHERRYHILL_NJ_URL, "state": "NJ", "run": cherry_hill_nj, "historical_only": True,
      "about": "This township ownership map needs a match to a current sale notice."},
@@ -5572,8 +5715,30 @@ SOURCES = [
      "agency": "California Department of Transportation", "url": CALTRANS_LAND, "state": "CA",
      "run": caltrans_surplus, "requires_sale_match": True,
      "about": "Current sealed-bid land auction brochures with a published minimum bid and a future bid deadline."},
+    {"id": "massachusetts-land-for-homes", "name": "Massachusetts State Land for Homes private development auctions",
+     "agency": "Massachusetts Division of Capital Asset Management and Maintenance", "url": MA_LAND_FOR_HOMES, "state": "MA",
+     "run": massachusetts_land_for_homes, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Vacant land in the Commonwealth's upcoming public housing-development auctions. Follow the official notice for auction terms."},
+    {"id": "lakota-nd-lots", "name": "Lakota, North Dakota municipal housing lots",
+     "agency": "City of Lakota, North Dakota", "url": LAKOTA_ND_LOTS, "state": "ND",
+     "run": lakota_nd_lots, "requires_sale_match": True,
+     "about": "City lots listed as for sale with the city's per-square-foot price applied to the published subdivision plat."},
+    {"id": "princeton-mn-lots", "name": "Princeton, Minnesota municipal development lots",
+     "agency": "City of Princeton, Minnesota", "url": PRINCETON_MN_SALE, "state": "MN",
+     "run": princeton_mn_lots, "requires_sale_match": True,
+     "about": "City and economic development authority industrial and commercial lots currently posted for sale."},
 ]
 NOT_CARRIED = [
+    ("Los Angeles County 2026B follow-up auction", "https://ttc.lacounty.gov/schedule-of-upcoming-auctions/",
+     "The county links to a separate GovEase catalog for this sale. Its robots.txt disallows the listing path."),
+    ("Navajo County back-tax auction notice", "https://www.navajocountyaz.gov/197/Back-Tax-Land",
+     "The county robots.txt endpoint returned HTTP 403. The prior GIS auction catalog could not verify the upcoming sale."),
+    ("Spokane County foreclosure listings", "https://www.spokanecounty.gov/4156/Real-Property-Auctions",
+     "The county robots.txt endpoint returned HTTP 403."),
+    ("Miami-Dade public surplus land", "https://www.miamidade.gov/global/strategic-procurement/real-estate.page",
+     "The public listing pages returned HTTP 403 to automated reads."),
+    ("Nevada DOT surplus land", "https://www.dot.nv.gov/doing-business/right-of-way/surplus-property-sales",
+     "Automated reads are skipped because the site's robots.txt returned HTTP 403."),
     ("Macon-Bibb Land Bank inventory", "https://maconlandbank.org/available-inventory/",
      "The sale page identifies the official price, but robots.txt disallows the table endpoint that contains the individual properties."),
     ("Shelby County, Cook County, Metro Atlanta, Waterbury and Greater Syracuse land bank portals",

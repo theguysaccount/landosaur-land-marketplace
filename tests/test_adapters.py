@@ -142,6 +142,33 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertNotIn("Private Test Contact", repr(row))
         self.assertIsNone(adapters.parse_caltrans_brochure(brochure, url, NOW + datetime.timedelta(days=100)))
 
+    def test_ma_land_for_homes_omits_houses_and_prior_auctions(self):
+        page = ('<div><h3 id="upcoming-auction">Upcoming Auction</h3>'
+                '<p>Parcels will be available at auction on <strong>Wednesday, December 2, 2026 at 11am</strong>.</p>'
+                '<p><a href="/doc/state-land-for-homes-flyer-billerica/download">0 Test Road, Billerica</a> '
+                'A vacant ±2.7-acre lot. <a href="/doc/state-land-for-homes-flyer-rowley/download">'
+                '1 Test Road, Rowley</a> – An existing home on a 3-acre tract.</p></div>')
+        rows = adapters.parse_ma_land_for_homes(page, NOW)
+        self.assertEqual([(r["county"], r["acres"], r["price"], r["offer_close_date"]) for r in rows],
+                         [("Middlesex", 2.7, None, "2026-12-02")])
+        self.assertEqual(adapters.parse_ma_land_for_homes(page, NOW + datetime.timedelta(days=30)), [])
+
+    def test_lakota_lot_numbers_and_city_rate_use_current_sale_notice(self):
+        page = ('<p>All residential city lots are sold for $.25/SF and require construction.</p>'
+                '<aside><h2>Hulstrand Addition</h2><p>Lots 2 &amp; 3 are for sale.</p>'
+                '<img src="/plat.jpg" alt="Hulstrand Addition"></aside>')
+        self.assertEqual(adapters.parse_lakota_lots(page),
+                         (0.25, ["2", "3"], "https://www.lakota-nd.com/plat.jpg"))
+        with self.assertRaises(adapters.StructureError):
+            adapters.parse_lakota_lots(page.replace("2 &amp; 3", "7 &amp; 8"))
+
+    def test_princeton_price_uses_each_official_tracts_area(self):
+        brochure = ("Two lots available for industrial development.\n"
+                    "Sale Price Per Lot: $50,000 per acre\n"
+                    "PID 1:  24-687-0020 4.06 Acres\nPID 2:  24-687-0030 6.28 Acres")
+        self.assertEqual(adapters.parse_princeton_industrial(brochure),
+                         [("24-687-0020", 4.06, 203000), ("24-687-0030", 6.28, 314000)])
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,

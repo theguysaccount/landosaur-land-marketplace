@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T23:12:46Z",
+ "checked": "2026-11-27T23:30:47Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -651,6 +651,24 @@
    "upstream_total": 81,
    "url": "https://ttc.lacounty.gov/auction-general-information/"
   },
+  "lakota-nd-lots": {
+   "about": "City lots listed as for sale with the city's per-square-foot price applied to the published subdivision plat.",
+   "agency": "City of Lakota, North Dakota",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:29:51Z",
+   "last_success": "2026-11-27T23:29:51Z",
+   "message": "",
+   "name": "Lakota, North Dakota municipal housing lots",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 12,
+   "state": "ND",
+   "upstream_total": 2,
+   "url": "https://www.lakota-nd.com/?SEC=12104B06-4E76-49CC-934C-4ACF2D87FF55"
+  },
   "las-cruces-nm": {
    "about": "City-owned vacant land parcels in Do\u00f1a Ana County, New Mexico with GIS outlines and acreage.",
    "agency": "City of Las Cruces, New Mexico",
@@ -740,6 +758,24 @@
    "state": "OH",
    "upstream_total": 43,
    "url": "https://co.lucas.oh.us/262/Forfeited-Land-Sale"
+  },
+  "massachusetts-land-for-homes": {
+   "about": "Vacant land in the Commonwealth's upcoming public housing-development auctions. Follow the official notice for auction terms.",
+   "agency": "Massachusetts Division of Capital Asset Management and Maintenance",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:19:36Z",
+   "last_success": "2026-11-27T23:19:36Z",
+   "message": "",
+   "name": "Massachusetts State Land for Homes private development auctions",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 1,
+   "state": "MA",
+   "upstream_total": 3,
+   "url": "https://www.mass.gov/info-details/state-land-for-homes"
   },
   "maui-hi": {
    "about": "Vacant government-owned parcels in West Maui with Tax Map Key (TMK) IDs, acreage, and GIS outlines.",
@@ -1102,6 +1138,24 @@
    "state": "OR",
    "upstream_total": 40,
    "url": "https://www.portland.gov/"
+  },
+  "princeton-mn-lots": {
+   "about": "City and economic development authority industrial and commercial lots currently posted for sale.",
+   "agency": "City of Princeton, Minnesota",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-27T23:30:47Z",
+   "last_success": "2026-11-27T23:30:47Z",
+   "message": "",
+   "name": "Princeton, Minnesota municipal development lots",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 12,
+   "state": "MN",
+   "upstream_total": 3,
+   "url": "https://princetonmn.org/city-owned-properties"
   },
   "richmond-va": {
    "about": "City-owned vacant surplus properties in Richmond, Virginia with GIS outlines and lot area.",

@@ -67,8 +67,10 @@ class Catalog(object):
                 if src.get("historical_only"):
                     r["status"] = "availability_unverified"
                     r["price"], r["price_kind"], r["deadline"] = None, "none", None
-                    r["facts"] = [f for f in r["facts"] if f["topic"] not in
-                                  ("availability", "price", "sale_program", "deadline")]
+                    r["facts"] = [f for f in r["facts"] if f["topic"] not in (
+                        "availability", "price", "minimum_bid", "sale_program", "auction_item",
+                        "deadline", "bid_deadline", "auction_start",
+                    )]
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
                 if r["status"] in ("auction_open", "proposal_open") and r.get("deadline"):
                     dl = parse_time(r["deadline"])

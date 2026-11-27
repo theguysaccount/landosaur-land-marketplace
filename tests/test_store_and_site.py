@@ -82,6 +82,9 @@ class RefreshAndBuildTest(unittest.TestCase):
     def test_unverified_offers_and_elapsed_local_close_dates_are_inactive(self):
         archived = listing(1, source="delaware-in", price=500, price_kind="min_bid",
                            status="auction_terms", deadline="2026-12-05T00:00:00Z")
+        archived["facts"] = [{"topic": "minimum_bid", "value": "$500", "url": "="},
+                             {"topic": "auction_item", "value": "Item #1", "url": "="},
+                             {"topic": "parcel_number", "value": "00123456", "url": "="}]
         dated = listing(2, source="salt-lake-county-surplus", status="auction_terms",
                         offer_close_date="2026-11-26")
         proposal = listing(3, source="california-dgs", status="proposal_open",
@@ -95,7 +98,7 @@ class RefreshAndBuildTest(unittest.TestCase):
         self.assertEqual([r["id"] for r in catalog.current()], [dated["id"]])
         self.assertEqual(catalog.by_id[archived["id"]]["status"], "availability_unverified")
         self.assertIsNone(catalog.by_id[archived["id"]]["price"])
-        self.assertEqual(catalog.by_id[archived["id"]]["facts"], [])
+        self.assertEqual([fact["topic"] for fact in catalog.by_id[archived["id"]]["facts"]], ["parcel_number"])
         self.assertEqual(Catalog(self.data, now=still_open + datetime.timedelta(hours=8)).current(), [])
 
     def test_failing_source_keeps_last_good_data_and_site_builds_with_sitemap_index(self):

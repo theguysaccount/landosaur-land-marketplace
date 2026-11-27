@@ -575,9 +575,12 @@ def build(dist, data_dir=None, now=None, log=print):
     for row in cur:
         state_counts[row["state"]] = state_counts.get(row["state"], 0) + 1
     status = dict(cat.status)
-    status["sources"] = {source: dict(info, active_count=cat.active_by_source.get(source, 0),
-                                      archived=bool(cat.sources.get(source, {}).get("historical_only")))
-                         for source, info in cat.status.get("sources", {}).items()}
+    status["sources"] = {}
+    for source, info in cat.status.get("sources", {}).items():
+        registry = cat.sources.get(source, {})
+        public_info = {field: registry[field] for field in ("name", "agency", "state", "url", "about") if field in registry}
+        status["sources"][source] = dict(info, **public_info, active_count=cat.active_by_source.get(source, 0),
+                                         archived=bool(registry.get("historical_only")))
     status["site"] = {
         "base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cur),
         "new": len(new), "closing_soon": len(cat.closing()), "guides": len(site.guides),

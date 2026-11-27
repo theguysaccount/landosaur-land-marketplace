@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T20:03:52Z",
+ "checked": "2026-11-27T21:26:58Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -963,8 +963,8 @@
    "complete": true,
    "count": 500,
    "failures": 0,
-   "last_attempt": "2026-11-27T20:03:52Z",
-   "last_success": "2026-11-27T20:03:52Z",
+   "last_attempt": "2026-11-27T21:26:58Z",
+   "last_success": "2026-11-27T21:26:58Z",
    "message": "",
    "name": "Sauk County Tax-Forfeited Land For Sale",
    "notes": [],

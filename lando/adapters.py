@@ -4428,7 +4428,9 @@ def parse_sauk_wi_features(features, warn):
         if not pid or pid in seen:
             continue
         seen.add(pid)
-        addr = clean(str(a.get("SITEADDRESS") or a.get("PSTLADDRESS") or "")).title()
+        addr = clean(str(a.get("SITEADDRESS") or "")).title()
+        if re.match(r"^p\.?\s*o\.?\s*box\b", addr, re.I):
+            addr = ""
         acres = number(a.get("TOTALACREAGE"))
         url = clean(str(a.get("URL") or ""))
         if not url.startswith("https://") or "co.sauk.wi.us" not in url:
@@ -4449,7 +4451,7 @@ def parse_sauk_wi_features(features, warn):
             "state": "WI", "county": "Sauk", "locality": "Baraboo", "apn": pid,
             "acres": round(acres, 4) if acres else None, "price": None, "price_kind": "none",
             "offering": "sale", "status": "listed", "deadline": None, "url": url,
-            "address": addr, "lat": 43.471, "lon": -89.744, "geometry": None, "facts": facts,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
             "tags": ["tax forfeited", "rural land", "wisconsin"],
         }
         if rings:
@@ -4460,7 +4462,7 @@ def parse_sauk_wi_features(features, warn):
 
 def sauk_county_wi(fetch, now, warn):
     feats = _arcgis_paged(fetch, SAUK_WI_GIS, "1=1",
-                          "OBJECTID,PARCELID,SITEADDRESS,PSTLADDRESS,URL,TOTALACREAGE", max_total=500, page_size=200)
+                          "OBJECTID,PARCELID,SITEADDRESS,URL,TOTALACREAGE", max_total=500, page_size=200)
     rows = parse_sauk_wi_features(feats, warn)
     if not rows:
         raise StructureError("no Sauk County WI parcels")

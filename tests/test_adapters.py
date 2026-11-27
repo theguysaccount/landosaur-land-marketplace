@@ -431,3 +431,15 @@ class GeometryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SaukTest(unittest.TestCase):
+    def test_uses_only_parcel_situs_and_geometry(self):
+        rows = adapters.parse_sauk_wi_features([
+            {"attributes": {"PARCELID": "101", "PSTLADDRESS": "Mailing address"}},
+            {"attributes": {"PARCELID": "102", "SITEADDRESS": "P.O. Box 18"}},
+            {"attributes": {"PARCELID": "103", "SITEADDRESS": "1 COUNTY ROAD"}},
+        ], lambda message: None)
+        self.assertEqual([row["address"] for row in rows], ["", "", "1 County Road"])
+        self.assertTrue(all(row["lat"] is None and row["lon"] is None for row in rows))
+        self.assertNotIn("Mailing address", repr(rows))

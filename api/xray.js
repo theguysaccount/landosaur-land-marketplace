@@ -759,7 +759,7 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate, roads, public
   return uses;
 }
 
-async function geocodeUS(query) {
+export async function geocodeUS(query) {
   const q = String(query || "").trim();
   if (!q || q.length < 2 || q.length > 160) return null;
   const coordMatch = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,\s]+\s*(-?\d+(?:\.\d+)?)\s*$/);

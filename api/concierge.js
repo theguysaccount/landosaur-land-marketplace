@@ -4,7 +4,7 @@
 
 import { list, put } from "@vercel/blob";
 import crypto from "node:crypto";
-import { geocodeLocation, runXray } from "./xray.js";
+import { geocodeUS, runXray } from "./xray.js";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -158,7 +158,7 @@ export async function POST(request) {
     let lat = Number(body.lat);
     let lon = Number(body.lon);
     if ((!Number.isFinite(lat) || !Number.isFinite(lon)) && location) {
-      const geo = await geocodeLocation(location).catch(() => null);
+      const geo = await geocodeUS(location).catch(() => null);
       if (geo) {
         lat = geo.lat;
         lon = geo.lon;

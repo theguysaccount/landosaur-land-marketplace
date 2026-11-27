@@ -955,6 +955,10 @@ table.sortable thead th { cursor: pointer; user-select: none; }
 table.sortable th[aria-sort="ascending"]::after { content: " \25B2"; font-size: 10px; color: var(--forest); }
 table.sortable th[aria-sort="descending"]::after { content: " \25BC"; font-size: 10px; color: var(--forest); }
 table.facts td:first-of-type { overflow-wrap: anywhere; }
+table.compare-matrix th:first-child { min-width: 155px; }
+table.compare-matrix td, table.compare-matrix thead th { min-width: 185px; }
+table.compare-matrix .col-ours { background: var(--lime-soft); color: var(--ink); }
+table.compare-matrix thead th.col-ours { color: var(--forest); }
 .note { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
 /* Worksheet & Analyzer Workbench */

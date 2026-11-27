@@ -482,8 +482,8 @@ def compute_benchmarks(cat):
             ),
         ),
         (
-            "How does Landosaur differ from commercial land marketplaces?",
-            "Unlike commercial brokerage portals that aggregate paid broker ads, Landosaur reads only official public-agency inventories (never commercial MLS scrapes) and never brokers land or invents asking prices. Every parcel links straight to its source government agency, labels minimum bids separately from fixed prices, pairs parcels with 50-state USDA/FHFA land price benchmarks and a full deal analyzer, and offers free bulk CSV/JSON downloads.",
+            "How does Landosaur differ from LandWatch, LandSearch, Land.com, and Zillow Land?",
+            "Commercial land portals such as LandWatch, LandSearch, Land.com, and Zillow Land primarily aggregate paid broker, MLS, and seller classifieds routed through agent lead forms. Landosaur reads official public-agency inventories (tax-sale auctions, state trust land, and municipal land banks) directly across all 50 states alongside free direct owner/agent listings, links every public parcel straight to its source agency portal, includes a free 9-agency Federal Parcel X-Ray (USGS LiDAR, FEMA flood/hazard, wetlands, USDA soils, roads, public lands, NASA solar) and 50-state USDA/FHFA land price benchmarks, and provides open CSV/JSON downloads and a public search API.",
         ),
         (
             "Does Landosaur sell, broker, or take commissions on government land?",

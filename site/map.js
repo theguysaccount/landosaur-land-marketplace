@@ -251,6 +251,7 @@
           "&mode=" + (isAuc ? "auction" : (r[5] === "cash" ? "buy_now" : "landbank"));
         var agBtn = el("a", "chip-btn chip-link", "Land Agent ($20)");
         agBtn.href = base + "/services/" + agQ;
+        agBtn.setAttribute("data-vital-event", "offer_clicked");
         acts.appendChild(agBtn);
       }
       var isSaved = savedIds.indexOf(r[0]) >= 0;
@@ -273,6 +274,7 @@
         acts.appendChild(zBtn);
         var xLink = el("a", "chip-btn chip-link", "X-Ray");
         xLink.href = base + "/xray/#lat=" + r[1] + "&lon=" + r[2];
+        xLink.setAttribute("data-vital-event", "tool_used");
         acts.appendChild(xLink);
       }
       li.appendChild(acts);

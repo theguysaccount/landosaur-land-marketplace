@@ -1,5 +1,6 @@
 """Load the stored listings and work out what the site shows: current inventory, states, counties, new and closing."""
 import datetime
+from functools import cached_property, lru_cache
 import json
 import os
 import re
@@ -21,6 +22,7 @@ STATE_NAMES = {
 PAGE_SIZE = 250
 
 
+@lru_cache(maxsize=4096)
 def slugify(text):
     t = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii").lower()
     t = t.replace("'", "").replace(".", "")
@@ -36,6 +38,7 @@ def parse_time(text):
         return None
 
 
+@lru_cache(maxsize=8192)
 def county_key(state, county):
     c = (county or "").lower().replace("saint ", "st. ").replace("st ", "st. ")
     c = re.sub(r"\s+(county|parish|borough|census area|municipality|city and borough)$", "", c).strip()
@@ -53,10 +56,11 @@ class Catalog(object):
             st = self.status.get("sources", {}).get(src["id"], {})
             last = parse_time(st.get("last_success"))
             fresh = bool(last and (self.now - last).days < config.CURRENT_DAYS)
+            checked = last.strftime("%Y-%m-%d") if last else ""
             for r in store.load_listings(src["id"], self.data_dir):
                 if r.get("missing"):
                     continue          # not seen by the latest complete read: waiting for a second confirmation
-                r["checked"] = last.strftime("%Y-%m-%d") if last else ""
+                r["checked"] = checked
                 r["fresh"] = fresh
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
                 if r["status"] == "auction_open" and r.get("deadline"):
@@ -140,6 +144,10 @@ class Catalog(object):
                       key=lambda r: (r["first_seen"], r["id"]), reverse=True)
 
     def closing(self):
+        return list(self._closing)
+
+    @cached_property
+    def _closing(self):
         out = []
         horizon = self.now + datetime.timedelta(days=config.CLOSING_DAYS)
         for r in self.listings:

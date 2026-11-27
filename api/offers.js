@@ -11,12 +11,12 @@ import { list, put } from "@vercel/blob";
 const LISTING_PREFIX = "direct/listings/";
 const OFFER_PREFIX = "direct/offers/";
 
-function jsonResp(body, status = 200, cache = "no-store") {
-  return new Response(JSON.stringify(body), {
+function jsonResp(body, status = 200) {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": cache,
+      "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
@@ -95,7 +95,7 @@ export async function GET(request) {
     const listing = await readBlobByPath(`${LISTING_PREFIX}${id}.json`);
     if (!listing) return jsonResp({ error: "Listing not found." }, 404);
     const ledger = await readBlobByPath(`${OFFER_PREFIX}${id}.json`);
-    return jsonResp(summarizeLedger(listing, ledger), 200, "no-store");
+    return jsonResp(summarizeLedger(listing, ledger), 200);
   } catch (err) {
     console.error("[offers GET] error:", err);
     return jsonResp({ error: "Unable to fetch bid status." }, 502);

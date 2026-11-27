@@ -3,7 +3,16 @@
 import { launch } from "./cdp.mjs";
 
 const base = (process.argv[2] || "http://localhost:4651").replace(/\/$/, "");
-const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/(xray|listings|offers|concierge|search|alerts)/;
+const externalResourceHosts = new Set([
+  "tile.openstreetmap.org", "basemap.nationalmap.gov", "hazards.fema.gov",
+  "rsio.org", "fonts.googleapis.com", "fonts.gstatic.com",
+]);
+function isExternalResourceError(error) {
+  const url = error.match(/^log: Failed to load resource: .* (https?:\/\/\S+)$/)?.[1];
+  if (!url) return false;
+  const host = new URL(url).hostname;
+  return externalResourceHosts.has(host) || host.endsWith(".tile.openstreetmap.org");
+}
 const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)/.test(base);
 const { page, close } = await launch();
 const results = [];
@@ -94,10 +103,14 @@ try {
   await step("indexing policy matches SITE_INDEXABLE across core hubs", async () => {
     const indexable = await page.eval(`fetch(${JSON.stringify(base)} + "/data/sources.json").then(r => r.json()).then(d => !!d.site.indexable)`);
     const want = indexable ? "index" : "noindex";
-    for (const p of ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
-      await page.goto(base + p);
-      assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith(want), p + " should be " + want);
-    }
+    const paths = ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"];
+    const actual = await page.eval(`Promise.all(${JSON.stringify(paths)}.map(async (path) => {
+      const response = await fetch(${JSON.stringify(base)} + path);
+      if (!response.ok) throw new Error(path + " HTTP " + response.status);
+      const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+      return doc.querySelector('meta[name=robots]')?.content || "";
+    }))`);
+    paths.forEach((path, index) => assert(actual[index].startsWith(want), path + " should be " + want));
   });
   await step("key templates fit a 375px phone screen with zero horizontal overflow", async () => {
     await page.viewport(375, 812, true);
@@ -105,13 +118,18 @@ try {
     const listingRel = new URL(listing, base).pathname.replace(new URL(base + "/").pathname, "/");
     for (const p of ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
+      if (p === "/") await page.waitFor("/listings match/.test(document.getElementById('map-count').textContent)");
+      if (p === "/land-atlas/") await page.waitFor("document.querySelector('#county-explorer-body tr')");
+      if (p === "/tax-sales/") await page.waitFor("document.querySelector('#tax-tbody tr')");
       const w = await page.eval("document.documentElement.scrollWidth");
-      if (w > 376) bad.push(p + " is " + w + "px wide");
+      if (w > 375) bad.push(p + " is " + w + "px wide");
     }
     assert(!bad.length, bad.join("; "));
   });
-  await step("no console errors (external tile/telemetry hosts excluded)", async () => {
-    const errs = page.errors.filter((e) => !TILE_HOSTS.test(e));
+  await step("zero site console errors", async () => {
+    const errs = page.errors.filter((error) => !isExternalResourceError(error));
+    const external = page.errors.length - errs.length;
+    if (external) console.log(`Observed ${external} external map tile or font request errors`);
     assert(!errs.length, errs.slice(0, 5).join(" | "));
   });
 } finally {

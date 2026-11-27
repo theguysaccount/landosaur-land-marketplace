@@ -4,7 +4,9 @@
 Every number on every page comes strictly from stored official agency inventories,
 USDA NASS 2010-2026 datasets, or the 3,115-county US County Land Index. Zero fabricated figures.
 """
+from functools import cached_property
 import html
+from itertools import islice
 import json
 import os
 import urllib.parse
@@ -72,6 +74,7 @@ def listing_is_indexable(r):
 class Site(object):
     def __init__(self, catalog):
         self.cat = catalog
+        self.related_candidates = {}
         self.base = config.base_path()
         self.benchmarks = research.compute_benchmarks(catalog)
         self.market = market_mod.MarketData(catalog)
@@ -150,10 +153,22 @@ class Site(object):
             )
             for p, t, is_cta, ev in nav_items
         )
+        tail = "".join('<script src="%s" defer></script>' % self.u("/assets/" + s) for s in (("theme.js",) + tuple(scripts)))
+        if config.GOATCOUNTER:
+            tail += '<script data-goatcounter="%s" async src="https://gc.zgo.at/count.js"></script>' % esc(config.GOATCOUNTER)
+        return (
+            '<!doctype html><html lang="en"><head>%s</head><body data-base="%s"><a class="skip" href="#main">Skip to content</a>'
+            '<header><div class="wrap"><a class="brand" href="%s">%s<span>Landosaur</span></a>'
+            '<nav aria-label="Main">%s<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle light or dark theme">☾ Theme</button></nav></div></header>'
+            '<main id="main" class="wrap%s">%s</main>%s%s</body></html>'
+        ) % ("".join(head), esc(self.base), self.u("/"), DINO, nav, " wide" if wide else "", body, self.footer, tail)
+
+    @cached_property
+    def footer(self):
         extra = ""
         if config.SUPPORT_URL:
             extra += ' · <a href="%s" rel="noopener sponsored">Support Landosaur</a>' % esc(config.SUPPORT_URL)
-        foot = (
+        return (
             '<footer><div class="wrap"><p class="notice">%s</p>'
             '<p>Official agencies tracked (%d): %s. <a href="%s">How sources are read</a>.</p>'
             '<p>County land values across 3,115 U.S. counties: <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
@@ -170,15 +185,6 @@ class Site(object):
             self.u("/research/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
-        tail = "".join('<script src="%s" defer></script>' % self.u("/assets/" + s) for s in (("theme.js",) + tuple(scripts)))
-        if config.GOATCOUNTER:
-            tail += '<script data-goatcounter="%s" async src="https://gc.zgo.at/count.js"></script>' % esc(config.GOATCOUNTER)
-        return (
-            '<!doctype html><html lang="en"><head>%s</head><body data-base="%s"><a class="skip" href="#main">Skip to content</a>'
-            '<header><div class="wrap"><a class="brand" href="%s">%s<span>Landosaur</span></a>'
-            '<nav aria-label="Main">%s<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle light or dark theme">☾ Theme</button></nav></div></header>'
-            '<main id="main" class="wrap%s">%s</main>%s%s</body></html>'
-        ) % ("".join(head), esc(self.base), self.u("/"), DINO, nav, " wide" if wide else "", body, foot, tail)
 
     def crumbs(self, trail):
         items = [("Map", "/")] + trail
@@ -407,10 +413,13 @@ class Site(object):
         n_src = sum(1 for s in cat.status.get("sources", {}).values() if s.get("count"))
         states = sorted({r["state"] for r in cur})
         us_latest = self.market.latest_values("US")
+        coverage = "all 50 U.S. states" if set(STATE_NAMES) - {"DC"} <= set(states) else "%d U.S. states" % len(states)
+        county_count = sum(len(rows) for rows in self.market.counties_by_state.values())
         lede = (
-            "Explore <strong>%s</strong> official government, tax-sale, state trust, and land-bank parcels across %d states (%s), "
-            "plus <strong>50-state USDA/FHFA land price benchmarks</strong> across 3,115 counties, 29 due-diligence guides, and a full land valuation workbench."
-            % ("{:,}".format(len(cur)), len(states), ", ".join(STATE_NAMES[s] for s in states) or "participating states")
+            "Explore <strong>%s</strong> official government, tax-sale, state trust, and land-bank parcels across "
+            "<strong>%s</strong>. Compare USDA/FHFA benchmarks across %s counties, explore interactive charts, "
+            "or hire a <strong>$20 Land Agent</strong> to help acquire a listed or unlisted parcel."
+            % ("{:,}".format(len(cur)), coverage, "{:,}".format(county_count))
         )
         state_tiles = "".join(
             '<a class="state-tile" href="%s"><strong>%s</strong><span>%s active</span><small>%d %s</small></a>' % (
@@ -2219,7 +2228,11 @@ class Site(object):
             ("price", "" if r["price"] is None else r["price"]),
             ("acres", "" if not r["acres"] else r["acres"]),
         ) if v != ""})
-        others = [x for x in county["listings"] if x["id"] != r["id"] and x["available"]][:6]
+        county_path = cat.county_path(st, county)
+        if county_path not in self.related_candidates:
+            self.related_candidates[county_path] = list(islice(
+                (item for item in county["listings"] if item["available"]), 7))
+        others = [item for item in self.related_candidates[county_path] if item["id"] != r["id"]][:6]
 
         has_price = r.get("price") is not None and r["price"] > 0
         concierge_fee = round(r["price"] * 0.10, 2) if has_price else None

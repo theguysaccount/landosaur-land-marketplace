@@ -16,12 +16,12 @@ const PREFIX = "direct/listings/";
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-function jsonResp(body, status = 200, cache = "no-store") {
-  return new Response(JSON.stringify(body), {
+function jsonResp(body, status = 200) {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": cache,
+      "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -141,7 +141,7 @@ export async function GET(request) {
     if (id) {
       const item = await loadOneListing(id);
       if (!item) return jsonResp({ error: "Direct listing not found." }, 404);
-      return jsonResp({ listing: publicView(item) }, 200, "public, s-maxage=15, stale-while-revalidate=60");
+      return jsonResp({ listing: publicView(item) }, 200);
     }
 
     const { configured, listings } = await loadAllDirectListings();
@@ -161,8 +161,7 @@ export async function GET(request) {
         count: filtered.length,
         listings: filtered,
       },
-      200,
-      "public, s-maxage=15, stale-while-revalidate=60"
+      200
     );
   } catch (err) {
     console.error("[listings GET] error:", err);

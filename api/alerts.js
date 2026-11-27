@@ -18,10 +18,10 @@ const DIRECT_PREFIX = "direct/listings/";
 let cachedMap = { at: 0, rows: [] };
 const MAP_TTL_MS = 5 * 60 * 1000;
 
-function jsonResp(body, status = 200, cache = "no-store, max-age=0") {
+function jsonResp(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": cache, ...CORS },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store", ...CORS },
   });
 }
 
@@ -218,7 +218,7 @@ export async function GET(request) {
         status: 200,
         headers: {
           "Content-Type": "application/atom+xml; charset=utf-8",
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=900",
+          "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store",
           ...CORS,
         },
       });

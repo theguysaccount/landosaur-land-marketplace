@@ -847,13 +847,12 @@ export async function runXray(lat, lon) {
   };
 }
 
-function jsonResp(body, status = 200, cacheControl = "no-store") {
+function jsonResp(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": cacheControl,
-      "CDN-Cache-Control": cacheControl,
+      "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
     },
   });
@@ -884,7 +883,7 @@ export async function GET(request) {
     const snappedLon = Math.round(lon * 100000) / 100000;
     const payload = await runXray(snappedLat, snappedLon);
     if (geocode) payload.geocode = geocode;
-    return jsonResp(payload, 200, "public, s-maxage=86400, stale-while-revalidate=604800");
+    return jsonResp(payload, 200);
   } catch (err) {
     console.error("[xray] unhandled error:", err);
     return jsonResp({ error: "Parcel X-Ray temporarily unavailable." }, 502);

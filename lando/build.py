@@ -11,12 +11,13 @@ Generates:
   - CSV/JSON downloads, Atom feeds, Sitemap Index (/sitemap.xml -> /sitemaps/{core,places,listings}.xml),
     robots.txt, llms.txt, IndexNow key file, share cards, and manifest.json.
 """
+from concurrent.futures import ProcessPoolExecutor
 import csv
 import hashlib
 import io
 import json
+import multiprocessing
 import os
-import shutil
 import statistics
 import sys
 
@@ -34,13 +35,35 @@ class Writer(object):
         self.indexable = []
         self.indexable_groups = {"core": [], "places": [], "listings": []}
         self.files = 0
+        self.outputs = set()
+        self.directories = {dist}
 
     def write(self, rel, data, page_path=None, indexable=False, group="core"):
         full = os.path.join(self.dist, rel)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
+        directory = os.path.dirname(full)
+        if directory not in self.directories:
+            parent = os.path.dirname(directory)
+            if parent in self.directories:
+                try:
+                    os.mkdir(directory)
+                except FileExistsError:
+                    if not os.path.isdir(directory):
+                        raise
+            else:
+                os.makedirs(directory, exist_ok=True)
+            self.directories.add(directory)
+        if os.path.islink(full):
+            os.unlink(full)
         raw = data.encode("utf-8") if isinstance(data, str) else data
-        with open(full, "wb") as fh:
-            fh.write(raw)
+        try:
+            with open(full, "rb") as fh:
+                unchanged = fh.read() == raw
+        except FileNotFoundError:
+            unchanged = False
+        if not unchanged:
+            with open(full, "wb") as fh:
+                fh.write(raw)
+        self.outputs.add(rel)
         self.files += 1
         if page_path is not None:
             self.pages[page_path] = hashlib.sha1(raw).hexdigest()[:16]
@@ -51,6 +74,61 @@ class Writer(object):
     def page(self, path, html_, indexable=False, group="core"):
         rel = path.strip("/")
         self.write((rel + "/" if rel else "") + "index.html", html_, path, indexable and config.INDEXABLE, group=group)
+
+    def prune(self):
+        """Delete paths omitted by this build, including withdrawn listing directories."""
+        for directory, children, files in os.walk(self.dist, topdown=False):
+            for name in children:
+                path = os.path.join(directory, name)
+                if os.path.islink(path):
+                    os.unlink(path)
+            for name in files:
+                full = os.path.join(directory, name)
+                if os.path.relpath(full, self.dist) not in self.outputs:
+                    os.unlink(full)
+            if directory != self.dist and directory not in self.directories and not os.listdir(directory):
+                os.rmdir(directory)
+
+
+def init_listing_worker(site):
+    global _listing_site
+    _listing_site = site
+
+
+def write_listing_batch(bounds):
+    site = _listing_site
+    dist, start, end = bounds
+    writer = Writer(dist)
+    for row in site.cat.listings[start:end]:
+        writer.page(site.cat.listing_path(row), site.listing(row),
+                    indexable=listing_is_indexable(row), group="listings")
+    return writer
+
+
+def write_listings(writer, site):
+    listings = site.cat.listings
+    if len(site.cat.by_id) != len(listings):
+        raise ValueError("listing IDs must be unique across all official sources")
+    workers = min(os.cpu_count() or 1, 4)
+    if len(listings) < 5000 or workers < 2 or "fork" not in multiprocessing.get_all_start_methods():
+        for row in listings:
+            writer.page(site.cat.listing_path(row), site.listing(row),
+                        indexable=listing_is_indexable(row), group="listings")
+        return
+
+    # Build workers share the read-only snapshot and write disjoint parcel paths.
+    os.makedirs(os.path.join(writer.dist, "land"), exist_ok=True)
+    size = 350
+    batches = [(writer.dist, start, min(start + size, len(listings))) for start in range(0, len(listings), size)]
+    with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("fork"),
+                             initializer=init_listing_worker, initargs=(site,)) as pool:
+        for result in pool.map(write_listing_batch, batches):
+            writer.pages.update(result.pages)
+            writer.indexable.extend(result.indexable)
+            writer.indexable_groups["listings"].extend(result.indexable)
+            writer.outputs.update(result.outputs)
+            writer.directories.update(result.directories)
+            writer.files += result.files
 
 
 def atom(title, path, listings, cat, updated):
@@ -285,14 +363,17 @@ def _build_atlas_payload(cat, site):
 def build(dist, data_dir=None, now=None, log=print):
     cat = Catalog(data_dir, now)
     site = Site(cat)
-    if os.path.isdir(dist):
-        shutil.rmtree(dist)
-    os.makedirs(dist)
+    os.makedirs(dist, exist_ok=True)
     w = Writer(dist)
     for name in STATIC:
-        os.makedirs(os.path.join(dist, "assets"), exist_ok=True)
-        shutil.copy(os.path.join(config.SITE_SRC, name), os.path.join(dist, "assets", name))
-    shutil.copytree(os.path.join(config.SITE_SRC, "vendor"), os.path.join(dist, "assets", "vendor"))
+        with open(os.path.join(config.SITE_SRC, name), "rb") as fh:
+            w.write("assets/" + name, fh.read())
+    vendor = os.path.join(config.SITE_SRC, "vendor")
+    for directory, _, files in os.walk(vendor):
+        for name in files:
+            full = os.path.join(directory, name)
+            with open(full, "rb") as fh:
+                w.write("assets/vendor/" + os.path.relpath(full, vendor), fh.read())
     with open(os.path.join(config.SITE_SRC, "indexnow-key.txt")) as fh:
         key = fh.read().strip()
     w.write("%s.txt" % key, key)
@@ -344,8 +425,7 @@ def build(dist, data_dir=None, now=None, log=print):
                 w.page(cat.county_path(st, c) + g["slug"] + "/", site.county(st, c, g), indexable=False)
 
     # Individual listing dossiers (priced/deadline-bearing listings indexed in listings child sitemap)
-    for r in cat.listings:
-        w.page(cat.listing_path(r), site.listing(r), indexable=listing_is_indexable(r), group="listings")
+    write_listings(w, site)
 
     # Map JSON & CSV downloads (includes deterministic % vs. USDA/FHFA county benchmark at col 14)
     state_fre = {
@@ -423,10 +503,10 @@ def build(dist, data_dir=None, now=None, log=print):
     os.makedirs(os.path.join(dist, "og"), exist_ok=True)
     for og_name in ["default.png", "research.png", "new.png", "closing.png"] + ["state-%s.png" % st["code"].lower() for st in cat.states.values()]:
         custom = os.path.join(og_custom_dir, og_name)
-        if os.path.exists(custom):
-            shutil.copy(custom, os.path.join(dist, "og", og_name))
-        elif os.path.exists(og_default_src):
-            shutil.copy(og_default_src, os.path.join(dist, "og", og_name))
+        image = custom if os.path.isfile(custom) else og_default_src
+        if os.path.isfile(image):
+            with open(image, "rb") as fh:
+                w.write("og/" + og_name, fh.read())
     w.write("_og/default.html", og_card(
         "Find, map, and value official land for sale",
         "%s listings · 50-state land prices" % "{:,}".format(len(cur)),
@@ -472,6 +552,7 @@ def build(dist, data_dir=None, now=None, log=print):
     w.write("manifest.json", json.dumps({"pages": w.pages, "indexable": sorted(w.indexable), "updated": updated}, sort_keys=True,
                                         separators=(",", ":")))
     w.write(".nojekyll", "")
+    w.prune()
     log("built %d files, %d pages (%d indexable: core=%d places=%d listings=%d), %d listings (%d current) into %s" % (
         w.files, len(w.pages), len(w.indexable),
         len(w.indexable_groups["core"]), len(w.indexable_groups["places"]), len(w.indexable_groups["listings"]),

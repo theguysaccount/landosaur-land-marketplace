@@ -6,11 +6,14 @@ Validates every page (title, description, canonical, 1 h1, not-an-offer notice, 
 working internal links, unique titles), official https agency links and zero previous-owner leaks
 on listing pages/CSV, and exact parity between indexable pages and the sitemap index + child sitemaps.
 """
+from concurrent.futures import ProcessPoolExecutor
+from functools import lru_cache
 import html
 import json
 import os
 import re
 import sys
+from urllib.parse import urlsplit
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -19,7 +22,7 @@ from lando.model import Catalog  # noqa: E402
 from lando.pages import listing_is_indexable  # noqa: E402
 
 HREF = re.compile(r'(?:href|src)="([^"]+)"')
-OFFICIAL = (
+OFFICIAL = {
     "stlouis-mo.gov", "cosl.org", "wisconsin.gov", "alaskamentalhealthtrust.org",
     "alaska.gov", "buildingdetroit.org", "kclandbank.org", "dgs.ca.gov",
     "chicago.gov", "pghlandbank.org", "louisvilleky.gov", "lucascountylandbank.org",
@@ -38,68 +41,106 @@ OFFICIAL = (
     "cityofboise.org", "auburnmaine.gov", "portlandmaine.gov",
     "phdcphila.org", "atlas.phila.gov", "clevelandohio.gov", "dallascityhall.com",
     "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us",
-)
+}
 
 
-def resolve(dist, base, url):
-    if url.startswith(config.BASE_URL):
+TITLE = re.compile(r"<title>(.*?)</title>", re.S)
+DESCRIPTION = re.compile(r'<meta name="description" content="[^"]{20,}"')
+ROBOTS = re.compile(r'<meta name="robots" content="([^"]+)"')
+JSON_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
+TAGS = re.compile(r"<[^>]+>")
+OWNER = re.compile(r"\bOwner\b")
+OFFICIAL_LINK = re.compile(r'<a[^>]*data-official-source="1"[^>]*href="([^"]+)"')
+
+
+@lru_cache(maxsize=32768)
+def resolve(base, raw_url):
+    url = html.unescape(raw_url)
+    if url.startswith(config.BASE_URL + "/"):
         url = base + url[len(config.BASE_URL):]
     if not url.startswith(base + "/"):
         return None
-    path = url[len(base):].split("#")[0].split("?")[0] or "/"
+    path = url[len(base):].split("#", 1)[0].split("?", 1)[0]
     if path.startswith("/api/"):
         return None
-    rel = path.lstrip("/")
-    if path.endswith("/"):
-        rel += "index.html"
-    return os.path.join(dist, rel)
+    return path.lstrip("/") + ("index.html" if path.endswith("/") else "")
+
+
+@lru_cache(maxsize=128)
+def official_host(host):
+    labels = host.split(".")
+    return any(".".join(labels[i:]) in OFFICIAL for i in range(len(labels) - 1))
+
+
+def official_source(link):
+    try:
+        url = urlsplit(html.unescape(link))
+        host = url.hostname or ""
+    except ValueError:
+        return False
+    return url.scheme == "https" and official_host(host)
+
+
+def init_worker(dist, files, base):
+    global _dist, _files, _base
+    _dist, _files, _base = dist, files, base
+
+
+def validate(rel):
+    if rel == "404.html":
+        return "", False, []
+    with open(os.path.join(_dist, rel), encoding="utf-8") as fh:
+        doc = fh.read()
+    problems = []
+    match = TITLE.search(doc)
+    title = match.group(1) if match else ""
+    if not title.strip():
+        problems.append("no title")
+    if not DESCRIPTION.search(doc):
+        problems.append("missing description")
+    if '<link rel="canonical" href="%s' % config.BASE_URL not in doc:
+        problems.append("no canonical")
+    h1 = doc.count("<h1")
+    if h1 != 1:
+        problems.append("%d h1 elements" % h1)
+    if "It is not an offer" not in doc:
+        problems.append("no not-an-offer notice")
+    robots = ROBOTS.search(doc)
+    index = bool(robots and robots.group(1).startswith("index"))
+    for block in JSON_LD.findall(doc):
+        try:
+            json.loads(block)
+        except ValueError as exc:
+            problems.append("bad JSON-LD (%s)" % exc)
+    for url in HREF.findall(doc):
+        target = resolve(_base, url)
+        if target and target not in _files:
+            problems.append("broken internal link %s" % url)
+    if rel.startswith("land/") and rel.count("/") == 2:
+        if ("Owner" in doc or "&#" in doc) and OWNER.search(html.unescape(TAGS.sub(" ", doc))):
+            problems.append("mentions an owner field")
+        official_link = OFFICIAL_LINK.search(doc)
+        if not official_link or not official_source(official_link.group(1)):
+            problems.append("no official https source link")
+    return title, index, problems
 
 
 def main(dist, data_dir=None):
     base = config.base_path()
-    problems, titles, pages, indexable = [], {}, 0, set()
-    for dirpath, _, files in os.walk(dist):
-        for name in files:
-            if not name.endswith(".html") or "/_og" in dirpath:
-                continue
-            full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, dist)
-            doc = open(full, encoding="utf-8").read()
-            pages += 1
-            if rel == "404.html":
-                continue
-            t = re.search(r"<title>(.*?)</title>", doc, re.S)
-            if not t or not t.group(1).strip():
-                problems.append("%s: no title" % rel)
-            else:
-                titles.setdefault(t.group(1), []).append(rel)
-            if not re.search(r'<meta name="description" content="[^"]{20,}"', doc):
-                problems.append("%s: missing description" % rel)
-            if '<link rel="canonical" href="%s' % config.BASE_URL not in doc:
-                problems.append("%s: no canonical" % rel)
-            if doc.count("<h1") != 1:
-                problems.append("%s: %d h1 elements" % (rel, doc.count("<h1")))
-            if "It is not an offer" not in doc:
-                problems.append("%s: no not-an-offer notice" % rel)
-            robots = re.search(r'<meta name="robots" content="([^"]+)"', doc)
-            if robots and robots.group(1).startswith("index"):
-                indexable.add("/" + rel[:-len("index.html")] if rel.endswith("index.html") else "/" + rel)
-            for block in re.findall(r'<script type="application/ld\+json">(.*?)</script>', doc, re.S):
-                try:
-                    json.loads(block)
-                except ValueError as exc:
-                    problems.append("%s: bad JSON-LD (%s)" % (rel, exc))
-            for url in HREF.findall(doc):
-                target = resolve(dist, base, html.unescape(url))
-                if target and not os.path.exists(target):
-                    problems.append("%s: broken internal link %s" % (rel, url))
-            if rel.startswith("land/") and rel.count("/") == 2:
-                visible = re.sub(r"(?s)<[^>]+>", " ", doc)
-                if re.search(r"\bOwner\b", visible):
-                    problems.append("%s: mentions an owner field" % rel)
-                official_link = re.search(r'<a[^>]*data-official-source="1"[^>]*href="([^"]+)"', doc) or re.search(r'<a class="button" href="([^"]+)"', doc)
-                if not official_link or not official_link.group(1).startswith("https://") or not any(h in official_link.group(1) for h in OFFICIAL):
-                    problems.append("%s: no official https source link" % rel)
+    problems, titles, indexable = [], {}, set()
+    files = set()
+    for dirpath, _, names in os.walk(dist):
+        prefix = os.path.relpath(dirpath, dist)
+        files.update(names if prefix == "." else (os.path.join(prefix, name) for name in names))
+    pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
+    with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 6), initializer=init_worker,
+                             initargs=(dist, files, base)) as pool:
+        for rel, (title, index, issues) in zip(pages, pool.map(validate, pages, chunksize=128)):
+            problems.extend("%s: %s" % (rel, issue) for issue in issues)
+            if title:
+                titles.setdefault(title, []).append(rel)
+            if index:
+                indexable.add("/" + rel.removesuffix("index.html"))
 
     for t, where in titles.items():
         if len(where) > 1:
@@ -146,14 +187,14 @@ def main(dist, data_dir=None):
 
     cat = Catalog(data_dir)
     for r in cat.listings:
-        if not os.path.exists(os.path.join(dist, "land", r["slug"], "index.html")):
+        if os.path.join("land", r["slug"], "index.html") not in files:
             problems.append("listing %s has no page" % r["id"])
         elif config.INDEXABLE and listing_is_indexable(r) and cat.listing_path(r) not in indexable:
             problems.append("priced/deadline listing %s should be indexable" % r["id"])
     csv_text = open(os.path.join(dist, "data", "listings.csv"), encoding="utf-8").read()
     if "Owner" in csv_text.splitlines()[0]:
         problems.append("listings.csv has an owner column")
-    print("checked %d HTML files, %d listings, %d indexable pages: %d problems" % (pages, len(cat.listings), len(indexable), len(problems)))
+    print("checked %d HTML files, %d listings, %d indexable pages: %d problems" % (len(pages), len(cat.listings), len(indexable), len(problems)))
     for p in problems[:200]:
         print("  " + p)
     return 1 if problems else 0

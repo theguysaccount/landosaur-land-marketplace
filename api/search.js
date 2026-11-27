@@ -14,10 +14,10 @@ const PREFIX = "direct/listings/";
 let cachedOfficial = { at: 0, rows: [] };
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function jsonResp(body, status = 200, cache = "public, s-maxage=30, stale-while-revalidate=120") {
+function jsonResp(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": cache, ...CORS },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store", ...CORS },
   });
 }
 
@@ -228,6 +228,6 @@ export async function GET(request) {
     });
   } catch (err) {
     console.error("[search GET] error:", err);
-    return jsonResp({ error: "Search service temporarily unavailable." }, 502, "no-store");
+    return jsonResp({ error: "Search service temporarily unavailable." }, 502);
   }
 }

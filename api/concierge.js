@@ -27,7 +27,7 @@ function jsonResp(body, status = 200) {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store, max-age=0",
+      "Cache-Control": "no-store, max-age=0", "CDN-Cache-Control": "no-store",
       ...CORS,
     },
   });

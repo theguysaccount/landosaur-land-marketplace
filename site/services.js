@@ -134,6 +134,20 @@
     });
   }
 
+  // Post-Stripe Checkout confirmation banner (?paid=1)
+  if (sp.get("paid") === "1" && banner) {
+    banner.hidden = false;
+    var sid = sp.get("session_id") || "";
+    var lastCode = "";
+    try { lastCode = sessionStorage.getItem("lando_last_agt") || ""; } catch (e) {}
+    banner.innerHTML =
+      "<div class='eyebrow'>Payment Received · Land Agent Activated</div>" +
+      "<h3 style='margin:4px 0 6px'>Your $20 Landosaur Land Agent Initiation Is Confirmed" + (lastCode ? (" · <code>" + esc(lastCode) + "</code>") : "") + "</h3>" +
+      "<p style='margin:0'>Our acquisition desk is now reviewing your dossier for county tax/lien/redemption verification, owner or agency outreach, and closing transfer coordination." +
+      (sid ? (" Stripe receipt ref: <code>" + esc(sid.slice(0, 28)) + "…</code>.") : "") +
+      " Use the order status tracker below with your <code>AGT-</code> code anytime.</p>";
+  }
+
   // Pre-fill from URL parameters (arriving from any of the 25,087 parcel dossiers OR from Land Atlas county!)
   var pId = sp.get("parcel") || "";
   var pTitle = sp.get("title") || "";
@@ -221,8 +235,9 @@
             return;
           }
           var d = res.d;
+          try { if (d.confirmation_code) sessionStorage.setItem("lando_last_agt", d.confirmation_code); } catch (e) {}
           var stripeHtml = d.stripe_checkout_url
-            ? "<p style='margin-top:12px'><a class='button' href='" + esc(d.stripe_checkout_url) + "' target='_blank' rel='noopener noreferrer'>Pay $20 Land Agent Initiation on Stripe →</a></p>"
+            ? "<p style='margin-top:12px'><a class='button' href='" + esc(d.stripe_checkout_url) + "'>Pay $20 Land Agent Initiation on Stripe →</a></p>"
             : "<p class='small' style='margin-top:8px'>Your order is queued in our Land Agent ledger under confirmation code <code>" + esc(d.confirmation_code) + "</code>. Watch your inbox for the $20 Stripe initiation checkout link.</p>";
           var estHtml = d.estimated_turnkey_total
             ? "<p class='small'><strong>Itemized Estimate:</strong> Base " + money(d.official_price || payload.max_budget) + " + 10% Land Agent Fee (" + money(d.concierge_fee_10pct) + ") = <strong>" + money(d.estimated_turnkey_total) + "</strong> · $20 due today.</p>"

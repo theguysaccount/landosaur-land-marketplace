@@ -263,7 +263,7 @@ class Site(object):
         cnt_all = len(scoped)
         cnt_cash = sum(1 for r in scoped if r["price_kind"] == "cash")
         cnt_auc = sum(1 for r in scoped if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms"))
-        cnt_none = sum(1 for r in scoped if r["price_kind"] == "none" and r["status"] not in ("auction_open", "auction_terms"))
+        cnt_none = sum(1 for r in scoped if r["price_kind"] not in ("cash", "min_bid") and r["status"] not in ("auction_open", "auction_terms"))
         return (
             '<section class="mapzone" aria-label="%s">'
             '<div class="mode-switcher" role="group" aria-label="Filter by deal type">'
@@ -357,7 +357,7 @@ class Site(object):
             '<th scope="col">Zillow Land</th>'
             '</tr></thead><tbody>'
             '<tr><th scope="row">County parcel &amp; deed source transparency</th>'
-            '<td class="col-ours">Maps %s official public-agency offerings (%d agencies across %d states, checked daily) plus direct owner/agent listings; every public parcel links straight to its official agency portal with parcel APN and GIS boundary when published.</td>'
+            '<td class="col-ours">Maps %s official public-agency offerings (%d agencies across %d states) plus direct owner/agent listings; every public parcel links straight to its official agency portal with parcel APN and GIS boundary when published.</td>'
             '<td>Paid broker, agent, and owner classified listings (CoStar / Land.com network); links route to brokers rather than county/state agency portals.</td>'
             '<td>Aggregates broker/MLS, auction, and owner land listings; county assessor or public source links vary by feed.</td>'
             '<td>Paid broker, land-specialist, and auctioneer classifieds (CoStar network); primary contact is the listing brokerage.</td>'
@@ -410,7 +410,7 @@ class Site(object):
         cat = self.cat
         b = self.benchmarks
         cur = cat.current()
-        n_src = sum(1 for s in cat.status.get("sources", {}).values() if s.get("count"))
+        n_src = len({r["source"] for r in cur})
         states = sorted({r["state"] for r in cur})
         us_latest = self.market.latest_values("US")
         coverage = "all 50 U.S. states" if set(STATE_NAMES) - {"DC"} <= set(states) else "%d U.S. states" % len(states)
@@ -2325,17 +2325,21 @@ class Site(object):
                 '</div>'
             )
 
+        eligibility = ""
+        if r["source"] == "detroit-dlba" and r["price_kind"] == "application":
+            eligibility = ('<p class="small"><strong>Detroit Neighborhood Lot eligibility applies.</strong> '
+                           'Check the Land Bank requirements for nearby homeowners before starting an acquisition.</p>')
         agent_box = (
             '<div class="agent-checkout-card">'
             '<div class="eyebrow">Landosaur Land Agent · Full Acquisition &amp; Deed Transfer</div>'
-            '<h3>%s</h3>%s'
+            '<h3>%s</h3>%s%s'
             '<div class="btn-row" style="margin:12px 0 8px">'
             '<a class="button" href="%s?%s">%s</a>'
             '</div>'
             '<p class="small" style="margin:0">Includes county tax/lien &amp; redemption verification, agency paperwork or bid prep, and licensed title/deed closing coordination. '
             '<a data-official-source="1" href="%s" rel="noopener">%s</a></p>'
             '</div>'
-        ) % (agent_head, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
+        ) % (agent_head, eligibility, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
 
         body = [
             crumbs,
@@ -2541,7 +2545,7 @@ class Site(object):
         new = cat.new()
         body = [
             crumbs, "<h1>New government land listings</h1>",
-            '<p class="lede">Land that official sources added in the last %d days: %s listings. Checked daily. '
+            '<p class="lede">Land that official sources added in the last %d days: %s listings. '
             'Subscribe with the <a href="%s">Atom feed</a> or a state feed below.</p>' % (
                 config.NEW_DAYS, "{:,}".format(len(new)), self.u("/feeds/new.xml")),
         ]
@@ -2556,7 +2560,7 @@ class Site(object):
         else:
             body.append("<p>No new listings in the last %d days. The sources are read every day; this page and the feeds update when one adds land.</p>" % config.NEW_DAYS)
         body.append(self.how_block())
-        desc = "New city, state and tax-sale land listings from official sources in the last %d days (%s), checked daily, with Atom feeds by state." % (
+        desc = "New city, state and tax-sale land listings from official sources in the last %d days (%s), with Atom feeds by state." % (
             config.NEW_DAYS, "{:,}".format(len(new)))
         ld = [crumb_ld, {
             "@context": "https://schema.org", "@type": "ItemList", "name": "New government land listings",
@@ -2578,7 +2582,7 @@ class Site(object):
         ]
         body.append(self.rows(rows[:500], True, True) if rows else "<p>No deadlines in the next %d days right now.</p>" % config.CLOSING_DAYS)
         body.append(self.how_block())
-        desc = "Government land auctions and tax-sale parcels with deadlines in the next %d days (%s listings), from official sources, checked daily." % (
+        desc = "Government land auctions and tax-sale parcels with deadlines in the next %d days (%s listings), from official sources." % (
             config.CLOSING_DAYS, "{:,}".format(len(rows)))
         return self.layout("Government land auctions closing soon | Landosaur", desc, "/closing-soon/", "".join(body), indexable=True,
                            jsonld=[crumb_ld], og="closing", scripts=["tables.js"], wide=True)

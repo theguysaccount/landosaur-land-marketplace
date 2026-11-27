@@ -4,6 +4,7 @@
 #   ./scripts/publish.sh                       # Verify, push, and deploy the current main commit
 #   ./scripts/publish.sh --refresh             # Refresh 64+ official agencies across 50 states and verify
 #   ./scripts/publish.sh --refresh-only a,b    # Refresh specific agency IDs and verify
+#   ./scripts/publish.sh --refresh-only a,b --crawl-only  # Refresh data for review
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally
 #   ./scripts/publish.sh --skip-e2e            # Local build only, without browser verification
 set -euo pipefail
@@ -17,6 +18,7 @@ REFRESH=0
 REFRESH_ONLY=""
 SKIP_E2E=0
 NO_DEPLOY=0
+CRAWL_ONLY=0
 SRV_PID=""
 CHANGED=""
 
@@ -43,6 +45,7 @@ while [ $# -gt 0 ]; do
       shift
       REFRESH_ONLY="$1"
       ;;
+    --crawl-only) CRAWL_ONLY=1 ;;
     --skip-e2e) SKIP_E2E=1 ;;
     --no-deploy) NO_DEPLOY=1 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
@@ -51,6 +54,27 @@ while [ $# -gt 0 ]; do
 done
 
 cd "$ROOT"
+
+refresh_sources() {
+  local -a python_run=(python3)
+  if ! python3 -c 'import pypdf' 2>/dev/null && command -v uv >/dev/null; then
+    export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/work/uv-cache}"
+    python_run=(uv run --no-project --with-requirements "$ROOT/requirements-refresh.txt" python)
+  fi
+  if [ -n "$REFRESH_ONLY" ]; then
+    "${python_run[@]}" -m lando.refresh --only "$REFRESH_ONLY"
+  else
+    "${python_run[@]}" -m lando.refresh --land-index
+  fi
+}
+if [ "$CRAWL_ONLY" -eq 1 ]; then
+  if [ "$REFRESH" -ne 1 ]; then
+    echo "--crawl-only requires --refresh or --refresh-only" >&2
+    exit 2
+  fi
+  refresh_sources
+  exit
+fi
 
 echo "==> 1/7 Syntax, API imports, and unit tests"
 while IFS= read -r -d '' file; do
@@ -68,11 +92,7 @@ python3 -m unittest discover -s tests -t .
 
 if [ "$REFRESH" -eq 1 ]; then
   echo "==> 2/7 Refreshing official agency feeds locally"
-  if [ -n "$REFRESH_ONLY" ]; then
-    python3 -m lando.refresh --only "$REFRESH_ONLY"
-  else
-    python3 -m lando.refresh --land-index
-  fi
+  refresh_sources
 else
   echo "==> 2/7 Using the committed inventory snapshot"
 fi
@@ -130,7 +150,7 @@ echo "==> 6/7 Pushing main and deploying the staging mirror to $BASE_URL"
 git push origin main
 rsync -a --delete \
   --exclude '.git' --exclude '.vercel' --exclude '.env' --exclude '.env.*' \
-  --exclude 'dist' --exclude 'original' --exclude '__pycache__' --exclude 'node_modules' \
+  --exclude 'dist' --exclude 'original' --exclude 'work' --exclude '.venv' --exclude '__pycache__' --exclude 'node_modules' \
   "$ROOT/" "$STAGING/"
 (cd "$STAGING" && "${vercel_cli[@]}" --prod --yes --scope persist-always)
 

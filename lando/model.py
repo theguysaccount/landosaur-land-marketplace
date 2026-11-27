@@ -62,6 +62,8 @@ class Catalog(object):
                     continue          # not seen by the latest complete read: waiting for a second confirmation
                 r["checked"] = checked
                 r["fresh"] = fresh
+                if src.get("historical_only"):
+                    r["status"] = "availability_unverified"
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
                 if r["status"] == "auction_open" and r.get("deadline"):
                     dl = parse_time(r["deadline"])

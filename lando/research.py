@@ -233,7 +233,7 @@ def compute_benchmarks(cat):
             "metric": "{:,} offerings".format(active_count),
             "sentence": (
                 "As of %s, Landosaur tracks %s active public-agency land offerings across %d U.S. %s, %d %s, "
-                "and %d official government %s (snapshot from %s total stored records, checked daily)."
+                "and %d official government %s (snapshot from %s total stored records)."
             ) % (
                 updated, "{:,}".format(active_count), len(states),
                 "state" if len(states) == 1 else "states", county_total,
@@ -459,7 +459,7 @@ def compute_benchmarks(cat):
         ),
         (
             "How fresh are these public land statistics and how are sold parcels removed?",
-            "Each official agency inventory is checked once daily (latest snapshot checked %s). If a source read fails or returns partial data, Landosaur preserves the last verified snapshot. "
+            "The latest source snapshot was read on %s. If a source read fails or returns partial data, Landosaur preserves the last verified snapshot. "
             "A listing is withdrawn only after two consecutive complete agency reads omit it, and any source unchecked for %d days leaves the active catalog." % (
                 updated, config.CURRENT_DAYS,
             ),
@@ -503,7 +503,7 @@ def compute_benchmarks(cat):
         ),
         (
             "How often are official agency land inventories updated?",
-            "Each agency inventory is checked once a day (last verified snapshot: %s). Failed or partial reads never wipe existing listings; "
+            "The most recent source snapshot was checked on %s. Failed or partial reads never wipe existing listings; "
             "parcels leave the active map only after two consecutive complete agency reads no longer list them, or if a source goes %d days without a verified read." % (
                 updated, config.CURRENT_DAYS,
             ),

@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T21:26:58Z",
+ "checked": "2026-11-27T21:48:13Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -418,21 +418,21 @@
    "url": "https://detroitmi.gov/departments/housing-and-revitalization-department/commercial-real-estate"
   },
   "detroit-dlba": {
-   "about": "Actively marketed vacant land programs (Marketed, Oversized, Auction, Own It Now, Create-a-Project lots) from Detroit's official open-data GIS.",
+   "about": "Actively marketed vacant lots from the official Detroit Land Bank GIS, including eligible Neighborhood Lots with the published program price.",
    "agency": "Detroit Land Bank Authority",
    "complete": true,
-   "count": 1152,
+   "count": 28077,
    "failures": 0,
-   "last_attempt": "2026-11-27T01:04:02Z",
-   "last_success": "2026-11-27T01:04:02Z",
+   "last_attempt": "2026-11-27T21:36:53Z",
+   "last_success": "2026-11-27T21:36:53Z",
    "message": "",
    "name": "Detroit Land Bank Authority marketed vacant lots",
    "notes": [],
    "ok": true,
-   "read": 1152,
-   "seconds": 5,
+   "read": 28077,
+   "seconds": 19,
    "state": "MI",
-   "upstream_total": 1152,
+   "upstream_total": 28077,
    "url": "https://buildingdetroit.org/properties"
   },
   "hartford-ct": {
@@ -453,6 +453,24 @@
    "upstream_total": 37,
    "url": "https://www.hartfordct.gov/"
   },
+  "hoke-county-nc": {
+   "about": "Current county surplus land table with parcel IDs, acreage where provided, and official minimum bids.",
+   "agency": "Hoke County, North Carolina",
+   "complete": true,
+   "count": 4,
+   "failures": 0,
+   "last_attempt": "2026-11-27T21:39:36Z",
+   "last_success": "2026-11-27T21:39:36Z",
+   "message": "",
+   "name": "Hoke County surplus land bids",
+   "notes": [],
+   "ok": true,
+   "read": 4,
+   "seconds": 2,
+   "state": "NC",
+   "upstream_total": 4,
+   "url": "https://hokecounty.net/474/Surplus-Properties-for-Sale"
+  },
   "horry-sc": {
    "about": "Delinquent tax-sale land parcels in Horry County, South Carolina with published opening bid amounts and GIS outlines.",
    "agency": "Horry County, South Carolina",
@@ -470,6 +488,24 @@
    "state": "SC",
    "upstream_total": 189,
    "url": "https://www.horrycountysc.gov/"
+  },
+  "itasca-county-mn": {
+   "about": "Official unimproved tax-forfeited parcels currently offered over the counter with the county's published minimum amount.",
+   "agency": "Itasca County, Minnesota",
+   "complete": true,
+   "count": 6,
+   "failures": 0,
+   "last_attempt": "2026-11-27T21:42:15Z",
+   "last_success": "2026-11-27T21:42:15Z",
+   "message": "",
+   "name": "Itasca County over-the-counter tax-forfeited land",
+   "notes": [],
+   "ok": true,
+   "read": 6,
+   "seconds": 21,
+   "state": "MN",
+   "upstream_total": 6,
+   "url": "https://www.itascacountymn.gov/304/Real-Estate"
   },
   "kansas-city-landbank": {
    "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context.",
@@ -850,22 +886,24 @@
    "url": "https://www.peterboroughnh.gov/"
   },
   "philly-landbank": {
-   "about": "Vacant land bank parcels in Philadelphia with OPA IDs, zoning districts, and GIS parcel outlines.",
+   "about": "Philadelphia Land Bank parcels marked available on the official sale map and matched to its vacant land layer.",
    "agency": "Philadelphia Land Bank / PHDC",
    "complete": true,
-   "count": 2361,
+   "count": 2396,
    "failures": 0,
-   "last_attempt": "2026-11-27T20:02:47Z",
-   "last_success": "2026-11-27T20:02:47Z",
+   "last_attempt": "2026-11-27T21:48:13Z",
+   "last_success": "2026-11-27T21:48:13Z",
    "message": "",
    "name": "Philadelphia Land Bank vacant lots",
-   "notes": [],
+   "notes": [
+    "kept 1901 listings this read did not include (read was partial or much smaller than before)"
+   ],
    "ok": true,
-   "read": 2361,
-   "seconds": 9,
+   "read": 495,
+   "seconds": 12,
    "state": "PA",
-   "upstream_total": 2361,
-   "url": "https://phdcphila.org/land/"
+   "upstream_total": 495,
+   "url": "https://phdcphila.org/property-map/"
   },
   "pittsburgh-vacant": {
    "about": "Vacant city-owned parcels marked Available for Sale (Public Sale) in Pittsburgh's daily open-data inventory, with zoning, square footage, and coordinates.",
@@ -1118,6 +1156,24 @@
    "state": "WI",
    "upstream_total": null,
    "url": "https://bcpl.wisconsin.gov/Pages/SurplusBCPLProperty.aspx"
+  },
+  "wsdot-surplus": {
+   "about": "Current first-come sale listings with no improvements and a published minimum offer.",
+   "agency": "Washington State Department of Transportation",
+   "complete": true,
+   "count": 15,
+   "failures": 0,
+   "last_attempt": "2026-11-27T21:42:15Z",
+   "last_success": "2026-11-27T21:42:15Z",
+   "message": "",
+   "name": "Washington DOT current unimproved surplus lots",
+   "notes": [],
+   "ok": true,
+   "read": 15,
+   "seconds": 24,
+   "state": "WA",
+   "upstream_total": 16,
+   "url": "https://wsdot.wa.gov/business-wsdot/real-estate-services/current-sales-and-auctions"
   },
   "wyandotte-ks": {
    "about": "Vacant land bank parcels in Kansas City, Kansas with GIS parcel outlines and acreage.",

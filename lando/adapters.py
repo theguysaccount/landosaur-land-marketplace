@@ -19,13 +19,14 @@ from .net import FetchError
 
 STATUS = {  # status -> (label, still available to buy)
     "listed": ("Listed by the agency", True),
+    "availability_unverified": ("Sale availability unconfirmed", False),
     "auction_open": ("Auction: bidding open", True),
     "auction_terms": ("Auction or tax sale: see terms", True),
     "proposal_open": ("Proposals invited", True),
     "pending": ("Sale pending", False),
     "auction_closed": ("Bidding closed", False),
 }
-PRICE_KIND = {"cash": "Price", "min_bid": "Minimum bid", "none": "No price published"}
+PRICE_KIND = {"cash": "Price", "min_bid": "Minimum bid", "application": "Program price", "none": "No price published"}
 
 
 class StructureError(Exception):
@@ -717,7 +718,10 @@ def alaska_dnr(fetch, now, warn):
 
 DLBA_GIS = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/DLBA_Owned_Properties/FeatureServer/0/query"
 DLBA_URL = "https://buildingdetroit.org/properties"
+DLBA_NEIGHBORHOOD_URL = "https://buildingdetroit.org/sidelots/index/neighborhood/"
+DLBA_NEIGHBORHOOD = "Neighborhood Lot For Sale"
 DLBA_PROGRAMS = (
+    DLBA_NEIGHBORHOOD,
     "Marketed Lot For Sale",
     "Oversized Lot For Sale",
     "Auction Lot For Sale",
@@ -726,14 +730,14 @@ DLBA_PROGRAMS = (
 )
 
 
-def parse_detroit_features(features, warn):
+def parse_detroit_features(features, warn, neighborhood_price=None):
     out, seen = [], set()
     for f in features:
         a = f.get("attributes") or {}
         pid = clean(str(a.get("parcel_id") or "")).rstrip(".")
         addr = clean(str(a.get("name") or ""))
         prog = clean(str(a.get("inventory_status_socrata") or ""))
-        if not pid or not addr or prog not in DLBA_PROGRAMS:
+        if not pid or prog not in DLBA_PROGRAMS:
             continue
         if pid in seen:
             continue
@@ -753,54 +757,83 @@ def parse_detroit_features(features, warn):
         except (TypeError, ValueError):
             lat = lon = None
         is_auction = "auction" in prog.lower()
+        neighborhood_lot = prog == DLBA_NEIGHBORHOOD
+        price = neighborhood_price if neighborhood_lot else None
+        source_url = DLBA_NEIGHBORHOOD_URL if neighborhood_lot else DLBA_URL
+        place = addr.title() if addr else "Parcel " + pid
         facts = [
             fact("sale_program", prog, "@dlba_gis", "dlba_program"),
             fact("parcel_number", pid, DLBA_URL),
-            fact("price", "See Detroit Land Bank program terms (not published in GIS feed)", DLBA_URL, "dlba_price"),
         ]
+        if neighborhood_lot:
+            facts.append(fact("eligibility", "Nearby residents who meet the Detroit Land Bank program requirements may apply.", source_url))
+        if price is not None:
+            facts.append(fact("price", "$%g per eligible Neighborhood Lot" % price, source_url))
+        else:
+            facts.append(fact("price", "See Detroit Land Bank program terms", source_url, "dlba_price"))
         if clean(str(a.get("neighborhood") or "")):
             facts.append(fact("neighborhood", clean(str(a["neighborhood"])), "@dlba_gis"))
         if a.get("council_district") is not None and str(a.get("council_district")).strip():
             facts.append(fact("council_district", "District %s" % clean(str(a["council_district"])), "@dlba_gis"))
         out.append({
             "id": "mi-dlba-%s" % slug(pid), "source": "detroit-dlba",
-            "title": "%s, Detroit (%s)" % (addr.title(), prog.lower()),
+            "title": "%s, Detroit (%s)" % (place, prog.lower()),
             "state": "MI", "county": "Wayne", "locality": "Detroit", "apn": pid,
-            "acres": None, "price": None, "price_kind": "none",
+            "acres": None, "price": price, "price_kind": "application" if price is not None else "none",
             "offering": "auction" if is_auction else "sale",
             "status": "auction_terms" if is_auction else "listed",
-            "deadline": None, "url": DLBA_URL, "address": addr.title(),
+            "deadline": None, "url": source_url, "address": addr.title(),
             "lat": lat, "lon": lon, "geometry": None, "facts": facts,
             "tags": ["land bank vacant lot", prog.lower(), "application required"],
         })
     return out
 
 
+def parse_detroit_neighborhood_price(page):
+    text = clean(page)
+    match = re.search(r"Neighborhood Lots will be sold for \$([\d,]+(?:\.\d{2})?)\b", text, re.I)
+    return number(match[1]) if match else None
+
+
 def detroit_dlba(fetch, now, warn):
     where = "inventory_status_socrata IN (%s)" % quote_list(DLBA_PROGRAMS)
     fields = "parcel_id,name,inventory_status_socrata,neighborhood,council_district,latitude,longitude"
-    all_feats, offset, page_size = [], 0, 1000
-    complete = True
-    for _ in range(20):
+    count = fetch.json(DLBA_GIS + "?" + urllib.parse.urlencode({
+        "f": "json", "where": where, "returnCountOnly": "true"
+    })).get("count")
+    if not isinstance(count, int) or not 50 <= count <= 100000:
+        raise StructureError("Detroit Land Bank marketed lot count is outside the supported range")
+    try:
+        price = parse_detroit_neighborhood_price(fetch.text(DLBA_NEIGHBORHOOD_URL))
+    except FetchError:
+        price = None
+    if price is None:
+        warn("Detroit Neighborhood Lot program price unavailable; published without a price")
+
+    rows, seen, offset = [], set(), 0
+    while offset < count:
         q = urllib.parse.urlencode({
-            "f": "json", "where": where, "outFields": fields, "outSR": "4326",
-            "returnGeometry": "true", "resultRecordCount": str(page_size), "resultOffset": str(offset),
+            "f": "json", "where": where, "outFields": fields,
+            "returnGeometry": "false", "orderByFields": "ObjectId ASC",
+            "resultRecordCount": 2000, "resultOffset": offset,
         })
         data = fetch.json(DLBA_GIS + "?" + q)
         if not isinstance(data, dict) or "features" not in data:
             raise StructureError("Detroit Land Bank ArcGIS response changed")
-        feats = data["features"]
-        all_feats.extend(feats)
-        if not data.get("exceededTransferLimit") or len(feats) < page_size:
+        features = data["features"]
+        if not features:
             break
-        offset += len(feats)
-    else:
-        complete = False
-        warn("Detroit Land Bank pagination reached safety limit")
-    rows = parse_detroit_features(all_feats, warn)
+        offset += len(features)
+        additions = [row for row in parse_detroit_features(features, warn, price) if row["id"] not in seen]
+        if not additions:
+            break
+        rows.extend(additions)
+        seen.update(row["id"] for row in additions)
     if len(rows) < 50:
         raise StructureError("only %d Detroit Land Bank marketed lots: feed looks incomplete" % len(rows))
-    return rows, {"complete": complete, "upstream_total": len(rows)}
+    if offset != count:
+        warn("Detroit Land Bank returned %d of %d queried lots" % (offset, count))
+    return rows, {"complete": offset == count, "upstream_total": count}
 
 
 # ------------------------------------------------------------------------------------------- Kansas City Land Bank (MO)
@@ -4083,15 +4116,18 @@ def _sf_to_acres(text):
 
 # --- Philadelphia Land Bank Vacant Land (PA) ---
 PHILLY_LB_GIS = "https://services.arcgis.com/fLeGjb7u4uXqeF9q/arcgis/rest/services/Vacant_Indicators_Land/FeatureServer/0/query"
-PHILLY_LB_URL = "https://phdcphila.org/land/"
+PHILLY_LB_URL = "https://phdcphila.org/property-map/"
+PHILLY_AVAIL_GIS = "https://services.arcgis.com/fLeGjb7u4uXqeF9q/arcgis/rest/services/LAMAAssets/FeatureServer/0/query"
+PHILLY_AVAILABLE = ("Owned - Available", "Owned - Available (no construction permitted)",
+                    "Owned - Available (not for SY)")
 
 
-def parse_philly_lb_features(features, warn):
+def parse_philly_lb_features(features, availability, warn):
     out, seen = [], set()
     for f in features:
         a = f.get("attributes") or {}
-        opa = clean(str(a.get("opa_id") or a.get("objectid") or ""))
-        if not opa or opa in seen:
+        opa = clean(str(a.get("opa_id") or "")).zfill(9)
+        if opa not in availability or opa in seen:
             continue
         seen.add(opa)
         addr = clean(str(a.get("address") or "")).title()
@@ -4100,7 +4136,7 @@ def parse_philly_lb_features(features, warn):
         rings = (f.get("geometry") or {}).get("rings") or []
         acres = rings_acres(rings) if rings else None
         facts = [
-            fact("availability", "Philadelphia Land Bank vacant lot", PHILLY_LB_URL, "philly_lb"),
+            fact("availability", availability[opa], PHILLY_LB_URL),
             fact("parcel_number", opa, PHILLY_LB_URL),
         ]
         if acres:
@@ -4110,13 +4146,12 @@ def parse_philly_lb_features(features, warn):
         if zipcode:
             facts.append(fact("zip_code", zipcode, PHILLY_LB_URL))
         title_loc = "%s (%s)" % (addr, opa) if addr else ("OPA " + opa)
-        atlas_url = ("https://atlas.phila.gov/" + urllib.parse.quote(addr)) if addr else PHILLY_LB_URL
         row = {
             "id": "pa-phl-%s" % slug(opa), "source": "philly-landbank",
             "title": "%s, Philadelphia (Land Bank vacant lot)" % title_loc,
             "state": "PA", "county": "Philadelphia", "locality": "Philadelphia", "apn": opa,
             "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
-            "status": "listed", "deadline": None, "url": atlas_url,
+            "status": "listed", "deadline": None, "url": PHILLY_LB_URL,
             "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
             "tags": ["land bank", "vacant lot", "pennsylvania"],
         }
@@ -4127,12 +4162,33 @@ def parse_philly_lb_features(features, warn):
 
 
 def philly_landbank(fetch, now, warn):
-    feats = _arcgis_paged(fetch, PHILLY_LB_GIS, "owner1 LIKE '%LAND BANK%'",
-                          "objectid,address,opa_id,zoningbasedistrict,zipcode", max_total=2500, page_size=500,
-                          extra={"orderByFields": "Shape__Area DESC"})
-    rows = parse_philly_lb_features(feats, warn)
-    if len(rows) < 200:
-        raise StructureError("only %d Philadelphia Land Bank parcels" % len(rows))
+    where = "agency = 'PLB' AND status_1 IN (%s)" % quote_list(PHILLY_AVAILABLE)
+    count = fetch.json(PHILLY_AVAIL_GIS + "?" + urllib.parse.urlencode({
+        "f": "json", "where": where, "returnCountOnly": "true",
+    })).get("count")
+    if not isinstance(count, int) or not 1 <= count <= 20000:
+        raise StructureError("Philadelphia Land Bank availability count is missing or invalid")
+    available = _arcgis_paged(fetch, PHILLY_AVAIL_GIS, where, "objectid,opabrt,status_1",
+                             max_total=count, page_size=500,
+                             extra={"orderByFields": "objectid", "returnGeometry": "false"})
+    if len(available) != count:
+        raise StructureError("Philadelphia Land Bank inventory was incomplete")
+    status = {}
+    for feature in available:
+        attributes = feature.get("attributes", {})
+        opa = clean(str(attributes.get("opabrt") or ""))
+        state = attributes.get("status_1")
+        if re.fullmatch(r"\d{1,9}", opa) and state in PHILLY_AVAILABLE:
+            status[opa.zfill(9)] = state
+
+    rows = []
+    ids = sorted(status)
+    for start in range(0, len(ids), 64):
+        vacant = _arcgis_query(fetch, PHILLY_LB_GIS, "opa_id IN (%s)" % quote_list(ids[start:start + 64]),
+                               "objectid,address,opa_id,zoningbasedistrict,zipcode", 500)
+        rows.extend(parse_philly_lb_features(vacant, status, warn))
+    if not rows:
+        raise StructureError("No sale-available Philadelphia parcels matched the official vacant land layer")
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
@@ -4469,6 +4525,156 @@ def sauk_county_wi(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+# Hoke County publishes a current, parcel-specific minimum-bid table for its surplus lots.
+HOKE_NC_URL = "https://hokecounty.net/474/Surplus-Properties-for-Sale"
+
+
+def parse_hoke_surplus(page, now, warn):
+    for table in re.findall(r"<table\b[^>]*>(.*?)</table>", page, re.I | re.S):
+        headings = clean(table)
+        if "Approximate Acreage" in headings and "Minimum Bid" in headings and "Parcel Number" in headings:
+            break
+    else:
+        raise StructureError("Hoke County surplus bid table is missing")
+
+    listings = []
+    for line in re.findall(r"<tr\b[^>]*>(.*?)</tr>", table, re.I | re.S):
+        fields = [clean(cell) for cell in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", line, re.I | re.S)]
+        if len(fields) != 7:
+            continue
+        _, pin, area, address, minimum, _, upset = fields
+        price = number(minimum)
+        if not re.fullmatch(r"\d{5}-\d{2}-\d{2}-\d{3}", pin) or not price:
+            continue
+        if re.search(r"\b(closed|sold|pending|withdrawn)\b", upset, re.I):
+            continue
+        # The county labels these rows as vacant land by acreage or as a lot.
+        if not re.fullmatch(r"(?:\d*\.?\d+|Lot)", area, re.I):
+            continue
+        acres = number(area)
+        listings.append({
+            "id": "nc-hoke-%s" % slug(pin), "source": "hoke-county-nc", "state": "NC",
+            "county": "Hoke", "locality": "", "address": address, "apn": pin,
+            "title": "%s (%s), Hoke County surplus land" % (address or "Parcel", pin),
+            "acres": acres, "price": price, "price_kind": "min_bid",
+            "offering": "auction", "status": "auction_terms", "deadline": None,
+            "url": HOKE_NC_URL, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("minimum_bid", "$%s" % "{:,.2f}".format(price), HOKE_NC_URL),
+                      fact("availability", "Listed on the county's surplus properties for sale table", HOKE_NC_URL)],
+            "tags": ["surplus land", "upset bid", "north carolina"],
+        })
+    return listings
+
+
+def hoke_surplus(fetch, now, warn):
+    rows = parse_hoke_surplus(fetch.text(HOKE_NC_URL), now, warn)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+WSDOT_URL = "https://wsdot.wa.gov/business-wsdot/real-estate-services/current-sales-and-auctions"
+
+
+def parse_wsdot_index(page):
+    section = re.search(r"<h3[^>]*>Properties available on a first come, first serve basis</h3>(.*?)(?:<h2|</article)", page, re.I | re.S)
+    if not section:
+        raise StructureError("WSDOT current sale lists not found")
+    entries = []
+    for county, block in re.findall(r"<h3[^>]*>(.*?)</h3>(.*?)(?=<h3|$)", section[1], re.I | re.S):
+        name = clean(county)
+        if not name.endswith(" County"):
+            continue
+        for link, label in re.findall(r'<a\b[^>]*?href="([^"]+)"[^>]*>(.*?)</a>', block, re.I | re.S):
+            reference = re.fullmatch(r"Parcel number:\s+([0-9-]+(?:\s+&\s+[0-9-]+)?)", clean(label))
+            url = urllib.parse.urljoin(WSDOT_URL, html.unescape(link))
+            if reference and urllib.parse.urlsplit(url).netloc == "wsdot.wa.gov":
+                entries.append((name.removesuffix(" County"), reference[1], url))
+    return entries
+
+
+def parse_wsdot_property(page, county, reference, url):
+    fields = {clean(label).lower(): clean(value) for label, value in
+              re.findall(r"<h2[^>]*>(.*?)</h2>(.*?)(?=<h2|</article|$)", page, re.I | re.S)}
+    if not re.match(r"^(none\b|no improvements\b)", fields.get("improvements", ""), re.I):
+        return None
+    price = number(fields.get("minimum bid"))
+    if not price:
+        return None
+    location = fields.get("location and size", "")
+    size = re.search(r"(\d[\d,.]*)\s*(?:[+±]\s*/?\s*[-−]?\s*)?acres?\b", location, re.I)
+    acres = number(size[1]) if size else None
+    return {
+        "id": "wa-wsdot-%s" % slug(reference), "source": "wsdot-surplus", "state": "WA", "county": county,
+        "locality": "", "address": "", "apn": "", "title": "WSDOT parcel %s in %s County" % (reference, county),
+        "acres": acres, "price": price, "price_kind": "application", "offering": "sale", "status": "listed",
+        "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("agency_parcel_number", reference, url),
+                  fact("minimum_offer", "$%s" % "{:,.2f}".format(price), url),
+                  fact("availability", "Listed by WSDOT for first-come, first-served purchase", WSDOT_URL),
+                  fact("improvements", "None listed by WSDOT", url)],
+        "tags": ["surplus land", "right of way", "washington"],
+    }
+
+
+def wsdot_surplus(fetch, now, warn):
+    entries = parse_wsdot_index(fetch.text(WSDOT_URL))
+    rows = [parse_wsdot_property(fetch.text(url), county, reference, url) for county, reference, url in entries]
+    rows = [row for row in rows if row]
+    return rows, {"complete": True, "upstream_total": len(entries)}
+
+
+ITASCA_URL = "https://www.itascacountymn.gov/304/Real-Estate"
+
+
+def pdf_text(fetch, url):
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(fetch.bytes(url)))
+    if not 1 <= len(reader.pages) <= 60:
+        raise StructureError("Unexpected page count for county sale PDF")
+    return "\n".join(page.extract_text(extraction_mode="layout") for page in reader.pages)
+
+
+def find_itasca_report(page):
+    for link, label in re.findall(r'<a\b[^>]*?href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        if clean(label).startswith("OTC General Listing"):
+            url = urllib.parse.urljoin(ITASCA_URL, html.unescape(link))
+            if urllib.parse.urlsplit(url).netloc == "www.itascacountymn.gov":
+                return url
+    raise StructureError("Itasca County's over-the-counter listing link is missing")
+
+
+def parse_itasca_otc(text, url, now, warn):
+    if "AVAILABLE OVER-THE-COUNTER" not in text.upper() or not re.search(r"^\s*UNIMPROVED\s*$", text, re.M):
+        raise StructureError("Itasca County report lacks its unimproved sale section")
+    body = re.split(r"^\s*UNIMPROVED\s*$", text, maxsplit=1, flags=re.M)[1]
+    body = re.split(r"^Tracts are available", body, maxsplit=1, flags=re.M)[0]
+    rows = []
+    pattern = (r"^\s*(?:\d+[#*+^]*\s{2,})?(\d[\d.]*)\s{2,}(\d{2}-\d{3}-\d{4})\s{2,}.*"
+               r"\$([\d,]+\.\d{2})\s*$")
+    for match in re.finditer(pattern, body, re.M):
+        acres, pin, amount = match.groups()
+        price = number(amount)
+        if not price:
+            continue
+        rows.append({
+            "id": "mn-itasca-%s" % slug(pin), "source": "itasca-county-mn",
+            "state": "MN", "county": "Itasca", "locality": "", "address": "", "apn": pin,
+            "title": "Parcel %s, Itasca County over-the-counter land" % pin, "acres": number(acres),
+            "price": price, "price_kind": "application", "offering": "sale", "status": "listed", "deadline": None,
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("minimum_offer", "$%s" % "{:,.2f}".format(price), url),
+                      fact("sale_program", "First-come, first-served at or above the county's published amount", url)],
+            "tags": ["tax forfeited", "over the counter", "minnesota"],
+        })
+    return rows
+
+
+def itasca_otc(fetch, now, warn):
+    url = find_itasca_report(fetch.text(ITASCA_URL))
+    rows = parse_itasca_otc(pdf_text(fetch, url), url, now, warn)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
@@ -4498,7 +4704,7 @@ SOURCES = [
      "about": "Vacant land bank parcels in Toledo & Lucas County with GIS polygon boundaries, zoning codes, acreage, and legal descriptions."},
     {"id": "detroit-dlba", "name": "Detroit Land Bank Authority marketed vacant lots", "agency": "Detroit Land Bank Authority",
      "url": DLBA_URL, "state": "MI", "run": detroit_dlba,
-     "about": "Actively marketed vacant land programs (Marketed, Oversized, Auction, Own It Now, Create-a-Project lots) from Detroit's official open-data GIS."},
+     "about": "Actively marketed vacant lots from the official Detroit Land Bank GIS, including eligible Neighborhood Lots with the published program price."},
     {"id": "chicago-dpd", "name": "City of Chicago City-Owned Land Inventory (ChiBlockBuilder)", "agency": "City of Chicago Dept. of Planning & Development",
      "url": CHI_URL, "state": "IL", "run": chicago_dpd,
      "about": "Actively offered and open-application Chicago city-owned vacant lots with zoning classifications, lot square footage, and Q4/2027 application deadlines."},
@@ -4652,14 +4858,14 @@ SOURCES = [
     {"id": "california-dgs", "name": "California DGS State Commercial Opportunities", "agency": "California Department of General Services",
      "url": CA_DGS, "state": "CA", "run": california_dgs, "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines."},
     {"id": "philly-landbank", "name": "Philadelphia Land Bank vacant lots", "agency": "Philadelphia Land Bank / PHDC",
-     "url": PHILLY_LB_URL, "state": "PA", "run": philly_landbank,
-     "about": "Vacant land bank parcels in Philadelphia with OPA IDs, zoning districts, and GIS parcel outlines."},
+     "url": PHILLY_LB_URL, "state": "PA", "run": philly_landbank, "requires_sale_match": True,
+     "about": "Philadelphia Land Bank parcels marked available on the official sale map and matched to its vacant land layer."},
     {"id": "cleveland-landbank", "name": "City of Cleveland Land Bank vacant land", "agency": "City of Cleveland Land Bank",
      "url": CLEVELAND_LB_URL, "state": "OH", "run": cleveland_landbank,
      "about": "Largest residential, commercial, and industrial vacant lots in the City of Cleveland Land Bank with GIS parcel outlines."},
     {"id": "dallas-landbank", "name": "City of Dallas Land Bank vacant lots", "agency": "City of Dallas Land Bank",
-     "url": DALLAS_LB_URL, "state": "TX", "run": dallas_landbank,
-     "about": "Unimproved vacant residential land bank lots across Dallas County from City of Dallas Open Data GIS."},
+     "url": DALLAS_LB_URL, "state": "TX", "run": dallas_landbank, "historical_only": True,
+     "about": "The former feed shows potential Land Bank acquisitions. Its parcels are withheld from active inventory."},
     {"id": "detroit-commercial-land", "name": "City of Detroit Priced Vacant Land For Sale", "agency": "City of Detroit Housing & Revitalization Dept.",
      "url": DETROIT_COMM_URL, "state": "MI", "run": detroit_commercial_land,
      "about": "Fixed-price City of Detroit vacant land parcels for sale with published asking prices and square footage."},
@@ -4669,8 +4875,27 @@ SOURCES = [
     {"id": "sauk-county-wi", "name": "Sauk County Tax-Forfeited Land For Sale", "agency": "Sauk County Treasurer, Wisconsin",
      "url": SAUK_WI_URL, "state": "WI", "run": sauk_county_wi,
      "about": "Rural tax-forfeited land parcels open for Offer to Purchase in Sauk County, Wisconsin."},
+    {"id": "hoke-county-nc", "name": "Hoke County surplus land bids", "agency": "Hoke County, North Carolina",
+     "url": HOKE_NC_URL, "state": "NC", "run": hoke_surplus,
+     "about": "Current county surplus land table with parcel IDs, acreage where provided, and official minimum bids."},
+    {"id": "wsdot-surplus", "name": "Washington DOT current unimproved surplus lots", "agency": "Washington State Department of Transportation",
+     "url": WSDOT_URL, "state": "WA", "run": wsdot_surplus,
+     "about": "Current first-come sale listings with no improvements and a published minimum offer."},
+    {"id": "itasca-county-mn", "name": "Itasca County over-the-counter tax-forfeited land", "agency": "Itasca County, Minnesota",
+     "url": ITASCA_URL, "state": "MN", "run": itasca_otc,
+     "about": "Official unimproved tax-forfeited parcels currently offered over the counter with the county's published minimum amount."},
 ]
 NOT_CARRIED = [
+    ("Arizona DOT and Arizona State Land Department sales", "https://azdot.gov/business/right-way-properties/vacant-land-and-commercial-properties-sale",
+     "Automated reads are skipped because the robots.txt endpoints returned HTTP 403. Browse the agency property notices directly."),
+    ("West Virginia State Auditor County Collections", "https://main.wvsao.gov/CountyCollections/",
+     "Automated reads are skipped because the site's robots.txt route returned HTML instead of crawler rules."),
+    ("Orange County Comptroller lands available for taxes", "https://www.occompt.com/158/Land-Available-For-Taxes",
+     "The Comptroller page's robots.txt could not be read. Browse its lands-available list directly."),
+    ("GovDeals and Bid4Assets listings", "https://www.govdeals.com/",
+     "Automated reads were skipped when these auction services' robots.txt endpoints returned HTTP 403."),
+    ("City of Dallas potential Land Bank acquisitions", "https://citysecretary2.dallascityhall.com/resolutions/2026/02-25-26/26-0395.pdf",
+     "The City's annual-plan map shows lots eligible for acquisition by the Land Bank. It does not identify lots currently offered for purchase."),
     ("GSA RealEstateSales.gov (federal surplus)", "https://realestatesales.gov/",
      "Not crawled: its robots.txt disallows automated access. Browse it directly."),
     ("BLM public land sales", "https://www.blm.gov/programs/lands-and-realty/land-tenure/land-sales",

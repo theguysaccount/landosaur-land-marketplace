@@ -40,7 +40,7 @@ OFFICIAL = {
     "cityofyankton.org", "burleigh.gov", "vcgi.vermont.gov", "dnrc.mt.gov",
     "cityofboise.org", "auburnmaine.gov", "portlandmaine.gov",
     "phdcphila.org", "atlas.phila.gov", "clevelandohio.gov", "dallascityhall.com",
-    "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us",
+    "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us", "hokecounty.net", "wsdot.wa.gov", "itascacountymn.gov",
 }
 
 
@@ -126,12 +126,13 @@ def validate(rel):
 
 
 def main(dist, data_dir=None):
+    dist = os.path.abspath(dist)
     base = config.base_path()
     problems, titles, indexable = [], {}, set()
     files = set()
     for dirpath, _, names in os.walk(dist):
-        prefix = os.path.relpath(dirpath, dist)
-        files.update(names if prefix == "." else (os.path.join(prefix, name) for name in names))
+        prefix = dirpath[len(dist) + 1:]
+        files.update(os.path.join(prefix, name) for name in names)
     pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
     with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 6), initializer=init_worker,
                              initargs=(dist, files, base)) as pool:

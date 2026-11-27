@@ -118,7 +118,7 @@ function filterRows(rows, crit) {
     if (q && `${r[9]} ${r[10]} ${r[11]} ${r[3]}`.toLowerCase().indexOf(q) < 0) continue;
     const isCash = r[5] === "cash";
     const isAuc = r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms";
-    const isNone = r[5] === "none" && !isAuc;
+    const isNone = !isCash && !isAuc;
     const isDirect = Boolean(r[13]);
     if ((mode === "cash" || mode === "buy_now") && !isCash) continue;
     if ((mode === "min_bid" || mode === "auction") && !isAuc) continue;

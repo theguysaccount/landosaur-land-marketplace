@@ -50,6 +50,20 @@ try {
     const total = await page.eval("document.querySelector('[data-t=total]').textContent");
     assert(total === "$1,800", "total is " + total);
   });
+  await step("program-priced neighborhood lots stay in the application filter", async () => {
+    await page.goto(base + "/#state=MI&kind=none&q=neighborhood%20lot");
+    await page.waitFor("/listings match/.test(document.getElementById('map-count').textContent)", 15000);
+    assert(await page.eval("document.querySelector('#results .badge')?.textContent.includes('Program price')"),
+           "Detroit Neighborhood Lots did not appear under Land Bank / Offer");
+    await page.eval("document.querySelector('[data-deal-mode=cash]').click()");
+    assert(await page.eval("!document.querySelector('#results .card-title')"),
+           "a Neighborhood Lot appeared under Buy It Now");
+    if (!isLocal) {
+      const eligible = await page.eval(`fetch(${JSON.stringify(base)} + "/api/search/?state=MI&mode=offer&q=neighborhood+lot&limit=1")
+        .then((r) => r.json()).then((d) => d.results?.[0]?.price_kind === "application" && d.results[0].deal_mode === "offer")`);
+      assert(eligible, "search API omitted program-priced land-bank supply");
+    }
+  });
   await step("50-state land prices observatory renders Georgia chart and counties", async () => {
     await page.goto(base + "/land-prices/georgia/");
     assert(await page.eval("document.querySelectorAll('svg.trend-svg path').length >= 1"), "missing SVG trend chart");

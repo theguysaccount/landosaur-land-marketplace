@@ -12,7 +12,6 @@ import json
 import os
 import sys
 import time
-import urllib.request
 
 from . import adapters, config, store
 from .net import Fetcher
@@ -30,7 +29,7 @@ def run(data_dir=None, only=None, now=None, log=print, sources=None, fetcher=Non
     changed, warnings = [], []
     fetch = fetcher or Fetcher(log=log)
     for src in sources or adapters.SOURCES:
-        if only and src["id"] not in only:
+        if src.get("historical_only") or (only and src["id"] not in only):
             continue
         entry = status["sources"].setdefault(src["id"], {})
         entry.update({"name": src["name"], "agency": src["agency"], "url": src["url"], "state": src["state"],
@@ -53,6 +52,9 @@ def run(data_dir=None, only=None, now=None, log=print, sources=None, fetcher=Non
             warnings.append("%s kept its last good data (%s)" % (src["name"], error))
             continue
         old = store.load_listings(src["id"], data_dir)
+        if src.get("requires_sale_match") and info.get("complete"):
+            for prior in old:
+                prior["status"] = "availability_unverified"
         merged, merge_notes = store.merge(old, rows, today, bool(info.get("complete")))
         notes += merge_notes
         if store.save_listings(src["id"], merged, data_dir):
@@ -71,9 +73,7 @@ def refresh_land_index(data_dir=None, log=print):
     """Cache the sister site's county land values (USDA/FHFA) used for price context. Keeps the old copy on failure."""
     path = os.path.join(data_dir or config.DATA, "usda", "land-index-counties.json")
     try:
-        req = urllib.request.Request(config.LAND_INDEX_URL + "/api/counties.json", headers={"User-Agent": config.USER_AGENT})
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            rows = json.loads(resp.read().decode("utf-8"))
+        rows = Fetcher(log=log).json(config.LAND_INDEX_URL + "/api/counties.json")
         if not isinstance(rows, list) or len(rows) < 1000:
             raise ValueError("unexpected county list")
     except Exception as exc:

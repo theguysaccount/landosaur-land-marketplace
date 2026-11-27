@@ -9,8 +9,8 @@
   var countEl = document.getElementById("map-count");
   var results = document.getElementById("results");
   var scope = box.getAttribute("data-scope");
-  var KIND = { cash: "Buy It Now", min_bid: "Auction · Min bid", none: "Offer / app" };
-  var STATUS = {
+  var KIND = { application: "Program price", cash: "Buy It Now", min_bid: "Auction · Min bid", none: "Offer / app" };
+  var STATUS = { availability_unverified: "Sale availability unconfirmed",
     listed: "Buy / Apply", auction_open: "Auction open", auction_terms: "Auction terms",
     proposal_open: "Proposals open", pending: "Sale pending", auction_closed: "Closed"
   };
@@ -337,7 +337,7 @@
       }
       var isCash = r[5] === "cash";
       var isAuc = r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms";
-      var isNone = r[5] === "none" && !isAuc;
+      var isNone = !isCash && !isAuc;
       var isDirect = Boolean(r[13]);
       modeCounts[""]++;
       if (isCash) modeCounts.cash++;

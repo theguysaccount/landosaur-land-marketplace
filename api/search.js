@@ -36,7 +36,7 @@ function matchesMode(r, mode) {
   if (!mode || mode === "all") return true;
   if (mode === "buy_now" || mode === "cash") return r[5] === "cash";
   if (mode === "auction" || mode === "min_bid") return r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms";
-  if (mode === "offer" || mode === "none" || mode === "land_bank") return r[5] === "none" && r[7] !== "auction_open" && r[7] !== "auction_terms";
+  if (mode === "offer" || mode === "none" || mode === "land_bank") return r[5] !== "cash" && r[5] !== "min_bid" && r[7] !== "auction_open" && r[7] !== "auction_terms";
   if (mode === "direct") return Boolean(r[13]);
   return true;
 }
@@ -146,7 +146,7 @@ export async function GET(request) {
       counts.all++;
       if (r[5] === "cash") counts.buy_now++;
       if (r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms") counts.auction++;
-      if (r[5] === "none" && r[7] !== "auction_open" && r[7] !== "auction_terms") counts.offer++;
+      if (r[5] !== "cash" && r[5] !== "min_bid" && r[7] !== "auction_open" && r[7] !== "auction_terms") counts.offer++;
       if (r[13]) counts.direct++;
       statesSet.add(r[3]);
 

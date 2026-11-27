@@ -443,3 +443,70 @@ class SaukTest(unittest.TestCase):
         self.assertEqual([row["address"] for row in rows], ["", "", "1 County Road"])
         self.assertTrue(all(row["lat"] is None and row["lon"] is None for row in rows))
         self.assertNotIn("Mailing address", repr(rows))
+
+
+class CurrentOfferingsTest(unittest.TestCase):
+    def test_detroit_neighborhood_price_is_published_program_price(self):
+        price = adapters.parse_detroit_neighborhood_price(
+            "<p>Neighborhood Lots will be sold for $250 and require a Neighborhood Lot Endorsement.</p>")
+        rows = adapters.parse_detroit_features([
+            {"attributes": {"parcel_id": "012", "name": "Vacant lot",
+                            "inventory_status_socrata": "Neighborhood Lot For Sale"}},
+            {"attributes": {"parcel_id": "013", "name": "Held lot",
+                            "inventory_status_socrata": "DLBA Owned Lot"}},
+            {"attributes": {"parcel_id": "014", "name": "House",
+                            "inventory_status_socrata": "Marketed Structure For Sale"}},
+        ], lambda message: None, price)
+        self.assertEqual([(r["id"], r["price_kind"], r["price"]) for r in rows],
+                         [("mi-dlba-012", "application", 250)])
+        self.assertEqual(rows[0]["url"], adapters.DLBA_NEIGHBORHOOD_URL)
+        self.assertIsNone(adapters.parse_detroit_neighborhood_price("The program sets terms."))
+
+    def test_hoke_reads_open_land_and_excludes_closed_bids(self):
+        table = """
+        <table>
+        <tr><th>Posted</th><th>Parcel Number</th><th>Approximate Acreage</th><th>Location</th>
+        <th>Minimum Bid</th><th>Current Bid Amount</th><th>Upset Period Ends</th></tr>
+        <tr><td>11/26</td><td>12345-01-01-020</td><td>0.25</td><td>Oak Rd</td>
+        <td>$3,455.10</td><td></td><td></td></tr>
+        <tr><td>10/26</td><td>12345-01-01-021</td><td>0.9</td><td>Ash Rd</td>
+        <td>$2,001</td><td></td><td>CLOSED</td></tr>
+        </table>
+        """
+        rows = adapters.parse_hoke_surplus(table, NOW, lambda message: None)
+        self.assertEqual([(r["apn"], r["acres"], r["price"]) for r in rows],
+                         [("12345-01-01-020", .25, 3455.10)])
+
+    def test_wsdot_uses_county_sale_index_and_excludes_improved_properties(self):
+        index = ('<h3>Properties available on a first come, first serve basis</h3>'
+                 '<h3>Pierce County</h3><p><a href="/node/6338">Parcel number: 3-27-15722</a></p><h2>Terms</h2>')
+        [(county, reference, url)] = adapters.parse_wsdot_index(index)
+        page = ('<h2>Minimum bid</h2><p>$350,000.00</p>'
+                '<h2>Location and size</h2><p>The subject is a 2.85 +/- acre parcel.</p>'
+                '<h2>Improvements</h2><p>None</p><h2>Terms</h2>')
+        row = adapters.parse_wsdot_property(page, county, reference, url)
+        self.assertEqual((row["county"], row["price"], row["acres"]), ("Pierce", 350000, 2.85))
+        self.assertIsNone(adapters.parse_wsdot_property(page.replace(">None<", ">House<"), county, reference, url))
+
+    def test_itasca_uses_unimproved_section_and_preserves_parcel_prices(self):
+        report = """2026 - ITASCA COUNTY TAX-FORFEITED PROPERTY : AVAILABLE OVER-THE-COUNTER
+           IMPROVED
+           3#   2.0   01-002-0034   Improved property  $55,000.00
+           UNIMPROVED
+           1#   0.08    05-445-0930   SITE DESCRIPTION      10-55-26       $5,443.00
+                0.03    74-420-0710   SITE DESCRIPTION       2-144-26        $165.00
+Tracts are available for purchase at not less than the appraised price.
+"""
+        rows = adapters.parse_itasca_otc(report, adapters.ITASCA_URL, NOW, lambda message: None)
+        self.assertEqual([(r["apn"], r["acres"], r["price"]) for r in rows],
+                         [("05-445-0930", .08, 5443), ("74-420-0710", .03, 165)])
+
+
+    def test_philadelphia_only_carries_lots_matching_the_sale_map(self):
+        features = [
+            {"attributes": {"opa_id": "341032950", "address": "6214 VINE ST"}},
+            {"attributes": {"opa_id": "341032951", "address": "6260 VINE ST"}},
+        ]
+        rows = adapters.parse_philly_lb_features(features, {"341032950": "Owned - Available"}, lambda message: None)
+        self.assertEqual([r["apn"] for r in rows], ["341032950"])
+        self.assertEqual(rows[0]["url"], adapters.PHILLY_LB_URL)

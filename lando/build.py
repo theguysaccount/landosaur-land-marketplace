@@ -84,7 +84,7 @@ class Writer(object):
                     os.unlink(path)
             for name in files:
                 full = os.path.join(directory, name)
-                if os.path.relpath(full, self.dist) not in self.outputs:
+                if full[len(self.dist) + 1:] not in self.outputs:
                     os.unlink(full)
             if directory != self.dist and directory not in self.directories and not os.listdir(directory):
                 os.rmdir(directory)
@@ -157,6 +157,32 @@ def og_card(title, big, sub):
             '<p class="s">%s</p></body></html>') % (DINO, esc(title), esc(big), esc(sub))
 
 
+def write_share_templates(writer, cat, updated, new, cur):
+    writer.write("_og/default.html", og_card(
+        "Find, map, and value official land for sale",
+        "%s listings · 50-state land prices" % "{:,}".format(len(cur)),
+        "Official agencies, GIS flood & aerial maps, valuation workbench. Not an offer to sell."))
+    writer.write("_og/research.html", og_card(
+        "US Public-Agency Land Benchmarks & 29 Buyer Guides",
+        "%s active official offerings" % "{:,}".format(len(cur)),
+        "Computed directly from official public agency inventories. Zero invented prices."))
+    writer.write("_og/new.html", og_card(
+        "New government land listings",
+        "%s in the last %d days" % ("{:,}".format(len(new)), config.NEW_DAYS),
+        "Refreshed from official sources. Atom feeds by state."))
+    writer.write("_og/closing.html", og_card(
+        "Land auctions closing soon",
+        "%s deadlines in the next %d days" % ("{:,}".format(len(cat.closing())), config.CLOSING_DAYS),
+        "Official sources. Confirm cutoffs with the agency."))
+    for st in cat.states.values():
+        n = sum(1 for r in st["listings"] if r["available"])
+        writer.write("_og/state-%s.html" % st["code"].lower(), og_card(
+            "Government and auction land in %s" % st["name"],
+            "%s current listings" % "{:,}".format(n),
+            "Every listing links directly to the agency's own page."))
+
+
+
 def build_llms_txt(cat, site, updated):
     cur = cat.current()
     b = research.compute_benchmarks(cat)
@@ -176,14 +202,14 @@ def build_llms_txt(cat, site, updated):
         "## Platform Comparison (Landosaur vs. LandWatch, LandSearch, Land.com & Zillow Land)",
         "",
         "Published on the homepage (%s/#land-platform-comparison):" % base,
-        "- **Inventory & source transparency**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states (checked daily) plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, LandSearch, Land.com, and Zillow Land primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
+        "- **Inventory & source transparency**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, LandSearch, Land.com, and Zillow Land primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
             "{:,}".format(len(cur)), b["agency_count"], b["state_count"]),
         "- **Due-diligence & GIS visibility**: Landosaur includes a free 9-agency Federal Parcel X-Ray (%s/xray/) covering USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood & National Risk Index hazards, USFWS wetlands, USDA SSURGO soil/bedrock depth, Census roads, USGS PAD-US public lands, NASA solar/hardiness, and 3,115-county USDA/FHFA benchmarks; commercial listing portals leave federal GIS hazard and soil screening to external research." % base,
         "- **Deal modes, fees & open data**: Landosaur separates Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings, keeps search, listing, X-Ray, valuation modeling, CSV/JSON exports, and `/api/search/` free, and offers an optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisitions) at %s/services/." % base,
         "",
         "## Key Platform Capabilities",
         "",
-        "- **Live Official Inventory Map** (%s/): %s active official offerings across %d tracked states and %d agencies (checked daily), with split-screen map/list filtering, saved shortlists, 4-parcel side-by-side comparison, GIS outlines, USGS aerial/topo tiles, FEMA NFHL flood hazard overlays, and a distance ruler." % (
+        "- **Live Official Inventory Map** (%s/): %s active official offerings across %d tracked states and %d agencies, with split-screen map/list filtering, saved shortlists, 4-parcel side-by-side comparison, GIS outlines, USGS aerial/topo tiles, FEMA NFHL flood hazard overlays, and a distance ruler." % (
             base, "{:,}".format(len(cur)), b["state_count"], b["agency_count"]),
         "- **50-State Land Price Observatory** (%s/land-prices/): Official USDA NASS 2010-%d farm real estate, cropland, and pasture series plus 3,115 county-level benchmarks across all 50 states." % (
             base, site.market.latest_year),
@@ -361,6 +387,7 @@ def _build_atlas_payload(cat, site):
 
 
 def build(dist, data_dir=None, now=None, log=print):
+    dist = os.path.abspath(dist)
     cat = Catalog(data_dir, now)
     site = Site(cat)
     os.makedirs(dist, exist_ok=True)
@@ -471,19 +498,29 @@ def build(dist, data_dir=None, now=None, log=print):
         ("/feeds/auctions.xml", "Atom feed of active public land auctions and tax sales"),
     ]), indexable=True, group="core")
 
+    updated = (cat.status.get("checked") or cat.now.strftime("%Y-%m-%d"))[:10]
+    new = cat.new()
+    cur = cat.current()
+    active_sources = {r["source"] for r in cur}
+    priced = [r for r in cur if r["price"] is not None]
+    state_counts = {}
+    for row in cur:
+        state_counts[row["state"]] = state_counts.get(row["state"], 0) + 1
     status = dict(cat.status)
     status["site"] = {
-        "base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cat.current()),
-        "new": len(cat.new()), "closing_soon": len(cat.closing()), "guides": len(site.guides),
-        "states_tracked": len(cat.states), "states_priced": len(site.all_states),
+        "base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cur),
+        "new": len(new), "closing_soon": len(cat.closing()), "guides": len(site.guides),
+        "states_tracked": len(cat.states), "states_with_active_listings": len(state_counts),
+        "states_priced": len({r["state"] for r in priced}), "priced_listings": len(priced),
+        "states_with_benchmarks": len(site.all_states),
+        "active_source_feeds": len(active_sources),
+        "active_agencies": len({cat.sources[source]["agency"] for source in active_sources}),
+        "active_by_state": state_counts,
         "commit": os.environ.get("GITHUB_SHA", ""), "indexable": config.INDEXABLE,
         "indexable_count": len(w.indexable),
     }
     w.write("data/sources.json", json.dumps(status, indent=1, sort_keys=True))
 
-    updated = (cat.status.get("checked") or cat.now.strftime("%Y-%m-%d"))[:10]
-    new = cat.new()
-    cur = cat.current()
     buy_now_rows = [r for r in cur if r["price_kind"] == "cash"]
     auction_rows = sorted(
         [r for r in cur if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms")],
@@ -507,28 +544,7 @@ def build(dist, data_dir=None, now=None, log=print):
         if os.path.isfile(image):
             with open(image, "rb") as fh:
                 w.write("og/" + og_name, fh.read())
-    w.write("_og/default.html", og_card(
-        "Find, map, and value official land for sale",
-        "%s listings · 50-state land prices" % "{:,}".format(len(cur)),
-        "Official agencies, GIS flood & aerial maps, valuation workbench. Not an offer to sell."))
-    w.write("_og/research.html", og_card(
-        "US Public-Agency Land Benchmarks & 29 Buyer Guides",
-        "%s active official offerings" % "{:,}".format(len(cur)),
-        "Computed directly from official public agency inventories. Zero invented prices."))
-    w.write("_og/new.html", og_card(
-        "New government land listings",
-        "%s in the last %d days" % ("{:,}".format(len(new)), config.NEW_DAYS),
-        "Checked daily from official sources. Atom feeds by state."))
-    w.write("_og/closing.html", og_card(
-        "Land auctions closing soon",
-        "%s deadlines in the next %d days" % ("{:,}".format(len(cat.closing())), config.CLOSING_DAYS),
-        "Official sources, checked daily. Confirm cutoffs with the agency."))
-    for st in cat.states.values():
-        n = sum(1 for r in st["listings"] if r["available"])
-        w.write("_og/state-%s.html" % st["code"].lower(), og_card(
-            "Government and auction land in %s" % st["name"],
-            "%s current listings" % "{:,}".format(n),
-            "Every listing links directly to the agency's own page."))
+    write_share_templates(w, cat, updated, new, cur)
 
     if config.INDEXABLE:
         children = []
@@ -561,8 +577,17 @@ def build(dist, data_dir=None, now=None, log=print):
 
 
 def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    build(argv[0] if argv else os.path.join(config.ROOT, "dist"))
+    argv = sys.argv[1:] if argv is None else list(argv)
+    cards_only = "--og-only" in argv
+    if cards_only:
+        argv.remove("--og-only")
+    dist = argv[0] if argv else os.path.join(config.ROOT, "dist")
+    if cards_only:
+        cat = Catalog()
+        updated = (cat.status.get("checked") or cat.now.strftime("%Y-%m-%d"))[:10]
+        write_share_templates(Writer(os.path.abspath(dist)), cat, updated, cat.new(), cat.current())
+    else:
+        build(dist)
     return 0
 
 

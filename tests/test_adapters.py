@@ -223,6 +223,89 @@ class Phase2AdaptersTest(unittest.TestCase):
         self.assertEqual(len(ut), 1)
         self.assertEqual((ut[0]["state"], ut[0]["county"]), ("UT", "Weber"))
 
+    def test_phase3_ny_fl_nm_md_tx(self):
+        ny = adapters.parse_albany_features([{
+            "attributes": {"PIN_SBL": "08702300010040000000", "print_key": "87.23-1-4", "full_addre": "187A MOUNT HOPE DR",
+                           "prop_class": "311", "class_desc": "Residential Vacant Land", "acres": 0.069, "rezone1": "R-T"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ny), ny[0]["state"], ny[0]["county"]), (1, "NY", "Albany"))
+
+        ora = adapters.parse_orange_fl_features([{
+            "attributes": {"USER_TDA_NUM": "2024-12942", "USER_Sale_Date": "01/07/2027",
+                           "USER_Deed_Status": "Active Sale", "USER_PARCEL": "10-24-29-3055-17-060"},
+            "geometry": {"x": -81.408, "y": 28.409},
+        }], NOW, lambda w: None)
+        self.assertEqual((len(ora), ora[0]["state"], ora[0]["status"]), (1, "FL", "auction_open"))
+        self.assertTrue(ora[0]["deadline"].startswith("2027-01-07"))
+
+        nm = adapters.parse_lascruces_features([{
+            "attributes": {"ACCOUNTNUM": "R0219246", "TOTALACRES": 2.34, "CouncilDistrict": 6},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(nm), nm[0]["state"]), (1, "NM"))
+
+        md = adapters.parse_baltimore_features([{
+            "attributes": {"PIN": "0563043", "BLOCKLOT": "0563 043", "ZONECODE": "C-5HS", "LOT_SIZE": "85X92-1"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(md), md[0]["state"], md[0]["county"]), (1, "MD", "Baltimore City"))
+
+        tx = adapters.parse_bigspring_features([{
+            "attributes": {"prop_id_te": "49828", "legal_acre": 0.2, "legal_desc": "SE/4 OF SC 32", "situs_num": "310", "situs_stre": "NOLAN"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(tx), tx[0]["state"], tx[0]["county"]), (1, "TX", "Howard"))
+
+    def test_phase4_wa_nc_ga_co_az_la_nj_fl(self):
+        wa = adapters.parse_king_wa_features([{
+            "attributes": {"PIN": "0000200038", "CAT_TYPE": "Tax Title", "ACREAGE": 0.46, "JURISDICTIONATACQUISITION": "KENT"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(wa), wa[0]["state"], wa[0]["status"]), (1, "WA", "auction_terms"))
+
+        nc = adapters.parse_charlotte_features([{
+            "attributes": {"ParcelID": "00155107", "Address": "22928 Torrance Chapel Rd.", "Acres": 4.65, "LandImprovements": "Undeveloped"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(nc), nc[0]["state"]), (1, "NC"))
+
+        ga = adapters.parse_canton_ga_features([{
+            "attributes": {"PIN": "14-0160-0021", "Acreage": 0.36, "Zoning": "CITY"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ga), ga[0]["state"]), (1, "GA"))
+
+        co = adapters.parse_sanmiguel_co_features([{
+            "attributes": {"PIN": "452335316008", "LOC_CITY": "PLACERVILLE", "LEGAL_DESC": "LOTS 4 5 AND 6"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(co), co[0]["state"]), (1, "CO"))
+
+        az = adapters.parse_navajo_az_features([{
+            "attributes": {"APN": "104-02-059A", "AuctionURL": "https://publicsurplus.com/sms/navajocounty,az/auction/view?auc=3926102"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(az), az[0]["state"], az[0]["offering"]), (1, "AZ", "auction"))
+
+        la = adapters.parse_ebr_la_rows([{
+            "assessment_num": "008-3340-1", "physadd": "9137 RIDGE OAK DR", "tax_roll_year": "2023",
+            "geolocation": {"latitude": "30.354", "longitude": "-91.116"},
+        }], lambda w: None)
+        self.assertEqual((len(la), la[0]["state"]), (1, "LA"))
+
+        nj = adapters.parse_cherryhill_nj_features([{
+            "attributes": {"UNIQUEID": "0409-1", "BLOCK": "369.01", "LOT": "16", "HADD": "GRANT AVE"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(nj), nj[0]["state"]), (1, "NJ"))
+
+        orl = adapters.parse_orlando_fl_rows([{
+            "parcel": "03-23-29-0180-02-240", "address": "601 18th Street", "lot_size_acres": "0.15",
+            "zoning": "R-1", "conforming_lot_58_1152": True, "geocoded_column": {"coordinates": [-81.386, 28.522]},
+        }], lambda w: None)
+        self.assertEqual((len(orl), orl[0]["state"]), (1, "FL"))
+
 
 class GeometryTest(unittest.TestCase):
     def test_centroid_and_outline_link(self):

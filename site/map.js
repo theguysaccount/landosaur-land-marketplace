@@ -1,4 +1,5 @@
-/* Zillow-for-Land split-screen map explorer, sort/viewport filters, local shortlist & parcel comparison. */
+/* Zillow-for-Land split-screen map explorer: Buy It Now vs. Auction vs. Land Bank switcher,
+   seamless live merge of Direct Owner/Agent listings (/api/listings/), viewport search, shortlist CSV export, & comparison. */
 (function () {
   "use strict";
   var box = document.getElementById("map");
@@ -8,9 +9,9 @@
   var countEl = document.getElementById("map-count");
   var results = document.getElementById("results");
   var scope = box.getAttribute("data-scope");
-  var KIND = { cash: "Fixed price", min_bid: "Min bid", none: "Offer / app" };
+  var KIND = { cash: "Buy It Now", min_bid: "Auction · Min bid", none: "Offer / app" };
   var STATUS = {
-    listed: "Listed", auction_open: "Bidding open", auction_terms: "Auction terms",
+    listed: "Buy / Apply", auction_open: "Auction open", auction_terms: "Auction terms",
     proposal_open: "Proposals open", pending: "Sale pending", auction_closed: "Closed"
   };
   var rows = [], byId = {}, first = true, lastShown = [];
@@ -26,16 +27,19 @@
       ? Math.round(v).toLocaleString("en-US")
       : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   }
-  function acres(a) { return a ? (Math.round(a * 100) / 100) + (a === 1 ? " ac" : " ac") : ""; }
-  function colour(r) { return !r[8] ? "#8b938c" : (r[5] === "min_bid" ? "#b5602f" : (r[5] === "cash" ? "#1d6f42" : "#2f7d6e")); }
+  function acres(a) { return a ? (Math.round(a * 100) / 100) + " ac" : ""; }
+  function colour(r) {
+    if (!r[8]) return "#8b938c";
+    if (r[13]) return r[5] === "min_bid" ? "#ea580c" : "#16a34a";
+    return r[5] === "min_bid" ? "#b5602f" : (r[5] === "cash" ? "#1d6f42" : "#2f7d6e");
+  }
+  function parcelHref(r) {
+    return r[13] ? (base + "/direct/?id=" + encodeURIComponent(r[0])) : (base + "/land/" + r[0] + "/");
+  }
 
-  // Local shortlist & comparison (no accounts, no cookies)
-  function loadList(key) {
-    try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { return []; }
-  }
-  function saveList(key, arr) {
-    try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) {}
-  }
+  // Local shortlist & comparison
+  function loadList(key) { try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { return []; } }
+  function saveList(key, arr) { try { localStorage.setItem(key, JSON.stringify(arr)); } catch (e) {} }
   var savedIds = loadList("landosaur_saved");
   var compareIds = loadList("landosaur_compare");
 
@@ -55,7 +59,6 @@
     renderCards(lastShown);
   }
 
-  // Base maps + optional FEMA flood overlay
   var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
   var topo = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map" });
   var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map: imagery" });
@@ -104,8 +107,8 @@
   }
   function popup(r) {
     var d = el("div", "pop");
-    var a = el("a", null, r[9]); a.href = base + "/land/" + r[0] + "/"; d.appendChild(a);
-    var bits = [STATUS[r[7]] || r[7]];
+    var a = el("a", null, r[9]); a.href = parcelHref(r); d.appendChild(a);
+    var bits = [r[13] ? (r[5] === "min_bid" ? "Direct Auction" : "Direct Buy It Now") : (STATUS[r[7]] || r[7])];
     if (r[4] != null) bits.push((KIND[r[5]] || "Price") + " " + money(r[4]));
     if (r[6]) bits.push(acres(r[6]));
     if (r[4] != null && r[6] > 0) bits.push(money(r[4] / r[6]) + "/ac");
@@ -135,8 +138,9 @@
       if (mode === "deadline") {
         return ((a[12] || "9999") < (b[12] || "9999") ? -1 : (a[12] || "9999") > (b[12] || "9999") ? 1 : 0) || (a[9] < b[9] ? -1 : 1);
       }
-      // Default: active first, then priced/closing soonest, then alphabetical
-      return (b[8] - a[8]) || ((a[12] || "9999") < (b[12] || "9999") ? -1 : (a[12] || "9999") > (b[12] || "9999") ? 1 : 0) ||
+      // Default: direct listings & active first, then closing soonest, then priced, then alphabetical
+      return ((b[13] ? 1 : 0) - (a[13] ? 1 : 0)) || (b[8] - a[8]) ||
+        ((a[12] || "9999") < (b[12] || "9999") ? -1 : (a[12] || "9999") > (b[12] || "9999") ? 1 : 0) ||
         ((a[4] != null ? 0 : 1) - (b[4] != null ? 0 : 1)) || (a[9] < b[9] ? -1 : 1);
     });
   }
@@ -148,8 +152,17 @@
     shown.slice(0, cap).forEach(function (r) {
       var li = el("li", "parcel-card");
       var top = el("div", "card-top");
-      var badgeCls = !r[8] ? "off" : (r[5] === "min_bid" ? "auction" : "ok");
-      top.appendChild(el("span", "badge " + badgeCls, r[4] != null ? (KIND[r[5]] + " " + money(r[4])) : (STATUS[r[7]] || r[7])));
+      var isAuc = r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms";
+      var badgeCls = !r[8] ? "off" : (isAuc ? "auction" : "ok");
+      var badgeText;
+      if (r[13]) {
+        badgeText = (r[5] === "min_bid" ? "Direct Auction · " : "Direct Buy It Now · ") + money(r[4]);
+      } else if (r[4] != null) {
+        badgeText = (KIND[r[5]] || "Price") + " " + money(r[4]);
+      } else {
+        badgeText = isAuc ? "Auction · See terms" : (STATUS[r[7]] || r[7]);
+      }
+      top.appendChild(el("span", "badge " + badgeCls, badgeText));
       if (r[6]) {
         var metric = acres(r[6]);
         if (r[4] != null && r[6] > 0) metric += " · " + money(r[4] / r[6]) + "/ac";
@@ -157,13 +170,16 @@
       }
       li.appendChild(top);
       var a = el("a", "card-title", r[9]);
-      a.href = base + "/land/" + r[0] + "/";
+      a.href = parcelHref(r);
       li.appendChild(a);
-      var meta = [r[10] + ", " + r[3], STATUS[r[7]] || r[7]];
+      var meta = [r[10] + ", " + r[3], r[13] ? "Direct Owner / Agent" : (STATUS[r[7]] || r[7])];
       if (r[12]) meta.push("closes " + r[12]);
       li.appendChild(el("span", "sub", meta.join(" · ")));
 
       var acts = el("div", "card-acts");
+      var cta = el("a", "chip-btn chip-link", r[13] ? (r[5] === "min_bid" ? "Bid Now →" : "Buy Now →") : (isAuc ? "Bid Info →" : "Details →"));
+      cta.href = parcelHref(r);
+      acts.appendChild(cta);
       var isSaved = savedIds.indexOf(r[0]) >= 0;
       var sBtn = el("button", "chip-btn" + (isSaved ? " on" : ""), isSaved ? "Saved ★" : "Save ☆");
       sBtn.type = "button";
@@ -193,12 +209,19 @@
     if (shown.length > cap) {
       results.appendChild(el("p", "small", "Showing the first " + cap + " of " + shown.length.toLocaleString("en-US") + ". Narrow filters, sort, or pan the map to explore more."));
     } else if (!shown.length) {
-      results.appendChild(el("p", "small", "No parcels match these filters. Clear a filter or zoom out to see more official offerings."));
+      results.appendChild(el("p", "small", "No parcels match these filters. Clear a filter, zoom out, or list your own land free at /list/."));
     }
+  }
+
+  function syncModeTabs(kindVal) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-deal-mode]"), function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-deal-mode") === (kindVal || ""));
+    });
   }
 
   function apply(skipFit) {
     var f = readForm();
+    syncModeTabs(f.kind);
     writeHash(f);
     var mapBounds = (f.inview && !first) ? map.getBounds() : null;
     var shown = [], markers = [], bounds = [];
@@ -206,7 +229,10 @@
       var r = rows[i];
       if (f.state && r[3] !== f.state) continue;
       if (!f.closed && !r[8]) continue;
-      if (f.kind && r[5] !== f.kind) continue;
+      if (f.kind === "cash" && r[5] !== "cash") continue;
+      else if (f.kind === "min_bid" && !(r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms")) continue;
+      else if (f.kind === "none" && !(r[5] === "none" && r[7] !== "auction_open" && r[7] !== "auction_terms")) continue;
+      else if (f.kind === "direct" && !r[13]) continue;
       if (!isNaN(f.max) && (r[4] == null || r[4] > f.max)) continue;
       if (!isNaN(f.acres) && (!r[6] || r[6] < f.acres)) continue;
       if (f.savedOnly && savedIds.indexOf(r[0]) < 0) continue;
@@ -216,7 +242,7 @@
       }
       shown.push(r);
       if (r[1] != null) {
-        var m = L.circleMarker([r[1], r[2]], { radius: 6, color: "#fff", weight: 2, fillColor: colour(r), fillOpacity: 0.95 });
+        var m = L.circleMarker([r[1], r[2]], { radius: r[13] ? 8 : 6, color: "#fff", weight: 2, fillColor: colour(r), fillOpacity: 0.95 });
         m.bindPopup(popup.bind(null, r));
         markers.push(m);
         bounds.push([r[1], r[2]]);
@@ -238,6 +264,14 @@
     renderCards(shown);
   }
 
+  // Deal-mode segmented switcher (All | Buy It Now | Auction / Bid | Land Bank / Offer | Direct)
+  Array.prototype.forEach.call(document.querySelectorAll("[data-deal-mode]"), function (btn) {
+    btn.addEventListener("click", function () {
+      form.kind.value = btn.getAttribute("data-deal-mode") || "";
+      apply(false);
+    });
+  });
+
   // Quick preset filter pills
   var presetBtns = Array.prototype.slice.call(document.querySelectorAll("[data-preset]"));
   presetBtns.forEach(function (btn) {
@@ -251,15 +285,16 @@
       if (form.savedOnly) form.savedOnly.checked = false;
       if (p === "cash") form.kind.value = "cash";
       else if (p === "min_bid") form.kind.value = "min_bid";
+      else if (p === "direct") form.kind.value = "direct";
       else if (p === "acres5") { form.acres.value = "5"; if (form.sort) form.sort.value = "acres_desc"; }
       else if (p === "under5k") { form.max.value = "5000"; if (form.sort) form.sort.value = "price_asc"; }
       else if (p === "ppa") { if (form.sort) form.sort.value = "ppa_asc"; }
       else if (p === "saved" && form.savedOnly) { form.savedOnly.checked = true; }
-      apply();
+      apply(false);
     });
   });
 
-  // Comparison Dock + Modal
+  // Comparison Dock + Shortlist CSV Export + Modal
   var dock = document.getElementById("compare-dock");
   var cmpModal = document.getElementById("compare-modal");
   function updateDock() {
@@ -280,7 +315,7 @@
     if (!items.length) { body.innerHTML = "<p>Select up to 4 listings to compare side by side.</p>"; }
     else {
       var cols = items.map(function (r) {
-        return '<th><a href="' + base + '/land/' + r[0] + '/">' + r[9] + '</a></th>';
+        return '<th><a href="' + parcelHref(r) + '">' + r[9] + '</a></th>';
       }).join("");
       function rowHtml(label, fn) {
         return '<tr><th scope="row">' + label + '</th>' + items.map(function (r) { return '<td>' + fn(r) + '</td>'; }).join("") + '</tr>';
@@ -288,7 +323,7 @@
       body.innerHTML =
         '<div class="scroll"><table class="data"><thead><tr><th>Field</th>' + cols + '</tr></thead><tbody>' +
         rowHtml("Location", function (r) { return r[10] + ", " + r[3]; }) +
-        rowHtml("Status", function (r) { return STATUS[r[7]] || r[7]; }) +
+        rowHtml("Deal Mode", function (r) { return r[13] ? (r[5] === "min_bid" ? "Direct Auction" : "Direct Buy It Now") : (STATUS[r[7]] || r[7]); }) +
         rowHtml("Price / Bid", function (r) { return r[4] != null ? (KIND[r[5]] + " " + money(r[4])) : "Not published"; }) +
         rowHtml("Acreage", function (r) { return r[6] ? acres(r[6]) : "Not stated"; }) +
         rowHtml("Implied $/acre", function (r) { return (r[4] > 0 && r[6] > 0) ? money(r[4] / r[6]) + "/ac" : "–"; }) +
@@ -305,6 +340,23 @@
   if (dock) {
     var oBtn = dock.querySelector("[data-open-compare]");
     if (oBtn) oBtn.addEventListener("click", openCompare);
+    var expBtn = dock.querySelector("[data-export-saved]");
+    if (expBtn) expBtn.addEventListener("click", function () {
+      var list = savedIds.map(function (id) { return byId[id]; }).filter(Boolean);
+      if (!list.length) return;
+      function qCsv(v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; }
+      var header = ["id", "title", "county", "state", "status", "price_kind", "price", "acres", "implied_usd_per_acre", "deadline", "latitude", "longitude", "url"];
+      var lines = [header.join(",")].concat(list.map(function (r) {
+        var ppa = (r[4] > 0 && r[6] > 0) ? (r[4] / r[6]).toFixed(2) : "";
+        return [r[0], r[9], r[10], r[3], STATUS[r[7]] || r[7], r[5], r[4] == null ? "" : r[4], r[6] || "", ppa, r[12] || "", r[1] == null ? "" : r[1], r[2] == null ? "" : r[2], location.origin + parcelHref(r)].map(qCsv).join(",");
+      }));
+      var blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+      var u = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = u; a.download = "landosaur-shortlist.csv";
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(u); a.remove(); }, 400);
+    });
     var clrBtn = dock.querySelector("[data-clear-compare]");
     if (clrBtn) clrBtn.addEventListener("click", function () {
       compareIds = []; saveList("landosaur_compare", compareIds); updateDock(); renderCards(lastShown);
@@ -335,10 +387,24 @@
   form.addEventListener("change", function () { apply(false); });
 
   countEl.textContent = "Loading listings…";
-  fetch(base + "/data/map.json")
-    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(function (d) {
-      rows = d.rows;
+  var directFetch = fetch(base + "/api/listings/").then(function (r) { return r.ok ? r.json() : { listings: [] }; }).catch(function () { return { listings: [] }; });
+  Promise.all([
+    fetch(base + "/data/map.json").then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    directFetch,
+  ])
+    .then(function (pair) {
+      var staticRows = pair[0].rows || [];
+      var directItems = (pair[1] && pair[1].listings) || [];
+      var directRows = directItems.map(function (it) {
+        return [
+          it.id, it.lat, it.lon, it.state, it.current_high_bid || it.price,
+          it.sale_mode === "auction" ? "min_bid" : "cash", it.acres,
+          it.sale_mode === "auction" ? "auction_open" : "listed",
+          it.status === "active" ? 1 : 0, it.title, it.county || "",
+          it.apn || "", (it.deadline || "").slice(0, 10), 1
+        ];
+      });
+      rows = directRows.concat(staticRows);
       for (var i = 0; i < rows.length; i++) byId[rows[i][0]] = rows[i];
       updateDock();
       apply(false);

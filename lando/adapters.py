@@ -74,6 +74,19 @@ NOTES = {  # long notes repeated on many listings are stored by key and expanded
     "la_ttc_bid": "Minimum bid published in the Los Angeles County Treasurer & Tax Collector auction GIS layer. Not a final sale price or appraisal; verify current auction schedule, redemption status, and terms on ttc.lacounty.gov.",
     "broward_surplus": "County-owned surplus real property parcel published in Broward County GIS. Confirm current sale status, bidding method, and liens with Broward County and the Property Appraiser.",
     "udot_surplus": "Unsold surplus right-of-way parcel published in Utah DOT GIS. Confirm availability, appraisal/auction process, and access restrictions with UDOT Right of Way.",
+    "albany_lb": "Vacant land parcel held by the Albany County Land Bank Corp. Confirm current availability, eligibility, and program pricing on albanycountylandbank.org.",
+    "orange_fl_tda": "Active Orange County, Florida Tax Deed Sale parcel with posted auction date. Confirm opening bid, statutory redemption cutoff, title/liens, and auction registration with the Orange County Comptroller.",
+    "lascruces_vac": "City-owned vacant land parcel published in the City of Las Cruces GIS inventory. Confirm surplus disposition availability and zoning directly with the City of Las Cruces.",
+    "baltimore_vac": "City-owned vacant parcel in Baltimore's official GIS inventory. Confirm Buy Into Baltimore / DHCD availability, pricing, and rehabilitation terms directly with Baltimore City DHCD.",
+    "bigspring_tx": "City-owned vacant lot published by the City of Big Spring / Howard County GIS. Confirm current surplus availability, bidding process, and liens with the City of Big Spring.",
+    "king_wa": "Tax-title vacant land held by King County Real Estate Services after tax foreclosure. Confirm current availability, minimum bid, easements, and sale procedures on kingcounty.gov.",
+    "charlotte_nc": "Undeveloped city-owned land parcel published in City of Charlotte GIS. Confirm surplus disposition eligibility and zoning directly with the City of Charlotte.",
+    "canton_ga": "City-owned parcel published by the City of Canton / Cherokee County GIS. Confirm surplus availability and zoning directly with the City of Canton.",
+    "sanmiguel_co": "County-owned parcel published by San Miguel County GIS. Confirm whether the tract is available for surplus sale or public auction with San Miguel County.",
+    "navajo_az": "Back-tax auction parcel published by Navajo County GIS with direct auction listing link. Confirm bidding window, opening bid, road access, and title terms directly on the auction page.",
+    "ebr_la": "Adjudicated tax-sale parcel published by East Baton Rouge Parish Open Data. Under Louisiana adjudicated property statutes, confirm redemption status, purchase process, and title requirements with the parish.",
+    "cherryhill_nj": "Township-owned vacant lot published in Cherry Hill / Camden County GIS. Confirm municipal land sale auction schedule and minimum bid with Cherry Hill Township.",
+    "orlando_fl": "City-owned vacant lot published by the City of Orlando Open Data portal (including zoning, dimensions, and conforming-lot status). Confirm purchase/application eligibility with the City of Orlando.",
     "gis_area": "Area computed from the agency's GIS parcel outline (not a legal survey).",
 }
 
@@ -122,6 +135,26 @@ def outline_url(listing):
         return one_parcel_url(BROWARD_GIS, "FOLIO='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "utah-udot":
         return one_parcel_url(UDOT_GIS, "parcel_number='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "albany-landbank":
+        return one_parcel_url(ALBANY_GIS, "PIN_SBL='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "las-cruces-nm":
+        return one_parcel_url(LASCRUCES_GIS, "ACCOUNTNUM='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "baltimore-vacant":
+        return one_parcel_url(BALTIMORE_GIS, "PIN='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "big-spring-tx":
+        return one_parcel_url(BIGSPRING_GIS, "prop_id_te='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "king-county-wa":
+        return one_parcel_url(KING_WA_GIS, "PIN='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "charlotte-nc":
+        return one_parcel_url(CHARLOTTE_GIS, "ParcelID='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "canton-ga":
+        return one_parcel_url(CANTON_GA_GIS, "PIN='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "san-miguel-co":
+        return one_parcel_url(SANMIGUEL_CO_GIS, "PIN='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "navajo-county-az":
+        return one_parcel_url(NAVAJO_AZ_GIS, "APN='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "cherry-hill-nj":
+        return one_parcel_url(CHERRYHILL_NJ_GIS, "UNIQUEID='%s'" % listing["apn"].replace("'", "''"))
     return ""
 
 
@@ -1472,6 +1505,819 @@ def utah_udot(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+# ------------------------------------------------------------------------------------------- Albany County Land Bank (NY)
+
+ALBANY_GIS = "https://services6.arcgis.com/JJzptGyn7EDStgyp/arcgis/rest/services/Tax_Parcel_Dataset_for_Public_View/FeatureServer/5/query"
+ALBANY_URL = "https://www.albanycountylandbank.org/"
+
+
+def parse_albany_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pin = clean(str(a.get("PIN_SBL") or a.get("print_key") or ""))
+        addr = clean(str(a.get("full_addre") or ""))
+        pclass = clean(str(a.get("prop_class") or ""))
+        if not pin or not pclass.startswith("3"):
+            continue
+        if pin in seen:
+            continue
+        seen.add(pin)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("acres")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        zoning = clean(str(a.get("rezone1") or ""))
+        zdesc = clean(str(a.get("rezone1des") or ""))
+        cdesc = clean(str(a.get("class_desc") or "Vacant Land"))
+        facts = [
+            fact("availability", "Albany County Land Bank — %s" % cdesc, ALBANY_URL, "albany_lb"),
+            fact("parcel_number", clean(str(a.get("print_key") or pin)), ALBANY_URL),
+            fact("price", "Application / program pricing on albanycountylandbank.org", ALBANY_URL, "albany_lb"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, ALBANY_URL))
+        if zoning:
+            facts.append(fact("zoning", ("%s (%s)" % (zoning, zdesc)) if zdesc else zoning, ALBANY_URL))
+        if cdesc:
+            facts.append(fact("property_class", cdesc, ALBANY_URL))
+        title_loc = addr.title() if addr else ("Parcel %s" % clean(str(a.get("print_key") or pin)))
+        row = {
+            "id": "ny-alb-%s" % slug(pin), "source": "albany-landbank",
+            "title": "%s, Albany County (land bank vacant lot)" % title_loc,
+            "state": "NY", "county": "Albany", "locality": "Albany", "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": ALBANY_URL, "address": addr.title(),
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["land bank vacant lot", "new york", "application required"] + (["zoned %s" % zoning] if zoning else []),
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(ALBANY_GIS, "PIN_SBL='%s'" % pin.replace("'", "''")), "Albany County GIS")
+        out.append(row)
+    return out
+
+
+def albany_landbank(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "prop_class LIKE '3%'",
+        "outFields": "PIN_SBL,print_key,full_addre,prop_class,class_desc,acres,rezone1,rezone1des",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "1000",
+    })
+    data = fetch.json(ALBANY_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Albany County Land Bank ArcGIS response changed")
+    rows = parse_albany_features(data["features"], warn)
+    if len(rows) < 25:
+        raise StructureError("only %d Albany Land Bank lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Orange County Tax Deed Auctions (FL)
+
+ORANGE_FL_GIS = "https://services1.arcgis.com/0U8EQ1FrumPeIqDb/arcgis/rest/services/Tax_Sale_Data/FeatureServer/0/query"
+ORANGE_FL_URL = "https://www.orangecountyfl.net/"
+ORANGE_FL_PA = "https://ocpaweb.ocpafl.org/"
+
+
+def parse_orange_fl_features(features, now, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        tda = clean(str(a.get("USER_TDA_NUM") or ""))
+        parcel = clean(str(a.get("USER_PARCEL") or ""))
+        dstat = clean(str(a.get("USER_Deed_Status") or ""))
+        sdate = clean(str(a.get("USER_Sale_Date") or ""))
+        if not tda or not parcel or dstat.lower() != "active sale":
+            continue
+        if tda in seen:
+            continue
+        seen.add(tda)
+        dl = None
+        if re.match(r"^\d{2}/\d{2}/\d{4}$", sdate):
+            try:
+                d = datetime.datetime.strptime(sdate, "%m/%d/%Y")
+                dl = datetime.datetime(d.year, d.month, d.day, 15, 0, 0, tzinfo=datetime.timezone.utc)
+            except ValueError:
+                dl = None
+        status = "auction_closed" if (dl and now > dl) else ("auction_open" if dl else "auction_terms")
+        geom = f.get("geometry") or {}
+        lat = lon = None
+        try:
+            if geom.get("y") is not None and geom.get("x") is not None:
+                la, lo = float(geom["y"]), float(geom["x"])
+                if 28.0 <= la <= 29.0 and -82.0 <= lo <= -80.8:
+                    lat, lon = round(la, 6), round(lo, 6)
+        except (TypeError, ValueError):
+            lat = lon = None
+        facts = [
+            fact("sale_program", "Orange County Tax Deed Sale (%s)" % dstat, ORANGE_FL_URL, "orange_fl_tda"),
+            fact("auction_item", "TDA #%s" % tda, ORANGE_FL_URL),
+            fact("parcel_number", parcel, ORANGE_FL_PA),
+            fact("price", "Opening bid set by Orange County Comptroller prior to auction", ORANGE_FL_URL, "orange_fl_tda"),
+        ]
+        if dl:
+            facts.append(fact("bid_deadline", dl.strftime("%B %d, %Y"), ORANGE_FL_URL, "Scheduled tax deed auction date; confirm status and cutoff with the county."))
+        out.append({
+            "id": "fl-ora-%s" % slug(tda), "source": "orange-county-fl",
+            "title": "Orange County parcel %s (Tax Deed Sale %s)" % (parcel, tda),
+            "state": "FL", "county": "Orange", "locality": "Orlando", "apn": parcel,
+            "acres": None, "price": None, "price_kind": "none", "offering": "auction",
+            "status": status, "deadline": dl.strftime("%Y-%m-%dT%H:%M:%SZ") if dl else None,
+            "url": ORANGE_FL_URL, "address": "", "lat": lat, "lon": lon, "geometry": None,
+            "facts": facts, "tags": ["tax deed sale", "florida", "auction terms apply"],
+        })
+    return out
+
+
+def orange_county_fl(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "USER_Deed_Status='Active Sale'",
+        "outFields": "USER_TDA_NUM,USER_Sale_Date,USER_Deed_Status,USER_PARCEL",
+        "outSR": "4326", "returnGeometry": "true", "resultRecordCount": "500",
+    })
+    data = fetch.json(ORANGE_FL_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Orange County FL Tax Sale ArcGIS response changed")
+    rows = parse_orange_fl_features(data["features"], now, warn)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- City of Las Cruces Vacant Land (NM)
+
+LASCRUCES_GIS = "https://services1.arcgis.com/ejcbAsQEUUGWEyzb/arcgis/rest/services/City_Owned_Vacant_Land/FeatureServer/15/query"
+LASCRUCES_URL = "https://lascruces.gov/"
+
+
+def parse_lascruces_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        acct = clean(str(a.get("ACCOUNTNUM") or a.get("MAPCODE") or ""))
+        if not acct or acct in seen:
+            continue
+        seen.add(acct)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("TOTALACRES")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "City-Owned Vacant Land Inventory", LASCRUCES_URL, "lascruces_vac"),
+            fact("parcel_number", acct, LASCRUCES_URL),
+            fact("price", "Inquiry / surplus disposition via City of Las Cruces", LASCRUCES_URL, "lascruces_vac"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, LASCRUCES_URL))
+        if clean(str(a.get("MAPCODE") or "")):
+            facts.append(fact("tax_parcel_id", clean(str(a["MAPCODE"])), LASCRUCES_URL))
+        if a.get("CouncilDistrict") is not None and str(a.get("CouncilDistrict")).strip():
+            facts.append(fact("council_district", "District %s" % clean(str(a["CouncilDistrict"])), LASCRUCES_URL))
+        row = {
+            "id": "nm-lc-%s" % slug(acct), "source": "las-cruces-nm",
+            "title": "Las Cruces city-owned vacant parcel %s" % acct,
+            "state": "NM", "county": "Doña Ana", "locality": "Las Cruces", "apn": acct,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": LASCRUCES_URL, "address": "",
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "new mexico"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(LASCRUCES_GIS, "ACCOUNTNUM='%s'" % acct.replace("'", "''")), "City of Las Cruces GIS")
+        out.append(row)
+    return out
+
+
+def las_cruces_nm(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "ACCOUNTNUM,MAPCODE,TOTALACRES,TOTALSQFT,CouncilDistrict,Zip_Code,Commercial_Residential",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(LASCRUCES_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Las Cruces Vacant Land ArcGIS response changed")
+    rows = parse_lascruces_features(data["features"], warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Las Cruces vacant parcels: feed looks incomplete" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Baltimore City Vacant Properties (MD)
+
+BALTIMORE_GIS = "https://services1.arcgis.com/UWYHeuuJISiGmgXx/arcgis/rest/services/City_Owned_Vacant_Properties_in_the_DMA/FeatureServer/0/query"
+BALTIMORE_URL = "https://www.baltimorecity.gov/dhcd"
+
+
+def parse_baltimore_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pin = clean(str(a.get("PIN") or a.get("BLOCKLOT") or ""))
+        if not pin or pin in seen:
+            continue
+        seen.add(pin)
+        addr = clean(str(a.get("FULLADDR") or "")).title()
+        blocklot = clean(str(a.get("BLOCKLOT") or pin))
+        zoning = clean(str(a.get("ZONECODE") or ""))
+        lot_size = clean(str(a.get("LOT_SIZE") or ""))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings)
+        facts = [
+            fact("availability", "Baltimore City-Owned Vacant Inventory (DMA)", BALTIMORE_URL, "baltimore_vac"),
+            fact("parcel_number", blocklot, BALTIMORE_URL),
+            fact("price", "See Baltimore City DHCD disposition terms", BALTIMORE_URL, "baltimore_vac"),
+        ]
+        if zoning:
+            facts.append(fact("zoning", zoning, BALTIMORE_URL))
+        if lot_size:
+            facts.append(fact("lot_area", lot_size, BALTIMORE_URL))
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, BALTIMORE_URL, "gis_area"))
+        if a.get("WARD") is not None and str(a.get("WARD")).strip():
+            facts.append(fact("ward", clean(str(a["WARD"])), BALTIMORE_URL))
+        title_loc = addr if addr else ("Block/Lot %s" % blocklot)
+        row = {
+            "id": "md-bal-%s" % slug(pin), "source": "baltimore-vacant",
+            "title": "%s, Baltimore (city-owned vacant parcel)" % title_loc,
+            "state": "MD", "county": "Baltimore City", "locality": "Baltimore", "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": BALTIMORE_URL, "address": addr,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "maryland"] + (["zoned %s" % zoning] if zoning else []),
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(BALTIMORE_GIS, "PIN='%s'" % pin.replace("'", "''")), "Baltimore City GIS")
+        out.append(row)
+    return out
+
+
+def baltimore_vacant(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "PIN,BLOCKLOT,FULLADDR,ZONECODE,LOT_SIZE,WARD",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(BALTIMORE_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Baltimore Vacant Properties ArcGIS response changed")
+    rows = parse_baltimore_features(data["features"], warn)
+    if not rows:
+        raise StructureError("Baltimore Vacant Properties returned 0 rows")
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- City of Big Spring Vacant Lots (TX)
+
+BIGSPRING_GIS = "https://services3.arcgis.com/alxLYecgXwbvnM3O/arcgis/rest/services/City_of_Big_Spring_Owned_Property_Vacant_lots_3_2023/FeatureServer/0/query"
+BIGSPRING_URL = "https://www.bigspringtx.gov/"
+
+
+def parse_bigspring_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("prop_id_te") or a.get("prop_id") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        situs = " ".join(clean(str(a.get(k) or "")) for k in ("situs_num", "situs_stre")).strip()
+        addr = situs.title() if situs else ""
+        legal = clean(str(a.get("legal_desc") or ""))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("legal_acre")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "City of Big Spring Vacant Lot Inventory", BIGSPRING_URL, "bigspring_tx"),
+            fact("parcel_number", pid, BIGSPRING_URL),
+            fact("price", "Confirm surplus bidding / purchase terms with the City of Big Spring", BIGSPRING_URL, "bigspring_tx"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, BIGSPRING_URL))
+        if legal:
+            facts.append(fact("legal_description", legal[:200], BIGSPRING_URL))
+        title_loc = addr if addr else ("Parcel %s" % pid)
+        row = {
+            "id": "tx-bs-%s" % slug(pid), "source": "big-spring-tx",
+            "title": "%s, Big Spring (city-owned vacant lot)" % title_loc,
+            "state": "TX", "county": "Howard", "locality": "Big Spring", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": BIGSPRING_URL, "address": addr,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "texas"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(BIGSPRING_GIS, "prop_id_te='%s'" % pid.replace("'", "''")), "Howard County / Big Spring GIS")
+        out.append(row)
+    return out
+
+
+def big_spring_tx(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "prop_id_te,prop_id,legal_acre,legal_desc,situs_num,situs_stre,geo_id",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(BIGSPRING_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Big Spring TX Vacant Lots ArcGIS response changed")
+    rows = parse_bigspring_features(data["features"], warn)
+    if len(rows) < 10:
+        raise StructureError("only %d Big Spring TX lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- King County Tax Title (WA)
+
+KING_WA_GIS = "https://services.arcgis.com/Ej0PsM5Aw677QF1W/arcgis/rest/services/REALPROP_AREA_1289/FeatureServer/0/query"
+KING_WA_URL = "https://kingcounty.gov/"
+
+
+def parse_king_wa_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pin = clean(str(a.get("PIN") or ""))
+        if not pin or pin in seen:
+            continue
+        if clean(str(a.get("CAT_TYPE") or "")).lower() != "tax title":
+            continue
+        seen.add(pin)
+        addr = clean(str(a.get("ADDRESS") or "")).title()
+        city = clean(str(a.get("JURISDICTIONATACQUISITION") or "")).title()
+        desc = clean(str(a.get("DESCRIPTION") or ""))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("ACREAGE")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("sale_program", "King County Tax Title Real Property", KING_WA_URL, "king_wa"),
+            fact("parcel_number", pin, KING_WA_URL),
+            fact("price", "Minimum bid / direct sale price set by King County Real Estate Services", KING_WA_URL, "king_wa"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, KING_WA_URL))
+        if desc:
+            facts.append(fact("legal_description", desc[:200], KING_WA_URL))
+        if a.get("COUNCIL_DISTRICT"):
+            facts.append(fact("council_district", "District %s" % clean(str(a["COUNCIL_DISTRICT"])), KING_WA_URL))
+        loc = addr or (city if city else "King County")
+        row = {
+            "id": "wa-king-%s" % slug(pin), "source": "king-county-wa",
+            "title": "%s, %s (King County tax-title land %s)" % (loc, "King County", pin),
+            "state": "WA", "county": "King", "locality": city, "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": KING_WA_URL, "address": addr,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax-title land", "washington", "auction terms apply"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(KING_WA_GIS, "PIN='%s'" % pin.replace("'", "''")), "King County GIS")
+        out.append(row)
+    return out
+
+
+def king_county_wa(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "CAT_TYPE='Tax Title' AND BUILDING_VALUE=0",
+        "outFields": "PIN,ADDRESS,ACREAGE,DESCRIPTION,CAT_TYPE,BUILDING_VALUE,COUNCIL_DISTRICT,JURISDICTIONATACQUISITION",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(KING_WA_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("King County WA Tax Title ArcGIS response changed")
+    rows = parse_king_wa_features(data["features"], warn)
+    if len(rows) < 20:
+        raise StructureError("only %d King County WA tax-title parcels: feed looks incomplete" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- City of Charlotte Undeveloped Land (NC)
+
+CHARLOTTE_GIS = "https://gis.charlottenc.gov/arcgis/rest/services/ODP/City_Owned_Property/MapServer/0/query"
+CHARLOTTE_URL = "https://www.charlottenc.gov/"
+
+
+def parse_charlotte_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("ParcelID") or ""))
+        if not pid or pid in seen:
+            continue
+        if clean(str(a.get("LandImprovements") or "")).lower() != "undeveloped":
+            continue
+        seen.add(pid)
+        addr = clean(str(a.get("Address") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("Acres")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "City of Charlotte Undeveloped Property Inventory", CHARLOTTE_URL, "charlotte_nc"),
+            fact("parcel_number", pid, CHARLOTTE_URL),
+            fact("price", "Surplus inquiry / sealed-bid terms via City of Charlotte", CHARLOTTE_URL, "charlotte_nc"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, CHARLOTTE_URL))
+        title_loc = addr if addr else ("Parcel %s" % pid)
+        row = {
+            "id": "nc-clt-%s" % slug(pid), "source": "charlotte-nc",
+            "title": "%s, Charlotte (undeveloped city land)" % title_loc,
+            "state": "NC", "county": "Mecklenburg", "locality": "Charlotte", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CHARLOTTE_URL, "address": addr,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "north carolina"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(CHARLOTTE_GIS, "ParcelID='%s'" % pid.replace("'", "''")), "City of Charlotte GIS")
+        out.append(row)
+    return out
+
+
+def charlotte_nc(fetch, now, warn):
+    all_feats, offset, page_size = [], 0, 500
+    complete = True
+    for _ in range(5):
+        q = urllib.parse.urlencode({
+            "f": "json", "where": "LandImprovements='Undeveloped'",
+            "outFields": "ParcelID,Address,Acres,LandImprovements",
+            "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6",
+            "resultRecordCount": str(page_size), "resultOffset": str(offset),
+        })
+        data = fetch.json(CHARLOTTE_GIS + "?" + q)
+        if not isinstance(data, dict) or "features" not in data:
+            raise StructureError("Charlotte NC ArcGIS response changed")
+        feats = data["features"]
+        all_feats.extend(feats)
+        if not data.get("exceededTransferLimit") or len(feats) < page_size:
+            break
+        offset += len(feats)
+    else:
+        complete = False
+    rows = parse_charlotte_features(all_feats, warn)
+    if len(rows) < 25:
+        raise StructureError("only %d Charlotte NC undeveloped parcels" % len(rows))
+    return rows, {"complete": complete, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- City of Canton Land (GA)
+
+CANTON_GA_GIS = "https://services6.arcgis.com/dpaY3zboICQILFY5/arcgis/rest/services/City_of_Canton_Owned_Property/FeatureServer/0/query"
+CANTON_GA_URL = "https://www.cantonga.gov/"
+
+
+def parse_canton_ga_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pin = clean(str(a.get("PIN") or a.get("TINNoSpace") or ""))
+        if not pin or pin in seen:
+            continue
+        seen.add(pin)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("Acreage")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        zoning = clean(str(a.get("Zoning") or ""))
+        facts = [
+            fact("availability", "City of Canton Public Property Inventory", CANTON_GA_URL, "canton_ga"),
+            fact("parcel_number", pin, CANTON_GA_URL),
+            fact("price", "Confirm surplus disposition terms with City of Canton", CANTON_GA_URL, "canton_ga"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, CANTON_GA_URL))
+        if zoning:
+            facts.append(fact("zoning", zoning, CANTON_GA_URL))
+        row = {
+            "id": "ga-can-%s" % slug(pin), "source": "canton-ga",
+            "title": "Canton parcel %s, Cherokee County (city-owned land)" % pin,
+            "state": "GA", "county": "Cherokee", "locality": "Canton", "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CANTON_GA_URL, "address": "",
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned land", "georgia"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(CANTON_GA_GIS, "PIN='%s'" % pin.replace("'", "''")), "City of Canton GIS")
+        out.append(row)
+    return out
+
+
+def canton_ga(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "PIN,TINNoSpace,Acreage,Zoning,Subdivision",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(CANTON_GA_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Canton GA ArcGIS response changed")
+    rows = parse_canton_ga_features(data["features"], warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Canton GA parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- San Miguel County Land (CO)
+
+SANMIGUEL_CO_GIS = "https://services.arcgis.com/aXqye4IXyXsdIpPb/arcgis/rest/services/County_Owned_Land/FeatureServer/0/query"
+SANMIGUEL_CO_URL = "https://www.sanmiguelcountyco.gov/"
+
+
+def parse_sanmiguel_co_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pin = clean(str(a.get("PIN") or a.get("ACCOUNTNO") or ""))
+        if not pin or pin in seen:
+            continue
+        seen.add(pin)
+        city = clean(str(a.get("LOC_CITY") or "")).title()
+        legal = clean(str(a.get("LEGAL_DESC") or ""))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings)
+        facts = [
+            fact("availability", "San Miguel County Owned Land Inventory", SANMIGUEL_CO_URL, "sanmiguel_co"),
+            fact("parcel_number", pin, SANMIGUEL_CO_URL),
+            fact("price", "Confirm surplus availability and sale method with San Miguel County", SANMIGUEL_CO_URL, "sanmiguel_co"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, SANMIGUEL_CO_URL, "gis_area"))
+        if legal:
+            facts.append(fact("legal_description", legal[:200], SANMIGUEL_CO_URL))
+        loc = city or "San Miguel County"
+        row = {
+            "id": "co-sm-%s" % slug(pin), "source": "san-miguel-co",
+            "title": "%s parcel %s (San Miguel County land)" % (loc, pin),
+            "state": "CO", "county": "San Miguel", "locality": city, "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": SANMIGUEL_CO_URL, "address": "",
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["county land", "colorado", "mountain parcel"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(SANMIGUEL_CO_GIS, "PIN='%s'" % pin.replace("'", "''")), "San Miguel County GIS")
+        out.append(row)
+    return out
+
+
+def san_miguel_co(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "PIN,ACCOUNTNO,LOC_CITY,LEGAL_DESC",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(SANMIGUEL_CO_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("San Miguel County CO ArcGIS response changed")
+    rows = parse_sanmiguel_co_features(data["features"], warn)
+    if len(rows) < 5:
+        raise StructureError("only %d San Miguel County CO parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Navajo County Back Tax Auctions (AZ)
+
+NAVAJO_AZ_GIS = "https://services.arcgis.com/cghC2lEIpJ2TRrs5/arcgis/rest/services/BackTaxAuctionProperties/FeatureServer/1/query"
+NAVAJO_AZ_URL = "https://www.navajocountyaz.gov/"
+
+
+def parse_navajo_az_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        apn = clean(str(a.get("APN") or ""))
+        if not apn or apn in seen:
+            continue
+        seen.add(apn)
+        auc_url = clean(str(a.get("AuctionURL") or ""))
+        url = auc_url if auc_url.startswith("https://publicsurplus.com/") else NAVAJO_AZ_URL
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings)
+        facts = [
+            fact("sale_program", "Navajo County Back-Tax Auction Properties", url, "navajo_az"),
+            fact("parcel_number", apn, url),
+            fact("price", "Opening bid & auction status published on official auction page", url, "navajo_az"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, url, "gis_area"))
+        row = {
+            "id": "az-nav-%s" % slug(apn), "source": "navajo-county-az",
+            "title": "Navajo County parcel %s (Arizona back-tax auction)" % apn,
+            "state": "AZ", "county": "Navajo", "locality": "", "apn": apn,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": url, "address": "",
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax-forfeited parcel", "arizona", "auction terms apply"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(NAVAJO_AZ_GIS, "APN='%s'" % apn.replace("'", "''")), "Navajo County GIS")
+        out.append(row)
+    return out
+
+
+def navajo_county_az(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "APN,AuctionURL",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(NAVAJO_AZ_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Navajo County AZ ArcGIS response changed")
+    rows = parse_navajo_az_features(data["features"], warn)
+    if len(rows) < 10:
+        raise StructureError("only %d Navajo County AZ parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- East Baton Rouge Adjudicated Land (LA)
+
+EBR_LA_API = "https://data.brla.gov/resource/a4h4-zi7e.json"
+EBR_LA_URL = "https://www.brla.gov/"
+
+
+def parse_ebr_la_rows(raw_rows, warn):
+    out, seen = [], set()
+    for r in raw_rows:
+        anum = clean(str(r.get("assessment_num") or ""))
+        addr = clean(str(r.get("physadd") or "")).title()
+        if not anum or anum in seen:
+            continue
+        seen.add(anum)
+        geo = r.get("geolocation") if isinstance(r.get("geolocation"), dict) else {}
+        lat = lon = None
+        try:
+            if geo.get("latitude") is not None and geo.get("longitude") is not None:
+                la, lo = float(geo["latitude"]), float(geo["longitude"])
+                if 30.2 <= la <= 30.8 and -91.4 <= lo <= -90.8:
+                    lat, lon = round(la, 6), round(lo, 6)
+        except (TypeError, ValueError):
+            lat = lon = None
+        subd = clean(str(r.get("subd") or "")).title()
+        legal = clean(str(r.get("legal") or ""))
+        facts = [
+            fact("sale_program", "East Baton Rouge Adjudicated Tax-Sale Inventory", EBR_LA_URL, "ebr_la"),
+            fact("parcel_number", anum, EBR_LA_URL),
+            fact("price", "Adjudicated sale minimum bid / statutory process via East Baton Rouge Parish", EBR_LA_URL, "ebr_la"),
+        ]
+        if subd:
+            facts.append(fact("neighborhood", subd, EBR_LA_URL))
+        if legal:
+            facts.append(fact("legal_description", legal[:200], EBR_LA_URL))
+        if r.get("tax_roll_year"):
+            facts.append(fact("tax_year", clean(str(r["tax_roll_year"])), EBR_LA_URL))
+        title_loc = addr if addr else ("Assessment %s" % anum)
+        out.append({
+            "id": "la-ebr-%s" % slug(anum), "source": "baton-rouge-la",
+            "title": "%s, Baton Rouge (adjudicated parcel)" % title_loc,
+            "state": "LA", "county": "East Baton Rouge", "locality": "Baton Rouge", "apn": anum,
+            "acres": None, "price": None, "price_kind": "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": EBR_LA_URL, "address": addr,
+            "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+            "tags": ["adjudicated tax-sale parcel", "louisiana", "auction terms apply"],
+        })
+    return out
+
+
+def baton_rouge_la(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "$where": "tax_roll_year='2023' AND sum_tol_as='0' AND geolocation IS NOT NULL AND physadd IS NOT NULL",
+        "$select": "assessment_num,physadd,subd,lot,legal,tax_roll_year,council_district_no,zip_code,geolocation",
+        "$order": "assessment_num", "$limit": "500",
+    })
+    batch = fetch.json(EBR_LA_API + "?" + q)
+    if not isinstance(batch, list):
+        raise StructureError("East Baton Rouge Socrata API changed")
+    rows = parse_ebr_la_rows(batch, warn)
+    if len(rows) < 50:
+        raise StructureError("only %d Baton Rouge adjudicated parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Cherry Hill Vacant Lots (NJ)
+
+CHERRYHILL_NJ_GIS = "https://services5.arcgis.com/UFyA9soK8NRbWhx7/arcgis/rest/services/TWP_Owned_Vacant_Lots_No_Intersect/FeatureServer/0/query"
+CHERRYHILL_NJ_URL = "https://www.chnj.gov/"
+
+
+def parse_cherryhill_nj_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        uid = clean(str(a.get("UNIQUEID") or a.get("X_UID") or ""))
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        blk = clean(str(a.get("BLOCK") or ""))
+        lot = clean(str(a.get("LOT") or ""))
+        street = clean(str(a.get("HADD") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("CACRES")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "Cherry Hill Township Owned Vacant Lot", CHERRYHILL_NJ_URL, "cherryhill_nj"),
+            fact("parcel_number", "Block %s / Lot %s" % (blk, lot) if blk else uid, CHERRYHILL_NJ_URL),
+            fact("price", "Municipal land sale auction terms via Cherry Hill Township", CHERRYHILL_NJ_URL, "cherryhill_nj"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, CHERRYHILL_NJ_URL, "gis_area"))
+        title_loc = street if street else ("Block %s Lot %s" % (blk, lot))
+        row = {
+            "id": "nj-ch-%s" % slug(uid), "source": "cherry-hill-nj",
+            "title": "%s, Cherry Hill (township vacant lot)" % title_loc,
+            "state": "NJ", "county": "Camden", "locality": "Cherry Hill", "apn": uid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CHERRYHILL_NJ_URL, "address": street,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["township vacant lot", "new jersey"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(CHERRYHILL_NJ_GIS, "UNIQUEID='%s'" % uid.replace("'", "''")), "Camden County / Cherry Hill GIS")
+        out.append(row)
+    return out
+
+
+def cherry_hill_nj(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "UNIQUEID,X_UID,BLOCK,LOT,HADD,CACRES,MUN",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(CHERRYHILL_NJ_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Cherry Hill NJ ArcGIS response changed")
+    rows = parse_cherryhill_nj_features(data["features"], warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Cherry Hill NJ lots" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- City of Orlando Vacant Lots (FL)
+
+ORLANDO_FL_API = "https://data.cityoforlando.net/resource/bkpt-5h2w.json"
+ORLANDO_FL_URL = "https://www.orlando.gov/Home"
+
+
+def parse_orlando_fl_rows(raw_rows, warn):
+    out, seen = [], set()
+    for r in raw_rows:
+        parcel = clean(str(r.get("parcel") or r.get("property_id") or ""))
+        addr = clean(str(r.get("address") or "")).title()
+        if not parcel or parcel in seen:
+            continue
+        seen.add(parcel)
+        acres = number(r.get("lot_size_acres")) or (round(number(r.get("lot_size_sqft")) / 43560.0, 4) if number(r.get("lot_size_sqft")) else None)
+        geo = r.get("geocoded_column") if isinstance(r.get("geocoded_column"), dict) else {}
+        coords = geo.get("coordinates") if isinstance(geo.get("coordinates"), list) else []
+        lat = lon = None
+        if len(coords) == 2:
+            try:
+                lo, la = float(coords[0]), float(coords[1])
+                if 28.2 <= la <= 28.8 and -81.7 <= lo <= -81.1:
+                    lat, lon = round(la, 6), round(lo, 6)
+            except (TypeError, ValueError):
+                pass
+        zoning = clean(str(r.get("zoning") or ""))
+        dims = clean(str(r.get("lot_dimensions_feet") or ""))
+        conforming = r.get("conforming_lot_58_1152")
+        facts = [
+            fact("availability", "City of Orlando Vacant Lots Inventory", ORLANDO_FL_URL, "orlando_fl"),
+            fact("parcel_number", parcel, ORLANDO_FL_URL),
+            fact("price", "Surplus application / disposition terms via City of Orlando", ORLANDO_FL_URL, "orlando_fl"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, ORLANDO_FL_URL))
+        if dims:
+            facts.append(fact("lot_area", "%s ft" % dims, ORLANDO_FL_URL))
+        if zoning:
+            facts.append(fact("zoning", zoning, ORLANDO_FL_URL))
+        if conforming is not None:
+            facts.append(fact("buildable_lot", "Yes (conforming)" if conforming else "Non-conforming", ORLANDO_FL_URL))
+        out.append({
+            "id": "fl-orl-%s" % slug(parcel), "source": "orlando-vacant-fl",
+            "title": "%s, Orlando (city-owned vacant lot)" % (addr or ("Parcel " + parcel)),
+            "state": "FL", "county": "Orange", "locality": "Orlando", "apn": parcel,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": ORLANDO_FL_URL, "address": addr,
+            "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "florida"] + (["zoned %s" % zoning] if zoning else []),
+        })
+    return out
+
+
+def orlando_vacant_fl(fetch, now, warn):
+    batch = fetch.json(ORLANDO_FL_API + "?$limit=500")
+    if not isinstance(batch, list):
+        raise StructureError("Orlando FL Socrata API changed")
+    rows = parse_orlando_fl_rows(batch, warn)
+    if len(rows) < 10:
+        raise StructureError("only %d Orlando FL vacant lots" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
@@ -1514,6 +2360,45 @@ SOURCES = [
     {"id": "broward-surplus", "name": "Broward County Surplus Real Property", "agency": "Broward County Board of County Commissioners",
      "url": "https://web.bcpa.net/BcpaClient/#/Record-Search", "state": "FL", "run": broward_surplus,
      "about": "County-owned surplus real property parcels in Broward County with GIS polygon outlines and direct Property Appraiser folio records."},
+    {"id": "orange-county-fl", "name": "Orange County Active Tax Deed Sales", "agency": "Orange County Comptroller / Tax Deed Sales",
+     "url": ORANGE_FL_URL, "state": "FL", "run": orange_county_fl,
+     "about": "Active scheduled tax deed auction parcels in Orange County, Florida with posted upcoming auction dates and coordinates."},
+    {"id": "albany-landbank", "name": "Albany County Land Bank vacant land", "agency": "Albany County Land Bank Corporation",
+     "url": ALBANY_URL, "state": "NY", "run": albany_landbank,
+     "about": "Vacant residential and commercial land bank parcels across Albany County, New York with GIS outlines, zoning, and acreage."},
+    {"id": "big-spring-tx", "name": "City of Big Spring city-owned vacant lots", "agency": "City of Big Spring, Texas",
+     "url": BIGSPRING_URL, "state": "TX", "run": big_spring_tx,
+     "about": "City-owned vacant land parcels in Howard County, Texas with GIS parcel outlines, acreage, and legal descriptions."},
+    {"id": "las-cruces-nm", "name": "City of Las Cruces city-owned vacant land", "agency": "City of Las Cruces, New Mexico",
+     "url": LASCRUCES_URL, "state": "NM", "run": las_cruces_nm,
+     "about": "City-owned vacant land parcels in Doña Ana County, New Mexico with GIS outlines and acreage."},
+    {"id": "baltimore-vacant", "name": "Baltimore City-Owned Vacant Properties (DMA)", "agency": "Baltimore City Dept. of Housing & Community Development",
+     "url": BALTIMORE_URL, "state": "MD", "run": baltimore_vacant,
+     "about": "City-owned vacant parcels in Baltimore with GIS outlines, zoning codes, and lot dimensions."},
+    {"id": "king-county-wa", "name": "King County Tax-Title Vacant Land", "agency": "King County Real Estate Services",
+     "url": KING_WA_URL, "state": "WA", "run": king_county_wa,
+     "about": "Tax-foreclosed vacant land held by King County, Washington with GIS parcel outlines and acreage."},
+    {"id": "charlotte-nc", "name": "City of Charlotte Undeveloped City-Owned Land", "agency": "City of Charlotte, North Carolina",
+     "url": CHARLOTTE_URL, "state": "NC", "run": charlotte_nc,
+     "about": "Undeveloped city-owned land parcels across Mecklenburg County with GIS outlines and acreage."},
+    {"id": "canton-ga", "name": "City of Canton City-Owned Land", "agency": "City of Canton, Georgia",
+     "url": CANTON_GA_URL, "state": "GA", "run": canton_ga,
+     "about": "City-owned parcels in Cherokee County, Georgia with GIS outlines, acreage, and zoning."},
+    {"id": "san-miguel-co", "name": "San Miguel County Public Land Inventory", "agency": "San Miguel County, Colorado",
+     "url": SANMIGUEL_CO_URL, "state": "CO", "run": san_miguel_co,
+     "about": "County-owned mountain land parcels in Telluride & Placerville, Colorado with GIS outlines."},
+    {"id": "navajo-county-az", "name": "Navajo County Back-Tax Auction Properties", "agency": "Navajo County, Arizona",
+     "url": NAVAJO_AZ_URL, "state": "AZ", "run": navajo_county_az,
+     "about": "Rural Arizona back-tax auction parcels with GIS outlines and direct official auction links."},
+    {"id": "baton-rouge-la", "name": "East Baton Rouge Adjudicated Tax-Sale Land", "agency": "City-Parish of East Baton Rouge, Louisiana",
+     "url": EBR_LA_URL, "state": "LA", "run": baton_rouge_la,
+     "about": "Adjudicated tax-sale vacant parcels published by East Baton Rouge Parish Open Data."},
+    {"id": "cherry-hill-nj", "name": "Cherry Hill Township Vacant Lots", "agency": "Cherry Hill Township, New Jersey",
+     "url": CHERRYHILL_NJ_URL, "state": "NJ", "run": cherry_hill_nj,
+     "about": "Township-owned vacant lots in Camden County, New Jersey with GIS outlines and block/lot IDs."},
+    {"id": "orlando-vacant-fl", "name": "City of Orlando Vacant Lots Inventory", "agency": "City of Orlando, Florida",
+     "url": ORLANDO_FL_URL, "state": "FL", "run": orlando_vacant_fl,
+     "about": "City-owned vacant lots in Orlando with zoning, lot dimensions, and conforming buildability flags."},
     {"id": "wisconsin-bcpl", "name": "Wisconsin Board of Commissioners of Public Lands", "agency": "Wisconsin BCPL",
      "url": WI, "state": "WI", "run": wisconsin, "about": "Surplus state trust land sold by sealed-bid auction or private sale."},
     {"id": "alaska-trust-otc", "name": "Alaska Mental Health Trust Land Office", "agency": "Alaska Mental Health Trust Land Office",

@@ -352,6 +352,17 @@
       fCost.acres.value = params.get("acres");
       if (compAcresIn) compAcresIn.value = params.get("acres");
     }
+    if (params.get("roadFt")) fCost.roadFt.value = params.get("roadFt");
+  }
+  if (fPower) {
+    if (params.get("roadFt")) fPower.distFt.value = params.get("roadFt");
+    if (params.get("sun")) {
+      var sunEl = document.getElementById("pwr-solar-hint");
+      if (sunEl) {
+        sunEl.hidden = false;
+        sunEl.textContent = "NASA POWER winter-minimum solar input for this parcel: " + params.get("sun") + " peak sun hours/day (use this worst-month figure when sizing off-grid panels and LiFePO4 battery autonomy).";
+      }
+    }
   }
   var hashMatch = location.hash.match(/a=([^&]+)/);
   if (hashMatch && fCost) {

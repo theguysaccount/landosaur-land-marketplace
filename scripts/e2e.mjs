@@ -3,7 +3,7 @@
 import { launch } from "./cdp.mjs";
 
 const base = (process.argv[2] || "http://localhost:4651").replace(/\/$/, "");
-const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/xray/;
+const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/(xray|listings|offers)/;
 const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)/.test(base);
 const { page, close } = await launch();
 const results = [];
@@ -54,18 +54,22 @@ try {
     await page.goto(base + "/research/tax-sales/");
     assert(await page.eval("document.querySelector('article.prose') && document.body.innerText.includes('Official')"), "guide missing content");
   });
-  await step("universal 50-state Parcel X-Ray page loads map and search console", async () => {
+  await step("universal 50-state Parcel X-Ray and Agent-First /list/ pages load cleanly", async () => {
     await page.goto(base + "/xray/");
     assert(await page.eval("!!document.getElementById('xray-map') && !!document.getElementById('xray-q')"), "missing X-Ray map or search input");
+    await page.goto(base + "/list/");
+    assert(await page.eval("!!document.getElementById('direct-list-form') && !!document.getElementById('agent-prompt-text')"), "missing /list/ form or AI agent prompt");
     if (!isLocal) {
-      const xrayOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/xray?lat=35.42&lon=-92.45").then(r => r.ok ? r.json() : null).then(d => !!(d && d.usgs && d.usgs.elevation_ft > 0 && d.county && d.county.fips))`);
-      assert(xrayOk, "live /api/xray failed or returned incomplete federal GIS data");
+      const xrayOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/xray/?lat=34.8689&lon=-111.7614").then(r => r.ok ? r.json() : null).then(d => !!(d && d.usgs && d.usgs.elevation_ft > 0 && d.usgs.profile_we && d.usgs.profile_we.length >= 3 && d.roads && d.public_land && d.hazards && d.county && d.county.fips))`);
+      assert(xrayOk, "live /api/xray/ failed or returned incomplete 9-agency federal GIS data");
+      const listOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/listings/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.storage_configured === true && Array.isArray(d.listings)))`);
+      assert(listOk, "live /api/listings/ Blob store check failed");
     }
   });
   await step("indexing policy matches SITE_INDEXABLE across core hubs", async () => {
     const indexable = await page.eval(`fetch(${JSON.stringify(base)} + "/data/sources.json").then(r => r.json()).then(d => !!d.site.indexable)`);
     const want = indexable ? "index" : "noindex";
-    for (const p of ["/", "/xray/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
+    for (const p of ["/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
       await page.goto(base + p);
       assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith(want), p + " should be " + want);
     }
@@ -74,7 +78,7 @@ try {
     await page.viewport(375, 812, true);
     const bad = [];
     const listingRel = new URL(listing, base).pathname.replace(new URL(base + "/").pathname, "/");
-    for (const p of ["/", "/xray/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
+    for (const p of ["/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
       const w = await page.eval("document.documentElement.scrollWidth");
       if (w > 376) bad.push(p + " is " + w + "px wide");

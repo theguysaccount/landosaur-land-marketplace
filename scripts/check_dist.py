@@ -24,6 +24,10 @@ OFFICIAL = (
     "alaska.gov", "buildingdetroit.org", "kclandbank.org", "dgs.ca.gov",
     "chicago.gov", "pghlandbank.org", "louisvilleky.gov", "lucascountylandbank.org",
     "lacounty.gov", "bcpa.net", "utah.gov",
+    "albanycountylandbank.org", "orangecountyfl.net", "lascruces.gov",
+    "baltimorecity.gov", "bigspringtx.gov",
+    "kingcounty.gov", "charlottenc.gov", "cantonga.gov", "sanmiguelcountyco.gov",
+    "navajocountyaz.gov", "publicsurplus.com", "brla.gov", "chnj.gov", "orlando.gov",
 )
 
 
@@ -122,7 +126,7 @@ def main(dist, data_dir=None):
                     len(locs), len(indexable), sorted(locs ^ indexable)[:5]))
         if "Sitemap: %s/sitemap.xml" % config.BASE_URL not in robots_txt:
             problems.append("robots.txt does not point at the sitemap")
-        for req_path in ("/", "/xray/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
+        for req_path in ("/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
             if req_path not in indexable:
                 problems.append("core hub not indexable: %s" % req_path)
     elif os.path.exists(smap) or "Disallow: /" not in robots_txt:

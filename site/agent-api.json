@@ -1,0 +1,67 @@
+{
+  "name": "Landosaur Agent-First Land Marketplace API",
+  "version": "1.0.0",
+  "base_url": "https://landosaur.com",
+  "description": "Zero-account open API for landowners, real estate agents, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to publish Buy It Now or Auction land listings across all 50 U.S. states, run 9-agency Federal Parcel X-Rays, and record buyer bids or Buy It Now reservations.",
+  "endpoints": {
+    "publish_listing": {
+      "method": "POST",
+      "url": "https://landosaur.com/api/listings/",
+      "content_type": "application/json",
+      "auto_enrichment": "Landosaur automatically runs a 9-agency Federal Parcel X-Ray (USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood zone, FEMA National Risk Index wildfire/hazards, USFWS wetlands, USDA SSURGO soil/bedrock, Census TIGERweb nearest road/highway, USGS PAD-US public lands, NASA solar & USDA hardiness zone, and 3,115-county USDA/FHFA land value benchmark) from lat/lon or location.",
+      "required_fields": {
+        "lat_lon_or_location": "Provide lat & lon (US bounds) OR location/address string",
+        "acres": "Positive number of acres",
+        "sale_mode": "'buy_now' or 'auction'",
+        "price_or_starting_bid": "Positive USD price (for buy_now) or starting_bid (for auction)",
+        "contact_name": "Owner or listing agent full name",
+        "contact_email": "Valid email for buyer handoff and confirmation"
+      },
+      "optional_fields": {
+        "title": "Custom title (auto-generated if omitted)",
+        "buy_now_price": "Optional instant Buy It Now price on an auction listing",
+        "reserve_price": "Optional reserve price on an auction",
+        "auction_end": "ISO-8601 future timestamp (defaults to +14 days for auctions)",
+        "apn": "County assessor parcel number",
+        "zoning": "Zoning classification",
+        "road_access": "Road access note (e.g. Paved county road, recorded easement)",
+        "utilities": "Utilities note (e.g. Power at road, well/septic needed)",
+        "financing_offered": "boolean — seller financing available",
+        "seller_type": "'owner' or 'agent'",
+        "brokerage": "Real estate brokerage name (if listed by agent)",
+        "agent_license": "State license number (optional)",
+        "checkout_url": "Optional HTTPS Stripe Payment Link, Escrow.com, or title-company earnest-money URL",
+        "escrow_notes": "Closing instructions or title company details",
+        "notes": "Plain facts about the land",
+        "submitted_by_agent": "Identifier of the AI agent (e.g. 'claude', 'chatgpt', 'codex', 'antigravity')"
+      }
+    },
+    "list_direct_parcels": {
+      "method": "GET",
+      "url": "https://landosaur.com/api/listings/?state=TX&sale_mode=buy_now"
+    },
+    "update_listing_status": {
+      "method": "PATCH",
+      "url": "https://landosaur.com/api/listings/?id=<listing_id>",
+      "body": { "edit_token": "<token returned on POST>", "status": "active | under_contract | sold | withdrawn" }
+    },
+    "place_bid_or_buy_now": {
+      "method": "POST",
+      "url": "https://landosaur.com/api/offers/",
+      "body": {
+        "listing_id": "<listing_id>",
+        "action": "bid | buy_now | offer",
+        "amount": 15000,
+        "buyer_name": "Full Name",
+        "buyer_email": "buyer@example.com",
+        "buyer_phone": "Optional",
+        "financing": "cash | land_loan | seller_financing",
+        "notes": "Optional closing timeline or contingencies"
+      }
+    },
+    "parcel_xray": {
+      "method": "GET",
+      "url": "https://landosaur.com/api/xray/?lat=34.8689&lon=-111.7614"
+    }
+  }
+}

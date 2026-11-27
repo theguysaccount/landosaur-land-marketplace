@@ -105,10 +105,24 @@
     }
   }
 
-  // Trigger Live Federal Parcel X-Ray when coordinates exist
+  // Trigger Live Federal Parcel X-Ray when coordinates exist + wire KML/GPX export & Analyzer handoff
   var xrayBox = document.getElementById("parcel-xray-body");
-  if (parcelObj && parcelObj.lat != null && parcelObj.lon != null && xrayBox && window.LandosaurXray) {
-    window.LandosaurXray.loadXray(xrayBox, parcelObj.lat, parcelObj.lon, parcelObj);
+  var kmlBtn = document.getElementById("export-kml");
+  var gpxBtn = document.getElementById("export-gpx");
+  if (parcelObj && parcelObj.lat != null && parcelObj.lon != null && window.LandosaurXray) {
+    if (kmlBtn) kmlBtn.addEventListener("click", function () { window.LandosaurXray.exportKml(parcelObj); });
+    if (gpxBtn) gpxBtn.addEventListener("click", function () { window.LandosaurXray.exportGpx(parcelObj); });
+    if (xrayBox) {
+      window.LandosaurXray.loadXray(xrayBox, parcelObj.lat, parcelObj.lon, parcelObj, function (d) {
+        var anaLink = document.getElementById("dossier-analyze-link");
+        if (anaLink && d) {
+          var u = new URL(anaLink.href, location.origin);
+          if (d.roads && d.roads.nearest_road_ft != null) u.searchParams.set("roadFt", String(d.roads.nearest_road_ft));
+          if (d.climate && d.climate.winter_min_sun_hours != null) u.searchParams.set("sun", String(d.climate.winter_min_sun_hours));
+          anaLink.href = u.pathname + u.search;
+        }
+      });
+    }
   }
 
   var form = document.getElementById("worksheet");

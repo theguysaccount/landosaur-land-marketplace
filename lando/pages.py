@@ -6,6 +6,7 @@ USDA NASS 2010-2026 datasets, or the 3,115-county US County Land Index. Zero fab
 """
 import html
 import json
+import os
 import urllib.parse
 
 from . import adapters, config, guides as guides_mod, market as market_mod, research
@@ -76,6 +77,12 @@ class Site(object):
         self.market = market_mod.MarketData(catalog)
         self.all_states = self.market.all_states()
         self.guides = guides_mod.load_guides(catalog.data_dir, self.base)
+        portals_path = os.path.join(catalog.data_dir, "market", "state-land-portals.json")
+        if os.path.exists(portals_path):
+            with open(portals_path, encoding="utf-8") as fh:
+                self.state_portals = json.load(fh)
+        else:
+            self.state_portals = {}
 
     def u(self, path):
         return self.base + path
@@ -111,10 +118,11 @@ class Site(object):
             '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
             '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap">',
             '<link rel="stylesheet" href="%s">' % self.u("/assets/style.css"),
+            '<script>try{var t=localStorage.getItem("landosaur_theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>',
             '<link rel="alternate" type="application/atom+xml" title="New government land listings" href="%s">' % self.u("/feeds/new.xml"),
             '<script src="https://rsio.org/vital.js" defer></script>',
         ]
-        if any("map" in s or "listing" in s or "xray" in s for s in scripts):
+        if any(k in s for s in scripts for k in ("map", "listing", "xray", "list", "direct")):
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/leaflet.css"))
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/MarkerCluster.css"))
             head.append('<link rel="stylesheet" href="%s">' % self.u("/assets/vendor/MarkerCluster.Default.css"))
@@ -123,12 +131,12 @@ class Site(object):
         nav_items = (
             ("/", "Map", False),
             ("/xray/", "Parcel X-Ray", True),
+            ("/list/", "List Land", True),
             ("/land-for-sale/", "Land for Sale", False),
             ("/land-prices/", "Land Prices", False),
             ("/analyze/", "Analyzer", False),
             ("/research/", "Research", False),
             ("/closing-soon/", "Closing Soon", False),
-            ("/sources/", "Sources", False),
         )
         nav = "".join(
             '<a href="%s"%s%s>%s</a>' % (
@@ -147,23 +155,24 @@ class Site(object):
             '<p>Official agencies tracked (%d): %s. <a href="%s">How sources are read</a>.</p>'
             '<p>County land values across 3,115 U.S. counties: <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
             '<a href="%s">50-State Land Price Observatory</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
-            '<p><a href="%s">Land for Sale</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
-            '<a href="%s">Research &amp; Guides</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
+            '<p><a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
+            '<a href="%s">Research &amp; Guides</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
             '<a href="%s">About</a> · <a href="%s" rel="noopener">Source Code</a> · '
             '<a href="%s" rel="noopener">Report a Problem</a>%s</p></div></footer>'
         ) % (
             esc(NOTICE), len(adapters.SOURCES), ", ".join(esc(s["agency"]) for s in adapters.SOURCES), self.u("/sources/"),
             esc(config.LAND_INDEX_URL), self.u("/land-prices/"), self.u("/xray/"),
-            self.u("/land-for-sale/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
-            self.u("/research/"), self.u("/new/"), self.u("/data/"),
+            self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
+            self.u("/research/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
-        tail = "".join('<script src="%s" defer></script>' % self.u("/assets/" + s) for s in scripts)
+        tail = "".join('<script src="%s" defer></script>' % self.u("/assets/" + s) for s in (("theme.js",) + tuple(scripts)))
         if config.GOATCOUNTER:
             tail += '<script data-goatcounter="%s" async src="https://gc.zgo.at/count.js"></script>' % esc(config.GOATCOUNTER)
         return (
             '<!doctype html><html lang="en"><head>%s</head><body data-base="%s"><a class="skip" href="#main">Skip to content</a>'
-            '<header><div class="wrap"><a class="brand" href="%s">%s<span>Landosaur</span></a><nav aria-label="Main">%s</nav></div></header>'
+            '<header><div class="wrap"><a class="brand" href="%s">%s<span>Landosaur</span></a>'
+            '<nav aria-label="Main">%s<button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle light or dark theme">☾ Theme</button></nav></div></header>'
             '<main id="main" class="wrap%s">%s</main>%s%s</body></html>'
         ) % ("".join(head), esc(self.base), self.u("/"), DINO, nav, " wide" if wide else "", body, foot, tail)
 
@@ -242,36 +251,46 @@ class Site(object):
         )
         return (
             '<section class="mapzone" aria-label="%s">'
+            '<div class="mode-switcher" role="group" aria-label="Filter by deal type">'
+            '<button type="button" class="mode-btn active" data-deal-mode="">All Land</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="cash">Buy It Now</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="min_bid">Auction / Bid</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="none">Land Bank / Offer</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="direct">Direct Owner / Agent</button>'
+            '<a class="mode-btn" href="%s" style="margin-left:auto;border-color:var(--accent);color:var(--accent)">+ List Land Free</a>'
+            '</div>'
             '<form class="filters" id="filters" onsubmit="return false">'
             '<label>State<select name="state"><option value="">All tracked states</option>%s</select></label>'
-            '<label>Type<select name="kind"><option value="">Any</option><option value="cash">Fixed price (OTC)</option>'
-            '<option value="min_bid">Auction / min bid</option><option value="none">Offer / application</option></select></label>'
+            '<label>Deal mode<select name="kind"><option value="">Any deal type</option><option value="cash">Buy It Now (fixed price)</option>'
+            '<option value="min_bid">Auction / min bid</option><option value="none">Land bank / offer</option><option value="direct">Direct Owner / Agent</option></select></label>'
             '<label>Max price<input name="max" type="number" min="0" step="100" inputmode="numeric" placeholder="Any"></label>'
             '<label>Min acres<input name="acres" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Any"></label>'
             '<label>Sort<select name="sort"><option value="default">Recommended</option><option value="deadline">Closing soonest</option>'
             '<option value="ppa_asc">Lowest $/acre</option><option value="price_asc">Price: low to high</option>'
             '<option value="price_desc">Price: high to low</option><option value="acres_desc">Largest acreage</option></select></label>'
             '<label class="grow">Search<input name="q" type="search" placeholder="County, city, address, parcel ID"></label>'
-            '<label class="check"><input name="inview" type="checkbox"> Search map area</label>'
-            '<label class="check"><input name="savedOnly" type="checkbox"> Saved only</label>'
-            '<label class="check"><input name="closed" type="checkbox"> Include closed</label>'
-            '</form>'
-            '<div class="preset-bar" aria-label="Quick filters">'
+            '<div class="preset-bar" aria-label="Quick filters" style="flex-basis:100%%;margin:4px -16px -14px;border-top:1px solid var(--line);border-bottom:0">'
             '<button type="button" class="pill-btn" data-preset="all">All active</button>'
-            '<button type="button" class="pill-btn" data-preset="cash">Fixed price (OTC)</button>'
-            '<button type="button" class="pill-btn" data-preset="min_bid">Tax-sale &amp; auctions</button>'
+            '<button type="button" class="pill-btn" data-preset="cash">Buy It Now</button>'
+            '<button type="button" class="pill-btn" data-preset="min_bid">Auction / Bid</button>'
+            '<button type="button" class="pill-btn" data-preset="direct">Direct Owner / Agent</button>'
             '<button type="button" class="pill-btn" data-preset="acres5">5+ acres</button>'
             '<button type="button" class="pill-btn" data-preset="under5k">Under $5,000</button>'
             '<button type="button" class="pill-btn" data-preset="ppa">Lowest $/acre</button>'
             '<button type="button" class="pill-btn" data-preset="saved">Saved shortlist ★</button>'
-            '</div>'
+            '<div class="filter-toggles">'
+            '<label><input name="inview" type="checkbox"> Search map area</label>'
+            '<label><input name="savedOnly" type="checkbox"> Saved only</label>'
+            '<label><input name="closed" type="checkbox"> Include closed</label>'
+            '</div></div></form>'
             '<div class="explorer-split">'
             '<div class="explorer-map-col"><div id="map" class="map" data-scope="%s">'
             '<noscript><p>The map needs JavaScript. Browse state directories below.</p></noscript></div>'
             '<div class="map-legend" aria-hidden="true">'
-            '<span><i style="background:#1d6f42"></i>Fixed price</span>'
-            '<span><i style="background:#b5602f"></i>Auction / min bid</span>'
+            '<span><i style="background:#1d6f42"></i>Buy It Now</span>'
+            '<span><i style="background:#b5602f"></i>Auction / Bid</span>'
             '<span><i style="background:#2f7d6e"></i>Land bank / offer</span>'
+            '<span><i style="background:#16a34a"></i>Direct Owner / Agent</span>'
             '</div></div>'
             '<div class="explorer-list-col"><div class="list-head"><p class="small" id="map-count" aria-live="polite"></p></div>'
             '<div id="results" class="results"></div></div>'
@@ -279,6 +298,7 @@ class Site(object):
             '<div id="compare-dock" class="compare-dock" hidden>'
             '<span>Saved: <strong data-saved-count>0</strong> · Compare: <strong data-cmp-count>0</strong>/4</span>'
             '<button type="button" data-open-compare>Compare side by side</button>'
+            '<button type="button" class="ghost-dk" data-export-saved>Export Saved CSV</button>'
             '<button type="button" class="ghost-dk" data-clear-compare>Clear</button>'
             '</div>'
             '<div id="compare-modal" class="compare-modal" hidden role="dialog" aria-modal="true" aria-label="Compare parcels">'
@@ -286,17 +306,17 @@ class Site(object):
             '<button type="button" class="button ghost sm" data-close-compare>Close</button></div>'
             '<div data-cmp-body></div></div></div>'
             '</section>'
-        ) % (esc(title), opts, esc(scope))
+        ) % (esc(title), self.u("/list/"), opts, esc(scope))
 
     def how_block(self):
         return (
             '<section><h2>How Landosaur works</h2><ul class="notes">'
-            '<li><strong>Official public sources only.</strong> City, county, state trust, and tax-sale inventories read daily. Zero scraped broker spam.</li>'
-            '<li><strong>GIS parcel intelligence.</strong> Agency parcel outlines, USGS aerial/topo imagery, FEMA flood overlays, distance ruler, and USDA/FHFA county values.</li>'
-            '<li><strong>No invented prices.</strong> Unpriced land-bank lots stay honest; minimum bids stay labeled separately from fixed prices.</li>'
-            '<li><strong>Full deal economics.</strong> Compare grid vs. off-grid electricity, land loans/balloons, closed comps, and 6 diligence gates in the <a href="%s">Land Analyzer</a>.</li>'
+            '<li><strong>Official public sources + direct listings.</strong> City, county, state trust, and tax-sale feeds across 23 states plus 50-state direct owner, real estate agent, and AI-agent listings. Zero scraped broker spam.</li>'
+            '<li><strong>9-agency GIS Parcel X-Ray.</strong> Instant USGS 3DEP terrain profile, FEMA flood &amp; disaster risk, USFWS wetlands, USDA soil/septic depth, Census roads, USGS public-land adjacency, NASA solar/hardiness, and USDA/FHFA county benchmarks.</li>'
+            '<li><strong>Clear Buy It Now vs. Auction bidding.</strong> Filter fixed-price Buy It Now parcels separately from auctions; bid or reserve direct listings on-site and link directly to official portals for government parcels.</li>'
+            '<li><strong>Agent-native listing API &amp; Analyzer.</strong> Publish any U.S. parcel in 60 seconds via <a href="%s">/list/</a> or a single AI agent API call, and model full all-in deal economics in the <a href="%s">Land Analyzer</a>.</li>'
             '</ul><p><a href="%s">About our rules</a> · <a href="%s">All official sources</a> · <a href="%s">50-State Land Prices</a></p></section>'
-        ) % (self.u("/analyze/"), self.u("/about/"), self.u("/sources/"), self.u("/land-prices/"))
+        ) % (self.u("/list/"), self.u("/analyze/"), self.u("/about/"), self.u("/sources/"), self.u("/land-prices/"))
 
     # ------------------------------------------------------------------ home (map)
     def home(self):
@@ -348,18 +368,18 @@ class Site(object):
             '<h1>Find, map, and X-Ray official land for sale</h1>'
             '<p class="lede">%s</p></div></div>'
             '<div class="hero-cta-group">'
-            '<a class="button" href="%s">Free 50-State Parcel X-Ray →</a>'
-            '<a class="button ghost" href="%s">Land Analyzer</a>'
+            '<a class="button" href="%s">List Land Free (60s / AI Agent) →</a>'
+            '<a class="button ghost" href="%s">Free 50-State Parcel X-Ray</a>'
             '</div></div>'
             '<div class="hero-stats">'
             '<span class="stat-pill"><strong>%s</strong> active parcels</span>'
-            '<span class="stat-pill"><strong>%d</strong> states live</span>'
+            '<span class="stat-pill"><strong>%d</strong> states live + 50-state direct</span>'
             '<span class="stat-pill"><strong>%d</strong> official agencies</span>'
             '<span class="stat-pill"><strong>3,115</strong> county price benchmarks</span>'
-            '<span class="stat-pill"><strong>6</strong> live federal X-Ray APIs</span>'
+            '<span class="stat-pill"><strong>9</strong> live federal X-Ray APIs</span>'
             '<span class="stat-pill">Updated <strong>%s</strong></span>'
             '</div></section>' % (
-                self.u("/assets/mascot.png"), lede, self.u("/xray/"), self.u("/analyze/"),
+                self.u("/assets/mascot.png"), lede, self.u("/list/"), self.u("/xray/"),
                 "{:,}".format(len(cur)), len(states), n_src, esc(self.updated() or "daily"),
             ),
             self.map_block("all"),
@@ -444,7 +464,7 @@ class Site(object):
         crumbs, crumb_ld = self.crumbs([("Parcel X-Ray", "/xray/")])
         faqs = [
             ("What does the Free U.S. Parcel X-Ray check?",
-             "For any coordinates in all 50 U.S. states, Landosaur queries 6 official public data services live: USGS 3DEP 1m/10m LiDAR (5-point elevation, relief, slope % and aspect), FEMA NFHL (exact flood zone, 100-year SFHA status, BFE, and FIRM panel), USFWS National Wetlands Inventory (wetlands within 100 meters), USDA NRCS SSURGO Soil Survey (soil map unit, prime farmland class, drainage class, hydrologic group, water table depth, and bedrock depth), NASA POWER Climatology (annual and worst-month solar peak sun hours, temperatures, and annual rainfall), and FCC Census County FIPS joined to our 3,115-county USDA/FHFA Land Index."),
+             "For any coordinates in all 50 U.S. states, Landosaur queries 9 official public data services live: USGS 3DEP 1m/10m LiDAR (9-point cross-section elevation profile, relief, slope % and aspect), FEMA NFHL (exact flood zone, 100-year SFHA status, BFE, and FIRM panel), FEMA National Risk Index (county Wildfire, Hurricane, Tornado, Drought, and Earthquake risk ratings), USFWS National Wetlands Inventory (wetlands within 100 meters), USDA NRCS SSURGO Soil Survey (soil map unit, prime farmland class, drainage class, hydrologic group, water table depth, and bedrock depth), U.S. Census TIGERweb Roads (nearest mapped public road & highway distances), USGS PAD-US Public Lands (National Forests, BLM land, and parks within 1 km), NASA POWER Climatology (peak sun hours, temperatures, rainfall, and USDA Plant Hardiness Zone), and FCC Census County FIPS joined to our 3,115-county USDA/FHFA Land Index."),
             ("Does Parcel X-Ray replace a survey, perc test, or title search?",
              "No. Automated federal GIS layers are a fast pre-offer screening layer so you can spot floodplains, wetlands, steep slopes, shallow bedrock, or arid off-grid constraints before spending thousands on inspections. Always obtain a licensed boundary survey, county health perc test, recorded access verification, and title insurance before closing."),
             ("Can I run Parcel X-Ray on land listed on other websites?",
@@ -452,9 +472,9 @@ class Site(object):
         ]
         body = [
             crumbs,
-            '<div class="eyebrow">All 50 U.S. States · 6 Live Federal APIs · Free Forever</div>',
-            '<h1>Free U.S. Parcel X-Ray: Flood, Soil, Slope, Wetlands &amp; Solar</h1>',
-            '<p class="lede">Click anywhere on the satellite map—or enter any U.S. address, town, or GPS coordinates—to screen raw land across <strong>USGS 3DEP LiDAR</strong>, <strong>FEMA Flood</strong>, <strong>USFWS Wetlands</strong>, <strong>USDA SSURGO Soil</strong>, <strong>NASA Solar/Climate</strong>, and <strong>3,115-county land values</strong> in seconds.</p>',
+            '<div class="eyebrow">All 50 U.S. States · 9 Live Federal APIs · KML/GPX Export · Free Forever</div>',
+            '<h1>Free U.S. Parcel X-Ray: Flood, Soil, Roads, Public Land &amp; Slope</h1>',
+            '<p class="lede">Click anywhere on the satellite map—or enter any U.S. address, town, or GPS coordinates—to screen raw land across <strong>USGS 3DEP LiDAR (with 656-ft terrain cross-section)</strong>, <strong>FEMA Flood &amp; Wildfire/Hazard Risk</strong>, <strong>USFWS Wetlands</strong>, <strong>USDA SSURGO Soil/Bedrock</strong>, <strong>Census Road Proximity</strong>, <strong>USGS Public Lands</strong>, <strong>NASA Solar &amp; Growing Zone</strong>, and <strong>3,115-county land values</strong>.</p>',
             '<div id="xray-app">',
             '<form id="xray-search-form" class="xray-search-bar" aria-label="Search any U.S. location">'
             '<input id="xray-q" type="search" placeholder="Enter address, town &amp; state, ZIP, or lat, lon (e.g. Sedona, AZ or 35.42, -92.45)" aria-label="U.S. address, town, or coordinates">'
@@ -505,6 +525,144 @@ class Site(object):
             "Free U.S. Parcel X-Ray — Flood, Soil, Slope, Wetlands & Solar Checker | Landosaur",
             desc, "/xray/", "".join(body), indexable=True, jsonld=ld,
             scripts=["vendor/leaflet.js", "xray.js"], wide=True,
+        )
+
+    # ------------------------------------------------------------------ /list/ Agent-First Land Listing Flow
+    def list_page(self):
+        crumbs, crumb_ld = self.crumbs([("List Land", "/list/")])
+        agent_prompt = (
+            "List my land on Landosaur by sending a POST request to https://landosaur.com/api/listings/ "
+            "(read https://landosaur.com/.well-known/landosaur-agent.json for the schema).\n"
+            "Details:\n"
+            "- Location / GPS: [insert address, town & state, or lat, lon]\n"
+            "- Acreage: [insert acres]\n"
+            "- Sale Mode: [buy_now OR auction]\n"
+            "- Price / Starting Bid: $[insert USD]\n"
+            "- Optional Buy It Now or Auction End Date: [insert or omit]\n"
+            "- Contact Name & Email: [insert name and email]\n"
+            "- Seller Type: [owner OR agent + brokerage]\n"
+            "- Optional Stripe/Escrow Checkout URL: [insert https://... or omit]\n"
+            "- Notes (access, utilities, seller financing): [insert brief facts]\n"
+            "Return the live Landosaur listing URL, auto-enriched Federal Parcel X-Ray summary, and my Seller Edit Token."
+        )
+        curl_snippet = (
+            "curl -X POST https://landosaur.com/api/listings/ \\\n"
+            "  -H 'Content-Type: application/json' \\\n"
+            "  -d '{\n"
+            '    "location": "Van Buren County, AR",\n'
+            '    "lat": 35.42, "lon": -92.45,\n'
+            '    "acres": 10,\n'
+            '    "sale_mode": "auction",\n'
+            '    "starting_bid": 15000,\n'
+            '    "buy_now_price": 29500,\n'
+            '    "seller_type": "agent",\n'
+            '    "contact_name": "Alex Rivera",\n'
+            '    "brokerage": "Ozark Land Realty",\n'
+            '    "contact_email": "alex@example.com",\n'
+            '    "road_access": "Gravel county road frontage",\n'
+            '    "submitted_by_agent": "claude"\n'
+            "  }'"
+        )
+        body = [
+            crumbs,
+            '<div class="eyebrow">All 50 States · Free · Zero Accounts · Human or AI Agent</div>',
+            '<h1>List Your Land in 60 Seconds—or With Just Your AI Agent</h1>',
+            '<p class="lede">The easiest place on earth for landowners, real estate agents, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity) to publish <strong>Buy It Now</strong> or <strong>Live Auction</strong> land across all 50 states. Drop one pin and Landosaur auto-fills county, USGS LiDAR slope, FEMA flood &amp; wildfire risk, USDA soil/bedrock, Census road distance, USGS public lands, and county $/acre benchmarks automatically.</p>',
+            '<div id="list-app">',
+
+            # AI Agent 1-Prompt Publishing Panel
+            '<section class="xray-section" id="agent-publish" style="margin-top:16px">'
+            '<div class="xray-header"><div><div class="eyebrow">Option 1 · Machine-First Publishing</div>'
+            '<h2>Tell Your AI Agent to List It For You</h2></div>'
+            '<a class="button ghost sm" href="%s">Open Agent JSON Schema ↗</a></div>'
+            '<p class="small">Paste this prompt into Claude, ChatGPT, Codex, Gemini, or Antigravity—your agent publishes directly to <code>POST https://landosaur.com/api/listings/</code> with zero form-filling and returns your live Buy It Now / Auction URL + Seller Edit Token.</p>'
+            '<pre id="agent-prompt-text" class="code-box">%s</pre>'
+            '<div class="btn-row">'
+            '<button type="button" class="button sm" data-copy-target="agent-prompt-text">Copy AI Agent Prompt</button>'
+            '<button type="button" class="button ghost sm" data-copy-target="agent-curl-text">Copy cURL Example</button>'
+            '<a class="button ghost sm" href="%s">View Live Direct Marketplace →</a>'
+            '</div>'
+            '<details class="faq-item"><summary>Developer / Broker Agent cURL Payload</summary>'
+            '<div style="padding:0 16px 14px"><pre id="agent-curl-text" class="code-box">%s</pre></div></details>'
+            '</section>' % (self.u("/.well-known/landosaur-agent.json"), esc(agent_prompt), self.u("/direct/"), esc(curl_snippet)),
+
+            # Human / Real Estate Agent 60-Second Drop-a-Pin Form
+            '<section class="xray-section" id="pin-publish" style="margin-top:24px">'
+            '<div class="eyebrow">Option 2 · Owner or Real Estate Agent Drop-a-Pin</div>'
+            '<h2>Publish a Buy It Now or Auction Listing Now</h2>'
+            '<p class="small">Click anywhere on the satellite map below (or search your address/town) to auto-detect county, state, elevation, flood zone, soil, and road proximity.</p>'
+            '<div id="list-pin-map" class="map small" style="margin:12px 0"></div>'
+            '<div id="list-xray-preview" class="callout" hidden style="margin-bottom:14px"></div>'
+            '<form id="direct-list-form" class="worksheet">'
+            '<label style="grid-column:1/-1"><span>1. Deal Mode (Buy It Now vs. Live Auction)</span>'
+            '<div class="radio-pills">'
+            '<label><input type="radio" name="sale_mode" value="buy_now" checked> Buy It Now (Fixed Price)</label>'
+            '<label><input type="radio" name="sale_mode" value="auction"> Live Auction (Accept Bids)</label>'
+            '</div></label>'
+            '<label style="grid-column:1/-1"><span>2. Listing As</span>'
+            '<div class="radio-pills">'
+            '<label><input type="radio" name="seller_type" value="owner" checked> Landowner (FSBO)</label>'
+            '<label><input type="radio" name="seller_type" value="agent"> Real Estate Agent / Broker</label>'
+            '</div></label>'
+            '<label style="grid-column:1/-1"><span>Find Location (Address, Town &amp; State, or GPS)</span>'
+            '<span class="in"><input name="location" type="text" placeholder="e.g. Fredericksburg, TX or 30.275, -98.872">'
+            '<button type="button" id="locate-pin-btn" class="button ghost sm" style="white-space:nowrap">Locate &amp; X-Ray</button></span></label>'
+            '<label><span>Latitude</span><input name="lat" type="number" step="any" placeholder="Click map or locate" required></label>'
+            '<label><span>Longitude</span><input name="lon" type="number" step="any" placeholder="Click map or locate" required></label>'
+            '<label><span>Acreage</span><span class="in"><input name="acres" type="number" min="0.01" step="any" placeholder="10" required><i>acres</i></span></label>'
+            '<label><span id="price-field-label">Buy It Now price ($)</span><span class="in"><input name="price" type="number" min="1" step="any" placeholder="25000" required><i>$</i></span></label>'
+            '<div id="auction-only-fields" hidden style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px 16px;padding-top:8px;border-top:1px solid var(--line)">'
+            '<label><span>Optional Buy It Now Price ($)</span><input name="buy_now_price" type="number" min="1" step="any" placeholder="Optional instant-buy price"></label>'
+            '<label><span>Auction End Date/Time</span><input name="auction_end" type="datetime-local"></label>'
+            '</div>'
+            '<label><span>Listing Title (optional — auto-filled)</span><input name="title" type="text" placeholder="e.g. 10 Wooded Acres Near Lake"></label>'
+            '<label><span>Parcel / APN (optional)</span><input name="apn" type="text" placeholder="County parcel ID"></label>'
+            '<label><span>Zoning (optional)</span><input name="zoning" type="text" placeholder="Agricultural / Residential / Unrestricted"></label>'
+            '<label><span>Road Access</span><input name="road_access" type="text" placeholder="Paved county road / recorded easement"></label>'
+            '<label><span>Utilities</span><input name="utilities" type="text" placeholder="Power at road, well/septic needed"></label>'
+            '<label class="inline-chk"><input name="financing_offered" type="checkbox"> Seller financing available</label>'
+            '<label><span>Your Name (Owner or Agent)</span><input name="contact_name" type="text" required placeholder="Full name"></label>'
+            '<label><span>Contact Email (private — for bids &amp; closing)</span><input name="contact_email" type="email" required placeholder="you@example.com"></label>'
+            '<label><span>Phone (optional)</span><input name="contact_phone" type="tel" placeholder="(555) 123-4567"></label>'
+            '<div id="agent-only-fields" hidden style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px 16px;padding-top:8px;border-top:1px solid var(--line)">'
+            '<label><span>Brokerage Name</span><input name="brokerage" type="text" placeholder="e.g. Lone Star Land Realty"></label>'
+            '<label><span>State License # (optional)</span><input name="agent_license" type="text" placeholder="License number"></label>'
+            '</div>'
+            '<label style="grid-column:1/-1"><span>Optional Direct Checkout / Escrow URL (Stripe Payment Link, Escrow.com, or Title Company)</span>'
+            '<input name="checkout_url" type="url" placeholder="https://buy.stripe.com/... or https://escrow.com/... (optional)"></label>'
+            '<label style="grid-column:1/-1"><span>Closing / Escrow Notes (optional)</span>'
+            '<input name="escrow_notes" type="text" placeholder="e.g. Closes via First American Title; $1,000 earnest money"></label>'
+            '<label style="grid-column:1/-1"><span>Plain Facts About the Land</span>'
+            '<input name="notes" type="text" placeholder="Clear title, recent survey, timber, creek frontage, no HOA, etc."></label>'
+            '<input name="website_hp" type="text" tabindex="-1" autocomplete="off" style="display:none">'
+            '<div style="grid-column:1/-1;padding-top:6px"><button type="submit" id="publish-btn" class="button">Publish Listing Free →</button></div>'
+            '</form>'
+            '<div id="publish-result" class="callout" hidden style="margin-top:14px"></div>'
+            '</section>'
+            '</div>',
+        ]
+        desc = "List land for sale in any of the 50 U.S. states in 60 seconds—or let your AI agent (Claude, ChatGPT, Codex) publish Buy It Now or Auction listings via one API call with automatic 9-agency Federal Parcel X-Ray."
+        return self.layout(
+            "List Your Land Free (Owners, Real Estate Agents & AI Agents) | Landosaur",
+            desc, "/list/", "".join(body), indexable=True, jsonld=[crumb_ld],
+            scripts=["vendor/leaflet.js", "list.js"], wide=True,
+        )
+
+    # ------------------------------------------------------------------ /direct/ Direct Marketplace & Live Bidding/Checkout
+    def direct_page(self):
+        crumbs, crumb_ld = self.crumbs([("Direct Marketplace", "/direct/")])
+        body = [
+            crumbs,
+            '<div id="direct-app">'
+            '<h1>Direct by Owner &amp; Agent Land Marketplace</h1>'
+            '<p class="lede">Live Buy It Now and Auction parcels listed directly by landowners, real estate agents, and AI agents across all 50 states—each auto-screened with 9 live federal GIS services. <a href="%s"><strong>List your land free →</strong></a></p>'
+            '</div>' % self.u("/list/"),
+        ]
+        desc = "Browse, bid on, or Buy It Now direct owner and real estate agent land listings across all 50 U.S. states, complete with live 9-agency Federal Parcel X-Ray and real-time bidding."
+        return self.layout(
+            "Direct by Owner & Agent Land Marketplace — Bid or Buy It Now | Landosaur",
+            desc, "/direct/", "".join(body), indexable=True, jsonld=[crumb_ld],
+            scripts=["vendor/leaflet.js", "xray.js", "direct.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /land-for-sale/ (national directory)
@@ -940,11 +1098,17 @@ class Site(object):
                 )
             )
         else:
+            portal = self.state_portals.get(st["code"])
+            portal_html = (
+                ' Official state agency portal: <a href="%s" target="_blank" rel="noopener noreferrer"><strong>%s ↗</strong></a>.'
+                % (esc(portal["url"]), esc(portal["agency"]))
+            ) if portal else ""
             inv_section = (
-                '<section class="callout"><h2>Evaluating land for sale in %s?</h2>'
-                '<p>Landosaur does not yet ingest an official state-agency feed for %s (we show 0 live listings honestly rather than scraping unverified ads). '
-                'Run any %s parcel through our free <a href="%s"><strong>All-In Cost, Financing &amp; Utility Analyzer</strong></a>, check our <a href="%s">active states on the map</a>, or read our <a href="%s">buying guides</a>.</p></section>' % (
-                    esc(name), esc(name), esc(name), self.u("/analyze/"), self.u("/land-for-sale/"), self.u("/research/#field-guides"))
+                '<section class="callout"><h2>Finding or selling land in %s?</h2>'
+                '<p>Landosaur does not yet ingest an automated open-data feed for %s (we show 0 automated agency listings honestly rather than scraping unverified ads).%s '
+                'Have land for sale in %s? <a href="%s"><strong>List it free in 60 seconds (or via your AI Agent) →</strong></a> — or screen any %s parcel with our free '
+                '<a href="%s"><strong>9-Agency Parcel X-Ray</strong></a> and <a href="%s"><strong>Land Analyzer</strong></a>.</p></section>' % (
+                    esc(name), esc(name), portal_html, esc(name), self.u("/list/"), esc(name), self.u("/xray/"), self.u("/analyze/"))
             )
 
         body = [
@@ -1045,6 +1209,7 @@ class Site(object):
             '<section id="tab-power" role="tabpanel" hidden>'
             '<h2>Electricity feasibility: Utility Grid Extension vs. Off-Grid Solar</h2>'
             '<p class="small">Power is often the single biggest hidden cost on raw land. Compare real utility line-extension quotes against an off-grid solar + LiFePO4 battery + backup generator system over your ownership horizon.</p>'
+            '<p id="pwr-solar-hint" class="callout" hidden style="margin-bottom:12px"></p>'
             '<form id="form-power" class="worksheet" onsubmit="return false">'
             '<label><span>Comparison horizon</span><span class="in"><input name="horizonYears" type="number" min="1" max="50" step="1" value="10"><i>yrs</i></span></label>'
             '<label><span>Distance to distribution line</span><span class="in"><input name="distFt" type="number" min="0" step="any" placeholder="0"><i>ft</i></span></label>'
@@ -1419,16 +1584,39 @@ class Site(object):
             kind = {"c": "%d census" % cv["year"], "e": "%d estimate" % cv["year"], "i": "%d estimate" % cv["year"],
                     "r": "%d residential land, FHFA" % cv["year"]}.get(cv["kind"], str(cv["year"]))
             per = ""
+            gauge = ""
             if r["price"] and r["acres"]:
-                per = " This listing's %s works out to <strong>%s per acre</strong>." % (
-                    "minimum bid" if r["price_kind"] == "min_bid" else "price", esc(money(r["price"] / r["acres"])))
+                l_ppa = r["price"] / r["acres"]
+                c_val = float(cv["value"])
+                diff_pct = ((l_ppa / c_val) - 1.0) * 100.0
+                diff_str = "%.0f%% %s county average" % (abs(diff_pct), "above" if diff_pct >= 0 else "below")
+                max_bar = max(l_ppa, c_val, 1.0)
+                w_list = max(4.0, min(100.0, (l_ppa / max_bar) * 100.0))
+                w_cnty = max(4.0, min(100.0, (c_val / max_bar) * 100.0))
+                per = " This listing's %s works out to <strong>%s per acre</strong> (%s)." % (
+                    "minimum bid" if r["price_kind"] == "min_bid" else "price", esc(money(l_ppa)), esc(diff_str))
+                gauge = (
+                    '<div class="bench-gauge" aria-label="Listing price per acre compared to county benchmark">'
+                    '<div class="bench-gauge-row"><strong>This listing (%s)</strong>'
+                    '<div class="bench-track"><div class="bench-fill%s" style="width:%.1f%%"></div></div>'
+                    '<span class="card-metric">%s/ac</span></div>'
+                    '<div class="bench-gauge-row"><span>%s avg</span>'
+                    '<div class="bench-track"><div class="bench-fill county" style="width:%.1f%%"></div></div>'
+                    '<span class="card-metric">%s/ac</span></div>'
+                    '<p class="small" style="margin:6px 0 0"><strong>%s.</strong> Small lots, auction opening floors, road access, utilities, and title defects cause wide swings vs. county averages—context only, not an appraisal.</p>'
+                    '</div>'
+                ) % (
+                    "min bid" if r["price_kind"] == "min_bid" else "price",
+                    " high" if diff_pct > 25 else "", w_list, esc(money(l_ppa)),
+                    esc(cv["name"]), w_cnty, esc(money(c_val)), esc(diff_str.capitalize()),
+                )
             what = "Land under single-family homes" if cv["kind"] == "r" else "Farm real estate"
             context = (
-                '<section><h2>Land values in %s</h2><p>%s in %s averaged <strong>%s per acre</strong> (%s) on the '
+                '<section><h2>Land values in %s</h2>%s<p>%s in %s averaged <strong>%s per acre</strong> (%s) on the '
                 '<a href="%s%s" rel="nofollow noopener noreferrer">US County Land Index</a>.%s County averages mix very different land; '
                 'they are context, not an appraisal. <a href="%s">See %s land price history &amp; all counties →</a></p></section>'
             ) % (
-                esc(r["county_label"]), what, esc(cv["name"] + ", " + r["state_name"]), money(cv["value"]), esc(kind),
+                esc(r["county_label"]), gauge, what, esc(cv["name"] + ", " + r["state_name"]), money(cv["value"]), esc(kind),
                 esc(config.LAND_INDEX_URL), esc(cv["path"]), per, self.u(state_price_link), esc(r["state_name"]),
             )
 
@@ -1436,7 +1624,7 @@ class Site(object):
         buildable_val = next((f["value"] for f in r["facts"] if f["topic"] == "buildable_lot"), "")
         side_lot_val = next((f["value"] for f in r["facts"] if f["topic"] == "side_lot_eligible"), "")
         parcel = {
-            "lat": r.get("lat"), "lon": r.get("lon"), "geometry": r.get("geometry"), "title": r["title"],
+            "slug": r["id"], "lat": r.get("lat"), "lon": r.get("lon"), "geometry": r.get("geometry"), "title": r["title"],
             "acres": r.get("acres"), "price": r.get("price"), "price_kind": r.get("price_kind"),
             "offering": r.get("offering"), "zoning": zoning_val, "buildable": buildable_val, "side_lot": side_lot_val,
         }
@@ -1445,25 +1633,27 @@ class Site(object):
             la, lo = r["lat"], r["lon"]
             diligence_links = (
                 '<div class="diligence-bar" aria-label="Parcel GIS due-diligence tools">'
-                '<button type="button" id="measure-toggle" class="chip-btn">Measure distance on map</button>'
-                '<a href="https://www.google.com/maps/@%.6f,%.6f,17z/data=!3m1!1e3" target="_blank" rel="noopener noreferrer">Satellite / Directions ↗</a>'
-                '<a href="https://msc.fema.gov/portal/search?AddressQuery=%.6f%%2C%.6f" target="_blank" rel="noopener noreferrer">FEMA Flood Map ↗</a>'
-                '<a href="https://websoilsurvey.nrcs.usda.gov/app/" target="_blank" rel="noopener noreferrer">USDA Web Soil Survey ↗</a>'
-                '<a href="https://fwsprimary.wim.usgs.gov/wetlands/apps/wetlands-mapper/" target="_blank" rel="noopener noreferrer">USFWS Wetlands Mapper ↗</a>'
+                '<button type="button" id="measure-toggle" class="chip-btn">Measure distance</button>'
+                '<button type="button" id="export-kml" class="chip-btn">Download KML</button>'
+                '<button type="button" id="export-gpx" class="chip-btn">Download GPX</button>'
+                '<a href="https://www.google.com/maps/@%.6f,%.6f,17z/data=!3m1!1e3" target="_blank" rel="noopener noreferrer">Satellite ↗</a>'
+                '<a href="https://msc.fema.gov/portal/search?AddressQuery=%.6f%%2C%.6f" target="_blank" rel="noopener noreferrer">FEMA Map ↗</a>'
+                '<a href="https://broadbandmap.fcc.gov/location-summary/fixed?latlon=%.5f%%2C%.5f" target="_blank" rel="noopener noreferrer">FCC Broadband ↗</a>'
+                '<a href="https://websoilsurvey.nrcs.usda.gov/app/" target="_blank" rel="noopener noreferrer">USDA Soils ↗</a>'
                 '</div><p class="small" id="measure-out" aria-live="polite" style="margin-top:6px"></p>'
-            ) % (la, lo, la, lo)
+            ) % (la, lo, la, lo, la, lo)
             mapbox = (
                 '<div id="parcel-map" class="map small"></div>'
                 '<script type="application/json" id="parcel">%s</script>'
                 '%s'
-                '<p class="small">Switch layers (USGS Aerial, Topo, Streets, FEMA Flood Zones) top-right. GIS coordinates (%.5f, %.5f) are reference only, not a boundary survey.</p>'
+                '<p class="small">Switch layers (USGS Aerial, Topo, Streets, FEMA Flood Zones) top-right. Download KML/GPX for OnX Hunt, Gaia GPS, or Google Earth. Coordinates (%.5f, %.5f) are GIS reference only, not a boundary survey.</p>'
             ) % (json.dumps(parcel, separators=(",", ":")).replace("</", "<\\/"), diligence_links, la, lo)
             xray_section = (
                 '<section class="xray-section" id="parcel-xray">'
-                '<div class="xray-header"><div><div class="eyebrow">Live 6-Agency Federal Screening</div>'
-                '<h2>Live Parcel X-Ray &amp; Land Potential</h2></div>'
+                '<div class="xray-header"><div><div class="eyebrow">Live 9-Agency Federal Screening</div>'
+                '<h2>Live Parcel X-Ray, Terrain Profile &amp; Land Potential</h2></div>'
                 '<a class="button ghost sm no-print" href="%s#lat=%.5f&amp;lon=%.5f">Open full-screen X-Ray →</a></div>'
-                '<div id="parcel-xray-body"><p class="small">Loading live USGS elevation &amp; slope, FEMA flood zone, USFWS wetlands, USDA soil/septic depth, and NASA solar data…</p></div>'
+                '<div id="parcel-xray-body"><p class="small">Loading live USGS 9-point terrain cross-section, FEMA flood &amp; wildfire risk, USFWS wetlands, USDA soil/bedrock depth, Census road proximity, USGS public lands, and NASA solar/climate data…</p></div>'
                 '</section>'
             ) % (self.u("/xray/"), la, lo)
         else:
@@ -1513,22 +1703,31 @@ class Site(object):
             '</ul></section>'
         ) % esc(r["title"])
 
+        if r["price_kind"] == "cash":
+            official_cta = "Buy It Now on Official Agency Portal ↗"
+        elif r["offering"] == "auction" or r["price_kind"] == "min_bid":
+            official_cta = "Place Bid on Official Agency Portal ↗"
+        elif r["offering"] == "proposal":
+            official_cta = "Submit Proposal on Official Agency Portal ↗"
+        else:
+            official_cta = "Apply / Buy on Official Agency Portal ↗"
+
         body = [
             crumbs,
             '<h1>%s</h1>' % esc(r["title"]),
             summary_strip,
             '<div class="dossier"><div class="dossier-card"><dl class="kv">%s</dl>'
             '<div class="btn-row">'
-            '<a class="button" href="%s" rel="noopener">View official agency listing ↗</a>'
-            '<a class="button ghost" href="%s?%s">Full Analyzer</a>'
+            '<a class="button" href="%s" rel="noopener">%s</a>'
+            '<a id="dossier-analyze-link" class="button ghost" href="%s?%s">Full Analyzer</a>'
             '<button type="button" id="print-dossier" class="button ghost sm">Print / Save Field PDF</button>'
             '<button type="button" id="save-parcel" class="button ghost sm" data-id="%s">Save ☆</button>'
             '<button type="button" id="compare-parcel" class="button ghost sm" data-id="%s">Compare</button>'
             '</div>'
-            '<p class="callout"><strong>Not an offer to sell.</strong> Landosaur does not sell or broker this land. %s\'s terms, deadlines and '
-            'eligibility rules apply; buy only through the agency.</p></div><div>%s</div></div>' % (
+            '<p class="callout"><strong>Not an offer to sell.</strong> Landosaur does not sell or broker government land. %s\'s official bidding rules, deadlines and '
+            'eligibility terms apply; complete bidding or checkout directly on the agency\'s portal.</p></div><div>%s</div></div>' % (
                 "".join("<dt>%s</dt><dd>%s</dd>" % (k, v) for k, v in kv),
-                esc(r["url"]), self.u("/analyze/"), esc(aq), esc(r["id"]), esc(r["id"]),
+                esc(r["url"]), official_cta, self.u("/analyze/"), esc(aq), esc(r["id"]), esc(r["id"]),
                 esc(src.get("agency", "The agency")), mapbox,
             ),
             xray_section,

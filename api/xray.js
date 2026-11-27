@@ -1,13 +1,16 @@
 /**
- * Landosaur Live Federal Parcel X-Ray API (Vercel Fluid Compute — Node.js Web API Function).
+ * Landosaur Live Federal Parcel X-Ray API v2 (Vercel Fluid Compute — Node.js Web API Function).
  *
- * Queries 6 authoritative public federal/official datasets in parallel for any coordinates in the 50 U.S. states:
- *   1. USGS 3DEP Elevation Point Query Service (5-point grid -> elevation, relief, slope %, aspect)
- *   2. FEMA National Flood Hazard Layer (NFHL MapServer/28 -> flood zone, SFHA, BFE, FIRM panel)
- *   3. USFWS National Wetlands Inventory (100m buffer -> wetland types & proximity)
- *   4. USDA NRCS SSURGO Soil Data Access (soil map unit, prime farmland, drainage, hydgrp, water table, bedrock)
- *   5. NASA POWER Climatology (annual/winter/summer peak sun hours, temps, annual precipitation)
- *   6. FCC Census Area FIPS joined against bundled 3,115-county USDA/FHFA Land Index
+ * Queries 9 authoritative public federal/official datasets in parallel for any coordinates in all 50 U.S. states:
+ *   1. USGS 3DEP Elevation Point Query Service (9-point W-E & S-N cross-section -> elevation, slope %, relief, aspect, SVG profile)
+ *   2. FEMA National Flood Hazard Layer (NFHL MapServer/28 -> flood zone, 100-yr SFHA, BFE, FIRM panel)
+ *   3. FEMA National Risk Index (county-level Wildfire, Drought, Hurricane, Tornado, Earthquake risk ratings)
+ *   4. USFWS National Wetlands Inventory (100m buffer -> wetland types & proximity)
+ *   5. USDA NRCS SSURGO Soil Data Access (soil map unit, prime farmland, drainage, hydgrp, water table, bedrock depth, septic signal)
+ *   6. U.S. Census TIGERweb Transportation (nearest mapped road + distance in ft, nearest highway + distance in mi)
+ *   7. USGS PAD-US Protected Areas & Public Lands (National Forest / BLM / State Park adjacency within 1 km)
+ *   8. NASA POWER Climatology (annual/winter/summer peak sun hours, normal summer high / winter low °F, rainfall, USDA Hardiness Zone)
+ *   9. FCC Census Area FIPS joined against bundled 3,115-county USDA/FHFA Land Index
  *
  * Also supports ?q=<address or place> via U.S. Census Geocoder + OpenStreetMap Nominatim (US-bounded).
  * Zero fabricated fallbacks: unavailable upstreams report status="unavailable" honestly.
@@ -17,7 +20,7 @@ import path from "node:path";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-const LANDO_UA = "landosaur-parcel-xray/1.0 (+https://landosaur.com)";
+const LANDO_UA = "landosaur-parcel-xray/2.0 (+https://landosaur.com)";
 
 const STATE_SLUGS = {
   AL: "alabama", AK: "alaska", AZ: "arizona", AR: "arkansas", CA: "california", CO: "colorado",
@@ -29,6 +32,17 @@ const STATE_SLUGS = {
   OK: "oklahoma", OR: "oregon", PA: "pennsylvania", RI: "rhode-island", SC: "south-carolina", SD: "south-dakota",
   TN: "tennessee", TX: "texas", UT: "utah", VT: "vermont", VA: "virginia", WA: "washington",
   WV: "west-virginia", WI: "wisconsin", WY: "wyoming",
+};
+
+const MTFCC_LABELS = {
+  S1100: "Primary highway / interstate",
+  S1200: "State / U.S. highway",
+  S1400: "Local / rural road",
+  S1500: "4WD / unimproved vehicular trail",
+  S1630: "Ramp",
+  S1640: "Service drive",
+  S1740: "Private / access road",
+  S1750: "Internal road",
 };
 
 let countyMap = null;
@@ -86,15 +100,48 @@ function round(v, d = 1) {
   return Math.round(v * f) / f;
 }
 
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(Math.min(1, a)));
+}
+
+function minDistanceToPathsMeters(lat, lon, paths) {
+  let best = Infinity;
+  for (const seg of paths || []) {
+    for (let i = 0; i < seg.length; i++) {
+      const [lo, la] = seg[i];
+      const d = haversineMeters(lat, lon, la, lo);
+      if (d < best) best = d;
+      if (i > 0) {
+        // Also check midpoint of segment for long rural straightaways
+        const [lo0, la0] = seg[i - 1];
+        const dm = haversineMeters(lat, lon, (la + la0) / 2, (lo + lo0) / 2);
+        if (dm < best) best = dm;
+      }
+    }
+  }
+  return best;
+}
+
 async function queryUsgsElevation(lat, lon) {
-  const dLat = 0.00045; // ~50 meters
-  const dLon = 0.00045 / Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  const dLat50 = 0.00045; // ~50m
+  const dLon50 = 0.00045 / Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  // 9-point cross-section (center + ±50m & ±100m along W-E and S-N) for true slope + terrain profile chart
   const pts = [
     ["c", lat, lon],
-    ["n", lat + dLat, lon],
-    ["s", lat - dLat, lon],
-    ["e", lat, lon + dLon],
-    ["w", lat, lon - dLon],
+    ["n1", lat + dLat50, lon],
+    ["s1", lat - dLat50, lon],
+    ["e1", lat, lon + dLon50],
+    ["w1", lat, lon - dLon50],
+    ["n2", lat + dLat50 * 2, lon],
+    ["s2", lat - dLat50 * 2, lon],
+    ["e2", lat, lon + dLon50 * 2],
+    ["w2", lat, lon - dLon50 * 2],
   ];
   const settled = await Promise.allSettled(
     pts.map(async ([k, la, lo]) => {
@@ -112,19 +159,19 @@ async function queryUsgsElevation(lat, lon) {
   if (vals.c == null) {
     return { status: "unavailable", source: "USGS 3DEP EPQS" };
   }
+  const near = ["c", "n1", "s1", "e1", "w1"].map((k) => vals[k]).filter((v) => v != null);
   const all = Object.values(vals);
   const minFt = Math.min(...all);
   const maxFt = Math.max(...all);
-  const reliefFt = maxFt - minFt;
+  const reliefFt = Math.max(...near) - Math.min(...near);
   let slopePct = null;
   let aspect = null;
-  if (vals.n != null && vals.s != null && vals.e != null && vals.w != null) {
-    const spanFt = 100 * 3.28084; // 100m N-S / E-W span in feet
-    const dzDy = (vals.n - vals.s) / spanFt;
-    const dzDx = (vals.e - vals.w) / spanFt;
+  if (vals.n1 != null && vals.s1 != null && vals.e1 != null && vals.w1 != null) {
+    const spanFt = 100 * 3.28084;
+    const dzDy = (vals.n1 - vals.s1) / spanFt;
+    const dzDx = (vals.e1 - vals.w1) / spanFt;
     slopePct = Math.sqrt(dzDx * dzDx + dzDy * dzDy) * 100;
     if (slopePct >= 2) {
-      // Aspect = direction the slope faces (downhill vector = (-dzDx, -dzDy))
       const ang = (Math.atan2(-dzDx, -dzDy) * 180) / Math.PI;
       const deg = (ang + 360) % 360;
       const dirs = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"];
@@ -141,6 +188,21 @@ async function queryUsgsElevation(lat, lon) {
     else if (slopePct < 25) terrainClass = "Steep (15–25%)";
     else terrainClass = "Very steep (>25%)";
   }
+  const profileWe = [
+    { offset_ft: -328, ft: round(vals.w2, 1) },
+    { offset_ft: -164, ft: round(vals.w1, 1) },
+    { offset_ft: 0, ft: round(vals.c, 1) },
+    { offset_ft: 164, ft: round(vals.e1, 1) },
+    { offset_ft: 328, ft: round(vals.e2, 1) },
+  ].filter((p) => p.ft != null);
+  const profileSn = [
+    { offset_ft: -328, ft: round(vals.s2, 1) },
+    { offset_ft: -164, ft: round(vals.s1, 1) },
+    { offset_ft: 0, ft: round(vals.c, 1) },
+    { offset_ft: 164, ft: round(vals.n1, 1) },
+    { offset_ft: 328, ft: round(vals.n2, 1) },
+  ].filter((p) => p.ft != null);
+
   return {
     status: "ok",
     elevation_ft: round(vals.c, 0),
@@ -150,8 +212,10 @@ async function queryUsgsElevation(lat, lon) {
     slope_pct: round(slopePct, 1),
     terrain_class: terrainClass,
     aspect,
+    profile_we: profileWe,
+    profile_sn: profileSn,
     source: "USGS 3DEP 1m/10m LiDAR",
-    source_url: `https://apps.nationalmap.gov/viewer/`,
+    source_url: "https://apps.nationalmap.gov/viewer/",
   };
 }
 
@@ -302,10 +366,20 @@ async function queryUsdaSoil(lat, lon) {
   };
 }
 
+function hardinessZoneFromExtremeMinF(minF) {
+  if (minF == null || !Number.isFinite(minF)) return null;
+  // USDA Plant Hardiness Zones span 10°F bands from 1a (-60°F) to 13b (+70°F)
+  const clamped = Math.max(-60, Math.min(69.9, minF));
+  const idx = Math.floor((clamped + 60) / 5);
+  const zoneNum = Math.floor(idx / 2) + 1;
+  const half = idx % 2 === 0 ? "a" : "b";
+  return `${zoneNum}${half}`;
+}
+
 async function queryNasaClimate(lat, lon) {
   const url =
     `https://power.larc.nasa.gov/api/temporal/climatology/point?` +
-    `parameters=ALLSKY_SFC_SW_DWN,T2M,T2M_RANGE,PRECTOTCORR&community=RE&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&format=JSON`;
+    `parameters=ALLSKY_SFC_SW_DWN,T2M,T2M_RANGE,T2M_MIN,PRECTOTCORR&community=RE&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&format=JSON`;
   const d = await fetchJson(url, {}, 7500);
   const p = d?.properties?.parameter;
   if (!p?.ALLSKY_SFC_SW_DWN) return { status: "unavailable", source: "NASA POWER" };
@@ -313,6 +387,7 @@ async function queryNasaClimate(lat, lon) {
   const sunVals = months.map((m) => Number(p.ALLSKY_SFC_SW_DWN[m])).filter((v) => Number.isFinite(v) && v >= 0);
   const avgHighsC = [];
   const avgLowsC = [];
+  const extMinC = [];
   for (const m of months) {
     const t = Number(p.T2M?.[m]);
     const r = Number(p.T2M_RANGE?.[m]);
@@ -321,11 +396,14 @@ async function queryNasaClimate(lat, lon) {
       avgHighsC.push(t + half);
       avgLowsC.push(t - half);
     }
+    const em = Number(p.T2M_MIN?.[m]);
+    if (Number.isFinite(em) && em > -90) extMinC.push(em);
   }
   const annSun = Number(p.ALLSKY_SFC_SW_DWN.ANN);
   const annPrecipMmDay = Number(p.PRECTOTCORR?.ANN);
   const annualPrecipIn = Number.isFinite(annPrecipMmDay) && annPrecipMmDay >= 0 ? (annPrecipMmDay * 365.25) / 25.4 : null;
   const cToF = (c) => (c * 9) / 5 + 32;
+  const extremeMinF = extMinC.length ? cToF(Math.min(...extMinC)) : null;
   return {
     status: "ok",
     annual_sun_hours: Number.isFinite(annSun) && annSun > 0 ? round(annSun, 2) : null,
@@ -334,16 +412,186 @@ async function queryNasaClimate(lat, lon) {
     annual_precip_in: round(annualPrecipIn, 1),
     summer_high_f: avgHighsC.length ? round(cToF(Math.max(...avgHighsC)), 0) : null,
     winter_low_f: avgLowsC.length ? round(cToF(Math.min(...avgLowsC)), 0) : null,
+    hardiness_zone: hardinessZoneFromExtremeMinF(extremeMinF),
     source: "NASA POWER Climatology",
     source_url: "https://power.larc.nasa.gov/",
   };
 }
 
-async function queryCountyBenchmark(lat, lon) {
+async function queryTigerRoads(lat, lon) {
+  const mkUrl = (layer, distM) =>
+    `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Transportation/MapServer/${layer}/query?` +
+    new URLSearchParams({
+      geometry: `${lon},${lat}`,
+      geometryType: "esriGeometryPoint",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      distance: String(distM),
+      units: "esriSRUnit_Meter",
+      outFields: "NAME,MTFCC",
+      returnGeometry: "true",
+      outSR: "4326",
+      resultRecordCount: "20",
+      f: "json",
+    });
+
+  const [localR, hwyR] = await Promise.allSettled([
+    fetchJson(mkUrl(8, 800), {}, 6500),
+    fetchJson(mkUrl(6, 3200), {}, 6500),
+  ]);
+
+  let nearestRoad = null;
+  if (localR.status === "fulfilled") {
+    for (const f of localR.value?.features || []) {
+      const m = minDistanceToPathsMeters(lat, lon, f?.geometry?.paths);
+      if (!Number.isFinite(m)) continue;
+      if (!nearestRoad || m < nearestRoad.distM) {
+        const a = f.attributes || {};
+        nearestRoad = {
+          name: a.NAME || "Unnamed mapped road",
+          mtfcc: a.MTFCC || "",
+          road_type: MTFCC_LABELS[a.MTFCC] || "Mapped road",
+          distM: m,
+        };
+      }
+    }
+  }
+
+  let nearestHwy = null;
+  if (hwyR.status === "fulfilled") {
+    for (const f of hwyR.value?.features || []) {
+      const m = minDistanceToPathsMeters(lat, lon, f?.geometry?.paths);
+      if (!Number.isFinite(m)) continue;
+      if (!nearestHwy || m < nearestHwy.distM) {
+        const a = f.attributes || {};
+        nearestHwy = { name: a.NAME || "State / U.S. highway", distM: m };
+      }
+    }
+  }
+
+  if (localR.status !== "fulfilled" && hwyR.status !== "fulfilled") {
+    return { status: "unavailable", source: "U.S. Census TIGERweb Roads" };
+  }
+
+  // If a state/US highway is closer than any local street, treat it as the nearest mapped road
+  if (nearestHwy && (!nearestRoad || nearestHwy.distM < nearestRoad.distM)) {
+    nearestRoad = {
+      name: nearestHwy.name,
+      mtfcc: "S1200",
+      road_type: "State / U.S. highway",
+      distM: nearestHwy.distM,
+    };
+  }
+
+  const roadFt = nearestRoad ? Math.round(nearestRoad.distM * 3.28084) : null;
+  const hwyMi = nearestHwy ? round(nearestHwy.distM / 1609.344, 2) : null;
+  let signal = "No public road mapped within 0.5 mi — confirm recorded easement before bidding.";
+  let tier = "constraint";
+  if (roadFt != null && roadFt <= 150) {
+    signal = "Adjacent to Census-mapped road — still verify recorded legal access & driveway permit.";
+    tier = "favorable";
+  } else if (roadFt != null && roadFt <= 600) {
+    signal = "Mapped road nearby — verify frontage or recorded easement across intervening land.";
+    tier = "caution";
+  } else if (roadFt != null) {
+    signal = `Nearest mapped road is ~${roadFt.toLocaleString("en-US")} ft away — check recorded easement & road-build cost.`;
+    tier = "caution";
+  } else if (hwyMi != null) {
+    signal = `No local road mapped within 0.5 mi (nearest highway ${hwyMi} mi) — verify recorded legal access.`;
+  }
+
+  return {
+    status: "ok",
+    nearest_road_name: nearestRoad?.name || null,
+    nearest_road_type: nearestRoad?.road_type || null,
+    nearest_road_ft: roadFt,
+    nearest_highway_name: nearestHwy?.name || null,
+    nearest_highway_mi: hwyMi,
+    access_tier: tier,
+    access_signal: signal,
+    source: "U.S. Census TIGERweb Roads",
+    source_url: `https://www.google.com/maps/@${lat.toFixed(6)},${lon.toFixed(6)},16z`,
+  };
+}
+
+async function queryPublicLands(lat, lon) {
+  const params = new URLSearchParams({
+    geometry: `${lon},${lat}`,
+    geometryType: "esriGeometryPoint",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    distance: "1000",
+    units: "esriSRUnit_Meter",
+    outFields: "Unit_Nm,MngNm_Desc,DesTp_Desc,Pub_Access,GIS_Acres",
+    returnGeometry: "false",
+    resultRecordCount: "12",
+    f: "json",
+  });
+  const url = `https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/PADUS_Public_Access/FeatureServer/0/query?${params}`;
+  const d = await fetchJson(url, {}, 7000);
+  const feats = d?.features || [];
+  const seen = new Set();
+  const units = [];
+  for (const f of feats) {
+    const a = f.attributes || {};
+    const name = String(a.Unit_Nm || "").trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const accMap = { OA: "Open Access", RA: "Restricted Access", XA: "Closed", UK: "Unknown" };
+    units.push({
+      name,
+      agency: a.MngNm_Desc || null,
+      designation: a.DesTp_Desc || null,
+      access: accMap[a.Pub_Access] || a.Pub_Access || null,
+      acres: a.GIS_Acres ? Math.round(Number(a.GIS_Acres)) : null,
+    });
+  }
+  units.sort((x, y) => (y.acres || 0) - (x.acres || 0));
+  return {
+    status: "ok",
+    within_1km: units.length > 0,
+    count: units.length,
+    units: units.slice(0, 4),
+    source: "USGS PAD-US Public Lands",
+    source_url: "https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-overview",
+  };
+}
+
+async function queryFemaNri(fips) {
+  if (!fips) return { status: "unavailable", source: "FEMA National Risk Index" };
+  const params = new URLSearchParams({
+    where: `STCOFIPS='${String(fips).replace(/[^0-9]/g, "")}'`,
+    outFields: "COUNTY,STATEABBRV,RISK_RATNG,WFIR_RISKR,DRGT_RISKR,HRCN_RISKR,TRND_RISKR,ERQK_RISKR",
+    returnGeometry: "false",
+    f: "json",
+  });
+  const url = `https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?${params}`;
+  const d = await fetchJson(url, {}, 6500);
+  const a = d?.features?.[0]?.attributes;
+  if (!a) return { status: "unavailable", source: "FEMA National Risk Index" };
+  return {
+    status: "ok",
+    overall: a.RISK_RATNG || null,
+    wildfire: a.WFIR_RISKR || null,
+    drought: a.DRGT_RISKR || null,
+    hurricane: a.HRCN_RISKR || null,
+    tornado: a.TRND_RISKR || null,
+    earthquake: a.ERQK_RISKR || null,
+    source: "FEMA National Risk Index",
+    source_url: "https://hazards.fema.gov/nri/map",
+  };
+}
+
+async function queryCountyAndHazards(lat, lon) {
   const url = `https://geo.fcc.gov/api/census/area?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}&format=json`;
   const d = await fetchJson(url, {}, 6500);
   const hit = d?.results?.[0];
-  if (!hit?.county_fips) return { status: "unavailable", source: "FCC Census Area API" };
+  if (!hit?.county_fips) {
+    return {
+      county: { status: "unavailable", source: "FCC Census Area API" },
+      hazards: { status: "unavailable", source: "FEMA National Risk Index" },
+    };
+  }
   const fips = String(hit.county_fips).padStart(5, "0");
   const idx = loadCountyMap().get(fips);
   const stCode = hit.state_code || idx?.state || "";
@@ -353,7 +601,7 @@ async function queryCountyBenchmark(lat, lon) {
     i: "USDA NASS estimate",
     r: "FHFA residential land value",
   };
-  return {
+  const county = {
     status: "ok",
     fips,
     county_name: hit.county_name || idx?.name || null,
@@ -366,9 +614,16 @@ async function queryCountyBenchmark(lat, lon) {
     land_index_path: idx?.path || null,
     source: "FCC Census FIPS + USDA/FHFA County Land Index",
   };
+  let hazards = { status: "unavailable", source: "FEMA National Risk Index" };
+  try {
+    hazards = await queryFemaNri(fips);
+  } catch {
+    // keep unavailable
+  }
+  return { county, hazards };
 }
 
-function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
+function buildPotentialScreening({ usgs, fema, nwi, soil, climate, roads, publicLand, hazards }) {
   const uses = [];
   // 1. Homesite / Cabin Build
   const homeFlags = [];
@@ -379,9 +634,20 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
   } else if (fema?.status === "ok") {
     homeFlags.push(`FEMA Zone ${fema.zone} (outside 100-yr floodplain)`);
   }
+  if (roads?.status === "ok") {
+    if (roads.nearest_road_ft == null) {
+      homeTier = "constraint";
+      homeFlags.push("No public road mapped within 0.5 mi — verify recorded easement");
+    } else if (roads.nearest_road_ft <= 200) {
+      homeFlags.push(`Near ${roads.nearest_road_name} (~${roads.nearest_road_ft} ft)`);
+    } else {
+      if (homeTier === "favorable") homeTier = "caution";
+      homeFlags.push(`Nearest mapped road ~${roads.nearest_road_ft.toLocaleString("en-US")} ft (${roads.nearest_road_name})`);
+    }
+  }
   if (nwi?.within_100m) {
     if (homeTier === "favorable") homeTier = "caution";
-    homeFlags.push(`USFWS mapped wetland within 100m (${nwi.types.slice(0, 2).join(", ") || "verify setback"})`);
+    homeFlags.push(`USFWS wetland within 100m (${nwi.types.slice(0, 2).join(", ") || "verify setback"})`);
   }
   if (usgs?.slope_pct != null) {
     if (usgs.slope_pct >= 20) {
@@ -403,6 +669,10 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
   } else if (soil?.drainage_class) {
     homeFlags.push(`USDA soil: ${soil.drainage_class}`);
   }
+  if (hazards?.wildfire && /High/i.test(hazards.wildfire)) {
+    if (homeTier === "favorable") homeTier = "caution";
+    homeFlags.push(`FEMA county Wildfire risk: ${hazards.wildfire} (check fire insurance)`);
+  }
   uses.push({
     id: "homesite",
     title: "Homesite / Cabin Build",
@@ -414,7 +684,7 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
   const offFlags = [];
   let offTier = "favorable";
   if (climate?.annual_sun_hours != null) {
-    offFlags.push(`${climate.annual_sun_hours} peak sun hrs/day avg (${climate.winter_min_sun_hours} winter min)`);
+    offFlags.push(`${climate.annual_sun_hours} peak sun hrs/day (${climate.winter_min_sun_hours} winter min)`);
     if (climate.winter_min_sun_hours != null && climate.winter_min_sun_hours < 2.0) {
       offTier = "caution";
       offFlags.push("Low winter sun — size backup generator & larger battery bank");
@@ -427,6 +697,7 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
       offFlags.push("Arid climate — verify well depth, water rights, or haul costs");
     }
   }
+  if (climate?.hardiness_zone) offFlags.push(`Growing Zone ${climate.hardiness_zone}`);
   if (fema?.sfha) {
     offTier = "constraint";
     offFlags.push(`FEMA ${fema.zone} flood hazard`);
@@ -453,6 +724,7 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
     agFlags.push(fl);
   }
   if (soil?.drainage_class) agFlags.push(soil.drainage_class);
+  if (climate?.hardiness_zone) agFlags.push(`Zone ${climate.hardiness_zone}`);
   if (climate?.annual_precip_in != null) agFlags.push(`~${climate.annual_precip_in} in/yr precip`);
   if (usgs?.slope_pct != null && usgs.slope_pct >= 15) {
     agTier = "caution";
@@ -468,14 +740,18 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
   // 4. Recreation / Hunting / Timber
   const recFlags = [];
   let recTier = "favorable";
+  if (publicLand?.within_1km && publicLand.units.length) {
+    const u0 = publicLand.units[0];
+    recFlags.push(`Near public land: ${u0.name}${u0.agency ? ` (${u0.agency})` : ""}`);
+  }
   if (usgs?.elevation_ft != null) recFlags.push(`Elevation ${usgs.elevation_ft.toLocaleString("en-US")} ft (${usgs.terrain_class})`);
   if (nwi?.within_100m) recFlags.push(`Water/wetland habitat nearby (${nwi.types[0] || "NWI mapped"})`);
   if (climate?.summer_high_f != null && climate?.winter_low_f != null) {
-    recFlags.push(`Temps ${climate.winter_low_f}°F winter low to ${climate.summer_high_f}°F summer high`);
+    recFlags.push(`Normal temps ${climate.winter_low_f}°F winter low to ${climate.summer_high_f}°F summer high`);
   }
   uses.push({
     id: "recreation",
-    title: "Recreation, Camping & Timber",
+    title: "Recreation, Camping & Public Land",
     tier: recFlags.length ? recTier : "check",
     summary: recFlags.join(" · ") || "Confirm county camping/RV ordinances, legal access, and timber covenants.",
   });
@@ -486,7 +762,6 @@ function buildPotentialScreening({ usgs, fema, nwi, soil, climate }) {
 async function geocodeUS(query) {
   const q = String(query || "").trim();
   if (!q || q.length < 2 || q.length > 160) return null;
-  // Direct "lat, lon" shortcut
   const coordMatch = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[,\s]+\s*(-?\d+(?:\.\d+)?)\s*$/);
   if (coordMatch) {
     const la = Number(coordMatch[1]);
@@ -495,7 +770,6 @@ async function geocodeUS(query) {
       return { lat: la, lon: lo, label: `${la.toFixed(5)}, ${lo.toFixed(5)}`, provider: "Direct coordinates" };
     }
   }
-  // 1. Official U.S. Census Geocoder (best for street addresses)
   try {
     const u =
       "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?" +
@@ -511,9 +785,8 @@ async function geocodeUS(query) {
       };
     }
   } catch {
-    // Fall through to Nominatim for towns, counties, ZIPs, landmarks
+    // Fall through to Nominatim
   }
-  // 2. OpenStreetMap Nominatim (US only)
   try {
     const u =
       "https://nominatim.openstreetmap.org/search?" +
@@ -535,21 +808,26 @@ async function geocodeUS(query) {
 }
 
 export async function runXray(lat, lon) {
-  const [usgsR, femaR, nwiR, soilR, climateR, countyR] = await Promise.allSettled([
+  const [usgsR, femaR, nwiR, soilR, climateR, roadsR, pubR, countyHazR] = await Promise.allSettled([
     queryUsgsElevation(lat, lon),
     queryFemaFlood(lat, lon),
     queryWetlands(lat, lon),
     queryUsdaSoil(lat, lon),
     queryNasaClimate(lat, lon),
-    queryCountyBenchmark(lat, lon),
+    queryTigerRoads(lat, lon),
+    queryPublicLands(lat, lon),
+    queryCountyAndHazards(lat, lon),
   ]);
   const usgs = usgsR.status === "fulfilled" ? usgsR.value : { status: "unavailable", source: "USGS 3DEP" };
   const fema = femaR.status === "fulfilled" ? femaR.value : { status: "unavailable", source: "FEMA NFHL" };
   const nwi = nwiR.status === "fulfilled" ? nwiR.value : { status: "unavailable", source: "USFWS NWI" };
   const soil = soilR.status === "fulfilled" ? soilR.value : { status: "unavailable", source: "USDA NRCS SSURGO" };
   const climate = climateR.status === "fulfilled" ? climateR.value : { status: "unavailable", source: "NASA POWER" };
-  const county = countyR.status === "fulfilled" ? countyR.value : { status: "unavailable", source: "FCC Census FIPS" };
-  const uses = buildPotentialScreening({ usgs, fema, nwi, soil, climate });
+  const roads = roadsR.status === "fulfilled" ? roadsR.value : { status: "unavailable", source: "U.S. Census TIGERweb" };
+  const publicLand = pubR.status === "fulfilled" ? pubR.value : { status: "unavailable", source: "USGS PAD-US" };
+  const county = countyHazR.status === "fulfilled" ? countyHazR.value.county : { status: "unavailable", source: "FCC Census FIPS" };
+  const hazards = countyHazR.status === "fulfilled" ? countyHazR.value.hazards : { status: "unavailable", source: "FEMA National Risk Index" };
+  const uses = buildPotentialScreening({ usgs, fema, nwi, soil, climate, roads, publicLand, hazards });
   return {
     lat: round(lat, 5),
     lon: round(lon, 5),
@@ -559,6 +837,9 @@ export async function runXray(lat, lon) {
     nwi,
     soil,
     climate,
+    roads,
+    public_land: publicLand,
+    hazards,
     county,
     uses,
     disclaimer:
@@ -599,7 +880,6 @@ export async function GET(request) {
       return jsonResp({ error: "Provide valid U.S. coordinates (?lat=..&lon=..) or a U.S. search query (?q=..)." }, 400);
     }
 
-    // Snap coordinates slightly for high CDN cache hit rate (~1.1m precision)
     const snappedLat = Math.round(lat * 100000) / 100000;
     const snappedLon = Math.round(lon * 100000) / 100000;
     const payload = await runXray(snappedLat, snappedLon);

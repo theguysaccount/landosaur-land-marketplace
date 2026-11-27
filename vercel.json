@@ -7,6 +7,13 @@
     "api/xray.js": {
       "maxDuration": 30,
       "includeFiles": "data/usda/land-index-counties.json"
+    },
+    "api/listings.js": {
+      "maxDuration": 30,
+      "includeFiles": "data/usda/land-index-counties.json"
+    },
+    "api/offers.js": {
+      "maxDuration": 15
     }
   },
   "redirects": [
@@ -24,8 +31,10 @@
     { "source": "/privacy/", "destination": "/about/#privacy", "permanent": true },
     { "source": "/terms", "destination": "/about/#terms", "permanent": true },
     { "source": "/terms/", "destination": "/about/#terms", "permanent": true },
-    { "source": "/sell", "destination": "/about/", "permanent": true },
-    { "source": "/sell/", "destination": "/about/", "permanent": true },
+    { "source": "/sell", "destination": "/list/", "permanent": true },
+    { "source": "/sell/", "destination": "/list/", "permanent": true },
+    { "source": "/list-land", "destination": "/list/", "permanent": true },
+    { "source": "/list-land/", "destination": "/list/", "permanent": true },
     { "source": "/workspace", "destination": "/analyze/", "permanent": true },
     { "source": "/workspace/", "destination": "/analyze/", "permanent": true },
     { "source": "/workspace/:path+", "destination": "/analyze/", "permanent": true }

@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/publish.sh                       # Test, build, guard, E2E, push, deploy to landosaur.com
-#   ./scripts/publish.sh --refresh             # Live-crawl all 15 official agencies first, then verify & deploy
+#   ./scripts/publish.sh --refresh             # Live-crawl all 28 official agencies first, then verify & deploy
 #   ./scripts/publish.sh --refresh-only a,b    # Crawl only specific agency IDs, then verify & deploy
 #   ./scripts/publish.sh --skip-e2e            # Skip headless Chrome E2E (still runs unit tests + check_dist)
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally without pushing or deploying
@@ -32,7 +32,7 @@ done
 cd "$ROOT"
 
 echo "==> 1/7 Syntax & unit tests"
-for f in api/xray.js site/map.js site/listing.js site/xray.js site/tables.js site/analyze.js scripts/e2e.mjs; do
+for f in api/xray.js api/listings.js api/offers.js site/theme.js site/map.js site/listing.js site/xray.js site/list.js site/direct.js site/tables.js site/analyze.js scripts/e2e.mjs; do
   node --check "$f"
 done
 python3 -m unittest discover -s tests -t .
@@ -45,7 +45,7 @@ if [ "$REFRESH" -eq 1 ]; then
     python3 -m lando.refresh --land-index
   fi
 else
-  echo "==> 2/7 Skipping live crawl (pass --refresh to crawl all 15 agencies)"
+  echo "==> 2/7 Skipping live crawl (pass --refresh to crawl all 28 agencies)"
 fi
 
 echo "==> 3/7 Building static site into dist/"
@@ -76,7 +76,7 @@ fi
 echo "==> 6/7 Syncing to Vercel production staging mirror & deploying to $BASE_URL"
 rsync -a --delete \
   --exclude '.git' --exclude '.vercel' --exclude '.env.local' \
-  --exclude 'dist' --exclude 'original' --exclude '__pycache__' \
+  --exclude 'dist' --exclude 'original' --exclude '__pycache__' --exclude 'node_modules' \
   "$ROOT/" "$STAGING/"
 
 (cd "$STAGING" && npx --no-install vercel --prod --yes --scope persist-always)

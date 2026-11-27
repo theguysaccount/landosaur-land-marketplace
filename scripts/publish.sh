@@ -7,6 +7,7 @@
 #   ./scripts/publish.sh --refresh-only a,b --crawl-only  # Refresh data for review
 #   ./scripts/publish.sh --refresh-intelligence --crawl-only  # Refresh EIA-861 and CPI-U
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally
+#   ./scripts/publish.sh --no-deploy --regen-og # Re-render the committed share cards
 #   ./scripts/publish.sh --skip-e2e            # Local build only, without browser verification
 set -euo pipefail
 
@@ -21,6 +22,7 @@ SKIP_E2E=0
 NO_DEPLOY=0
 CRAWL_ONLY=0
 REFRESH_INTELLIGENCE=0
+REGEN_OG=0
 SRV_PID=""
 CHANGED=""
 
@@ -51,12 +53,17 @@ while [ $# -gt 0 ]; do
     --crawl-only) CRAWL_ONLY=1 ;;
     --skip-e2e) SKIP_E2E=1 ;;
     --no-deploy) NO_DEPLOY=1 ;;
+    --regen-og) REGEN_OG=1 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
 cd "$ROOT"
+if [ "$REGEN_OG" -eq 1 ] && [ "$NO_DEPLOY" -ne 1 ]; then
+  echo "Use --regen-og with --no-deploy and commit the updated share cards before releasing" >&2
+  exit 2
+fi
 
 refresh_data() {
   local -a python_run=(python3)
@@ -108,6 +115,9 @@ fi
 
 echo "==> 3/7 Building static site into dist/"
 python3 -m lando.build dist
+if [ "$REGEN_OG" -eq 1 ]; then
+  python3 scripts/og.py dist site/og
+fi
 
 echo "==> 4/7 Validating the production output"
 python3 scripts/check_dist.py dist

@@ -510,3 +510,45 @@ Tracts are available for purchase at not less than the appraised price.
         rows = adapters.parse_philly_lb_features(features, {"341032950": "Owned - Available"}, lambda message: None)
         self.assertEqual([r["apn"] for r in rows], ["341032950"])
         self.assertEqual(rows[0]["url"], adapters.PHILLY_LB_URL)
+
+class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
+        attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,
+                 "Subdivisio": "MEADOW LAKE SUBDIVISION", "Lot": "12", "Situs": "",
+                 "Owner": "PRIVATE PERSON"}
+        rings = [[[-106.7, 34.8], [-106.6998, 34.8], [-106.6998, 34.8002], [-106.7, 34.8002], [-106.7, 34.8]]]
+        sample = {"attributes": attrs, "geometry": {"rings": rings}}
+        r = adapters.valencia_lot_listing(sample, "valencia-county-land", adapters.VALENCIA_BUY)
+        self.assertGreater(r["acres"], 0)
+        self.assertIsNone(r["price"])
+        self.assertNotIn("PRIVATE PERSON", repr(r))
+        for change in ({"IMPACT": 100}, {"Subdivisio": "COUNTY LANDFILL"}, {"Situs": "120 MAIN ST"}):
+            sample["attributes"] = {**attrs, **change}
+            self.assertIsNone(adapters.valencia_lot_listing(sample, "valencia-county-land", adapters.VALENCIA_BUY))
+
+    def test_valencia_auction_uses_only_minimum_bid_and_expires(self):
+        text = ("Public auction in Valencia County\nTIME: 10:00 AM\nDATE: Tuesday, December 15, 2026\n"
+                "Item #1 Case: 1\nUPC: 1019038365253000000\nDelinquent Owner: PRIVATE PERSON\nMinimum Bid: $2,400.00\n"
+                "Item #2 Case: 2\nUPC: 1019038365253000001\nMinimum Bid: $4,000.00\nProperty Description: LOT 11 MH#123\n")
+        bids, deadline = adapters.parse_valencia_auction(text, NOW)
+        self.assertEqual(bids, {"1019038365253000000": 2400})
+        self.assertEqual(deadline, "2026-12-15T17:00:00Z")
+        self.assertEqual(adapters.parse_valencia_auction(text, NOW + datetime.timedelta(days=30)), ({}, None))
+
+    def test_st_louis_county_omits_sold_and_improved_tracts(self):
+        text = ("Current parcels for immediate purchase\n over the counter at the listed price\n"
+                "Tract 1       CITY OF DULUTH      010-0070-00210      $18,000.00     ± 1.26 acres       C22250063\n"
+                "Improvements      $0.00\nTotal       $18,000.00\n"
+                "Tract 2       CITY OF DULUTH      010-0070-00390      $35,300.00     ± 2.13 acres       C22250065\n"
+                "SOLD\nImprovements      $0.00\nTotal       $35,300.00\n"
+                "Tract 3       CITY OF DULUTH      010-0220-03930      $32,600.00     ± 1.34 acres       C22250066\n"
+                "Improvements      $250.00\nTotal       $32,600.00\n")
+        rows = adapters.parse_stlouis_mn_book(text, adapters.STLOUIS_MN_URL)
+        self.assertEqual([(row["apn"], row["price"], row["acres"]) for row in rows], [("010-0070-00210", 18000, 1.26)])
+
+    def test_fairbanks_offers_only_named_lot_sheets_at_published_price(self):
+        page = ('Available lots are sold at their established fair market value.'
+                '<a target="_blank" href="/DocumentCenter/View/27480/WCRR-Lot-7-FMV-12300">WCRR Lot 7 (FMV $12,300)</a>'
+                '<a href="/DocumentCenter/View/27481/WCRR-Lot-8-FMV-11500">WCRR Lot 8 (sold)</a>')
+        rows = adapters.parse_fnsb_chatanika(page)
+        self.assertEqual([(row["id"], row["price"]) for row in rows], [("ak-fnsb-chatanika-7", 12300)])

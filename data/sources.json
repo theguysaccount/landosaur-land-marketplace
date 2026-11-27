@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T21:48:13Z",
+ "checked": "2026-11-27T22:37:59Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -435,6 +435,24 @@
    "upstream_total": 28077,
    "url": "https://buildingdetroit.org/properties"
   },
+  "fnsb-chatanika-otc": {
+   "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases.",
+   "agency": "Fairbanks North Star Borough Natural Resources Development",
+   "complete": true,
+   "count": 21,
+   "failures": 0,
+   "last_attempt": "2026-11-27T22:37:59Z",
+   "last_success": "2026-11-27T22:37:59Z",
+   "message": "",
+   "name": "Fairbanks North Star Borough West Chatanika over-the-counter lots",
+   "notes": [],
+   "ok": true,
+   "read": 21,
+   "seconds": 2,
+   "state": "AK",
+   "upstream_total": 21,
+   "url": "https://www.fnsb.gov/1295/West-Chatanika-River-Recreation-Subdivis"
+  },
   "hartford-ct": {
    "about": "City-owned vacant lots in Hartford, Connecticut with GIS outlines, zoning, and square footage.",
    "agency": "City of Hartford, Connecticut",
@@ -777,6 +795,24 @@
    "upstream_total": 191,
    "url": "https://www.navajocountyaz.gov/"
   },
+  "nm-valencia-tax-auction": {
+   "about": "Future state auction notices with a published minimum bid and a match to an unimproved county parcel.",
+   "agency": "New Mexico Taxation and Revenue Department",
+   "complete": true,
+   "count": 77,
+   "failures": 0,
+   "last_attempt": "2026-11-27T22:37:59Z",
+   "last_success": "2026-11-27T22:37:59Z",
+   "message": "",
+   "name": "New Mexico tax auction notices matched to undeveloped Valencia parcels",
+   "notes": [],
+   "ok": true,
+   "read": 77,
+   "seconds": 8,
+   "state": "NM",
+   "upstream_total": 77,
+   "url": "https://www.tax.newmexico.gov/businesses/property-tax-overview/delinquent-property-tax-auctions/"
+  },
   "odot-ok": {
    "about": "Statewide surplus highway right-of-way parcels across Oklahoma counties with GIS outlines, acreage, and PLSS descriptions.",
    "agency": "Oklahoma Department of Transportation",
@@ -1049,6 +1085,24 @@
    "upstream_total": 7435,
    "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm"
   },
+  "stlouis-county-mn": {
+   "about": "St. Louis County's active available-property booklet for unimproved tracts offered at published prices. Sold and withdrawn tracts are excluded.",
+   "agency": "St. Louis County Land and Minerals Department, Minnesota",
+   "complete": true,
+   "count": 60,
+   "failures": 0,
+   "last_attempt": "2026-11-27T22:37:59Z",
+   "last_success": "2026-11-27T22:37:59Z",
+   "message": "",
+   "name": "St. Louis County available tax-forfeited tracts",
+   "notes": [],
+   "ok": true,
+   "read": 60,
+   "seconds": 7,
+   "state": "MN",
+   "upstream_total": 60,
+   "url": "https://www.stlouiscountymn.gov/departments-a-z/land-minerals/sales-and-contracts/tax-forfeited-land-sales"
+  },
   "utah-udot": {
    "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data.",
    "agency": "Utah Department of Transportation",
@@ -1066,6 +1120,24 @@
    "state": "UT",
    "upstream_total": 3,
    "url": "https://connect.udot.utah.gov/business/surplus-property/"
+  },
+  "valencia-county-land": {
+   "about": "Unimproved lots from the county parcel map identified through its public land purchase program. Individual prices require a county quote.",
+   "agency": "Valencia County Manager, New Mexico",
+   "complete": true,
+   "count": 816,
+   "failures": 0,
+   "last_attempt": "2026-11-27T22:37:59Z",
+   "last_success": "2026-11-27T22:37:59Z",
+   "message": "",
+   "name": "Valencia County available subdivision lots",
+   "notes": [],
+   "ok": true,
+   "read": 816,
+   "seconds": 17,
+   "state": "NM",
+   "upstream_total": 1058,
+   "url": "https://co.valencia.nm.us/DocumentCenter/View/29749/Purchasing-Processpdf?bidId="
   },
   "vcgi-vt": {
    "about": "Unimproved town- and city-owned parcels across Vermont from VCGI Statewide Standardized Parcel Data with SPAN IDs and GIS outlines.",

@@ -4675,6 +4675,206 @@ def itasca_otc(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+# Valencia County publishes its application inventory through its parcel map.
+VALENCIA_BUY = "https://co.valencia.nm.us/DocumentCenter/View/29749/Purchasing-Processpdf?bidId="
+VALENCIA_MAP = "https://arcgisce2.co.valencia.nm.us/parcelmap/"
+VALENCIA_QUERY = "https://arcgisce2.co.valencia.nm.us/arcgis/rest/services/OnlineMap/MapServer/0/query"
+VALENCIA_SUBDIVISIONS = {
+    "RIO DEL ORO", "RIO GRANDE ESTATES", "MEADOW LAKE SUBDIVISION", "CANYON DEL RIO", "HIGHLAND MEADOWS",
+    "MANZANO VIEW ESTATES", "LAS MARAVILLAS", "EL MONTE ESTATES", "LA PONDEROSA FARMS", "RANCHO RIO GRANDE",
+}
+NM_PT_URL = "https://www.tax.newmexico.gov/businesses/property-tax-overview/delinquent-property-tax-auctions/"
+STLOUIS_MN_URL = ("https://www.stlouiscountymn.gov/departments-a-z/land-minerals/sales-and-contracts/"
+                  "tax-forfeited-land-sales")
+
+
+def valencia_lot_listing(feature, source, url, bid=None, deadline=None):
+    a = feature.get("attributes") or {}
+    upc = str(a.get("UPC") or "").strip()
+    if not re.fullmatch(r"\d{19}", upc) or a.get("IMPACT") != 0:
+        return None
+    account = str(a.get("AccountNum") or "")
+    if not re.fullmatch(r"R\d{5,9}", account):
+        return None
+    rings = (feature.get("geometry") or {}).get("rings") or []
+    acres = rings_acres(rings)
+    if not acres:
+        return None
+    facts = [fact("parcel_number", upc, VALENCIA_MAP), fact("county_account", account, VALENCIA_MAP),
+             fact("acreage", "%g acres (county GIS outline)" % acres, VALENCIA_MAP),
+             fact("assessment", "No improvement value reported in the county parcel layer", VALENCIA_MAP)]
+    is_county = source == "valencia-county-land"
+    if is_county:
+        subd = str(a.get("Subdivisio") or "").strip().upper()
+        lot = str(a.get("Lot") or "").strip()
+        situs = str(a.get("Situs") or "").strip()
+        if subd not in VALENCIA_SUBDIVISIONS or not lot or re.match(r"^[1-9]\d*\s", situs) or acres >= 1:
+            return None
+        facts.append(fact("sale_program", "Purchase inquiry through the Valencia County Manager. Confirm current availability and the parcel-specific price.", url))
+    else:
+        facts.append(fact("minimum_bid", "$%s" % "{:,.2f}".format(bid), url))
+        facts.append(fact("sale_program", "State delinquent property tax auction. Confirm the lot remains in the sale before bidding.", url))
+    row = {
+        "id": ("nm-vc-" if is_county else "nm-pt-va-") + upc, "source": source, "state": "NM",
+        "county": "Valencia", "locality": "", "address": "", "apn": upc,
+        "title": "Parcel %s, Valencia County %s" % (account, "land" if is_county else "tax auction"),
+        "acres": acres, "price": bid, "price_kind": "none" if is_county else "min_bid",
+        "offering": "sale" if is_county else "auction", "status": "listed" if is_county else "auction_open",
+        "deadline": deadline, "url": url, "lat": None, "lon": None, "geometry": None,
+        "facts": facts, "tags": ["county purchase application"] if is_county else ["state tax auction"],
+    }
+    apply_geometry(row, rings, VALENCIA_MAP, "Valencia County")
+    if rings and row["facts"][-1]["topic"] == "parcel_outline":
+        row["facts"][-1]["url"] = VALENCIA_MAP
+    return row
+
+
+def valencia_county_land(fetch, now, warn):
+    # Recheck the county's published invitation as well as the parcel data.
+    if not fetch.bytes(VALENCIA_BUY).startswith(b"%PDF-"):
+        raise StructureError("Valencia's land purchase instructions are unavailable")
+    candidates = _arcgis_paged(fetch, VALENCIA_QUERY, "UPPER(Owner) = 'COUNTY OF VALENCIA' AND IMPACT=0",
+                              "OBJECTID,UPC,AccountNum,IMPACT,Subdivisio,Lot,Situs", max_total=2000,
+                              extra={"orderByFields": "OBJECTID ASC"})
+    if not candidates or len(candidates) >= 2000:
+        raise StructureError("Valencia County's purchase inventory returned an implausible number of parcels")
+    rows = [row for f in candidates if (row := valencia_lot_listing(f, "valencia-county-land", VALENCIA_BUY))]
+    return rows, {"complete": True, "upstream_total": len(candidates)}
+
+
+def parse_valencia_auction(text, now):
+    from zoneinfo import ZoneInfo
+
+    parsed_date = re.search(r"^\s*DATE:\s*\w+,\s*(\w+ \d{1,2}, \d{4})\s*$", text, re.M)
+    parsed_time = re.search(r"^\s*TIME:\s*(\d{1,2}:\d\d\s*[AP]M)\s*$", text, re.M)
+    if not parsed_date or not parsed_time or "VALENCIA COUNTY" not in text[:500].upper():
+        raise StructureError("Valencia County tax auction notice lost its date or terms")
+    when = datetime.datetime.strptime(parsed_date[1] + " " + parsed_time[1], "%B %d, %Y %I:%M %p").replace(
+        tzinfo=ZoneInfo("America/Denver"))
+    if when <= now:
+        return {}, None
+    bids = {}
+    for parcel in re.split(r"(?m)^\s*Item #\d+\b", text)[1:]:
+        upc = re.search(r"(?m)^\s*UPC:\s*(\d{19})\s*$", parcel)
+        price = re.search(r"(?m)^\s*Minimum Bid:\s*\$([\d,]+\.\d{2})\s*$", parcel)
+        if upc and price and not re.search(r"\bMH\s*#|\bMOBILE HOME\b", parcel, re.I):
+            amount = number(price[1])
+            if amount:
+                bids[upc[1]] = amount
+    if not bids:
+        raise StructureError("No qualifying UPCs or minimum bids parsed from the future Valencia notice")
+    return bids, when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def nm_valencia_tax_sale(fetch, now, warn):
+    page = fetch.text(NM_PT_URL)
+    links = []
+    for href, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        if clean(label) == "Valencia County" and "AuctionAdvertisement" in href:
+            url = urllib.parse.urljoin(NM_PT_URL, html.unescape(href))
+            if urllib.parse.urlsplit(url).netloc == "www.tax.newmexico.gov" and url.endswith(".pdf"):
+                links.append(url)
+    rows = []
+    for url in dict.fromkeys(links):
+        bids, deadline = parse_valencia_auction(pdf_text(fetch, url), now)
+        pins = sorted(bids)
+        for start in range(0, len(pins), 35):
+            where = "IMPACT=0 AND UPC IN (" + quote_list(pins[start:start + 35]) + ")"
+            for feature in _arcgis_query(fetch, VALENCIA_QUERY, where, "UPC,AccountNum,IMPACT"):
+                upc = str(feature.get("attributes", {}).get("UPC", ""))
+                if upc not in bids:
+                    continue
+                row = valencia_lot_listing(feature, "nm-valencia-tax-auction", url, bids[upc], deadline)
+                if row:
+                    rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+def parse_stlouis_mn_book(text, url):
+    if "purchase\n" not in text.lower() or "over the counter" not in text.lower():
+        raise StructureError("St. Louis County report is missing its over-the-counter terms")
+    headers = list(re.finditer(
+        r"(?m)^\s*Tract\s+(\d+)\s{2,}([^\n]+?)\s{2,}([0-9]{3}-[0-9]{4}-[0-9]{5}(?:,\s*\d{5})*)"
+        r"\s{2,}\$([\d,]+\.\d{2})\s+±\s*([\d.]+)\s+acres?\s+(C\d{8})\s*$", text,
+    ))
+    if not headers:
+        raise StructureError("St. Louis County report has no recognizable available tracts")
+    rows = []
+    for i, match in enumerate(headers):
+        tract, place, pin, price, acres, file_no = match.groups()
+        # County marks sold entries inline, between their header and value table.
+        body = text[match.end():headers[i + 1].start() if i + 1 < len(headers) else len(text)]
+        amounts = re.search(r"(?m)^\s*Improvements\s+\$0\.00\s*$", body)
+        total = re.search(r"(?m)^\s*Total\s+\$([\d,]+\.\d{2})\s*$", body)
+        if not amounts or not total or price != total[1] or re.search(
+            r"(?im)^\s*(?:SOLD|PENDING(?: SALE)?|WITHDRAWN|REMOVED|NOT AVAILABLE)\s*$", body,
+        ):
+            continue
+        if re.search(r"\bhas a water tower\b|\bhas an existing (?:building|house|cabin|garage)\b", body, re.I):
+            continue
+        amount, area = number(price), number(acres)
+        if not amount or not area:
+            continue
+        rows.append({
+            "id": "mn-stl-otc-" + file_no.lower(), "source": "stlouis-county-mn", "state": "MN",
+            "county": "St. Louis", "locality": place.strip().title(), "address": "", "apn": pin,
+            "title": "St. Louis County tax-forfeited land %s" % file_no, "acres": area,
+            "price": amount, "price_kind": "cash", "offering": "sale", "status": "listed",
+            "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", pin, url), fact("agency_site_id", file_no, url),
+                      fact("sale_program", "Published county over-the-counter price. Confirm availability and settlement fees.", url)],
+            "tags": ["tax forfeited", "over the counter"],
+        })
+    return rows
+
+
+def stlouis_mn_land(fetch, now, warn):
+    page = fetch.text(STLOUIS_MN_URL)
+    for href, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        if clean(label) == "Available Property Booklet":
+            url = urllib.parse.urljoin(STLOUIS_MN_URL, html.unescape(href))
+            if urllib.parse.urlsplit(url).netloc == "www.stlouiscountymn.gov":
+                rows = parse_stlouis_mn_book(pdf_text(fetch, url), url)
+                return rows, {"complete": True, "upstream_total": len(rows)}
+    raise StructureError("St. Louis County available property booklet link missing")
+
+
+FNSB_SALE = "https://www.fnsb.gov/1295/West-Chatanika-River-Recreation-Subdivis"
+
+
+def parse_fnsb_chatanika(page):
+    if "Available lots are sold at their established fair market value" not in clean(page):
+        raise StructureError("Fairbanks North Star Borough did not confirm the over-the-counter sale price rule")
+    rows = []
+    for href, label in re.findall(r'<a\b[^>]*?href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        match = re.fullmatch(r"WCRR Lot (\d+) \(FMV \$([\d,]+)\)", clean(label))
+        url = urllib.parse.urljoin(FNSB_SALE, html.unescape(href))
+        if not match or urllib.parse.urlsplit(url).netloc != "www.fnsb.gov":
+            continue
+        lot, bid = match.groups()
+        price = number(bid)
+        if not price:
+            continue
+        rows.append({
+            "id": "ak-fnsb-chatanika-" + lot, "source": "fnsb-chatanika-otc", "state": "AK",
+            "county": "Fairbanks North Star", "locality": "West Chatanika River", "address": "", "apn": "",
+            "title": "West Chatanika River Recreational Subdivision lot " + lot,
+            "acres": None, "price": price, "price_kind": "cash", "offering": "sale", "status": "listed",
+            "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", "Subdivision lot " + lot, url), fact("price", "$" + bid, url),
+                      fact("sale_program", "First-come, first-served at the published fair market value. Borough processing fees are separate.", FNSB_SALE)],
+            "tags": ["recreation", "borough land", "over the counter"],
+        })
+    if not rows:
+        raise StructureError("Fairbanks North Star Borough's current lot sheets were not found")
+    return rows
+
+
+def fnsb_chatanika(fetch, now, warn):
+    rows = parse_fnsb_chatanika(fetch.text(FNSB_SALE))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
@@ -4884,8 +5084,22 @@ SOURCES = [
     {"id": "itasca-county-mn", "name": "Itasca County over-the-counter tax-forfeited land", "agency": "Itasca County, Minnesota",
      "url": ITASCA_URL, "state": "MN", "run": itasca_otc,
      "about": "Official unimproved tax-forfeited parcels currently offered over the counter with the county's published minimum amount."},
+    {"id": "valencia-county-land", "name": "Valencia County available subdivision lots", "agency": "Valencia County Manager, New Mexico",
+     "url": VALENCIA_BUY, "state": "NM", "run": valencia_county_land,
+     "about": "Unimproved lots from the county parcel map identified through its public land purchase program. Individual prices require a county quote."},
+    {"id": "nm-valencia-tax-auction", "name": "New Mexico tax auction notices matched to undeveloped Valencia parcels",
+     "agency": "New Mexico Taxation and Revenue Department", "url": NM_PT_URL, "state": "NM", "run": nm_valencia_tax_sale,
+     "about": "Future state auction notices with a published minimum bid and a match to an unimproved county parcel."},
+    {"id": "stlouis-county-mn", "name": "St. Louis County available tax-forfeited tracts",
+     "agency": "St. Louis County Land and Minerals Department, Minnesota", "url": STLOUIS_MN_URL, "state": "MN", "run": stlouis_mn_land,
+     "about": "St. Louis County's active available-property booklet for unimproved tracts offered at published prices. Sold and withdrawn tracts are excluded."},
+    {"id": "fnsb-chatanika-otc", "name": "Fairbanks North Star Borough West Chatanika over-the-counter lots",
+     "agency": "Fairbanks North Star Borough Natural Resources Development", "url": FNSB_SALE, "state": "AK",
+     "run": fnsb_chatanika, "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases."},
 ]
 NOT_CARRIED = [
+    ("Kenai Peninsula Borough land sales", "https://www.kpb.us/landmgt/landsales",
+     "Automated reads are skipped because the official robots.txt endpoint returned HTML instead of crawler rules."),
     ("Arizona DOT and Arizona State Land Department sales", "https://azdot.gov/business/right-way-properties/vacant-land-and-commercial-properties-sale",
      "Automated reads are skipped because the robots.txt endpoints returned HTTP 403. Browse the agency property notices directly."),
     ("West Virginia State Auditor County Collections", "https://main.wvsao.gov/CountyCollections/",

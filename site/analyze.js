@@ -355,7 +355,19 @@
     if (params.get("roadFt")) fCost.roadFt.value = params.get("roadFt");
   }
   if (fPower) {
-    if (params.get("roadFt")) fPower.distFt.value = params.get("roadFt");
+    var rate = Number(params.get("kwhRate"));
+    if (rate > 0 && rate < 5) {
+      fPower.kwhRate.value = String(rate);
+      var utilityHint = document.getElementById("pwr-utility-hint");
+      if (utilityHint) {
+        var state = /^[A-Z]{2}$/.test(params.get("eiaState") || "") ? " for " + params.get("eiaState") : "";
+        var year = /^20\d{2}$/.test(params.get("eiaYear") || "") ? " (" + params.get("eiaYear") + ")" : "";
+        utilityHint.hidden = false;
+        utilityHint.textContent = "EIA state residential average" + state + year + ": $" + rate +
+          " per kWh. Enter your utility’s current tariff when you have a quote.";
+      }
+      activateTab("tab-power");
+    }
     if (params.get("sun")) {
       var sunEl = document.getElementById("pwr-solar-hint");
       if (sunEl) {

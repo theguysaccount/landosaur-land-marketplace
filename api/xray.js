@@ -1,7 +1,7 @@
 /**
  * Landosaur Live Federal Parcel X-Ray API v2 (Vercel Fluid Compute — Node.js Web API Function).
  *
- * Queries 9 authoritative public federal/official datasets in parallel for any coordinates in all 50 U.S. states:
+ * Uses 10 authoritative public federal/official datasets in parallel for any coordinates in all 50 U.S. states:
  *   1. USGS 3DEP Elevation Point Query Service (9-point W-E & S-N cross-section -> elevation, slope %, relief, aspect, SVG profile)
  *   2. FEMA National Flood Hazard Layer (NFHL MapServer/28 -> flood zone, 100-yr SFHA, BFE, FIRM panel)
  *   3. FEMA National Risk Index (county-level Wildfire, Drought, Hurricane, Tornado, Earthquake risk ratings)
@@ -10,7 +10,8 @@
  *   6. U.S. Census TIGERweb Transportation (nearest mapped road + distance in ft, nearest highway + distance in mi)
  *   7. USGS PAD-US Protected Areas & Public Lands (National Forest / BLM / State Park adjacency within 1 km)
  *   8. NASA POWER Climatology (annual/winter/summer peak sun hours, normal summer high / winter low °F, rainfall, USDA Hardiness Zone)
- *   9. FCC Census Area FIPS joined against bundled 3,115-county USDA/FHFA Land Index
+ *   9. FCC Census Area FIPS joined against bundled USDA/FHFA Land Index
+ *  10. EIA-861 utility service territory and residential rates
  *
  * Also supports ?q=<address or place> via U.S. Census Geocoder + OpenStreetMap Nominatim (US-bounded).
  * Zero fabricated fallbacks: unavailable upstreams report status="unavailable" honestly.
@@ -80,6 +81,33 @@ function loadCountyMap() {
   return countyMap;
 }
 
+const EIA_SOURCE = "https://www.eia.gov/electricity/data/eia861/";
+let utilityData;
+
+export function utilityForCounty(county) {
+  if (utilityData === undefined) {
+    try {
+      utilityData = JSON.parse(fs.readFileSync(new URL("../data/utilities/county-utilities.json", import.meta.url), "utf8"));
+    } catch (error) {
+      utilityData = null;
+      if (error.code !== "ENOENT") console.error("[xray] could not read EIA-861 data:", error.message);
+    }
+  }
+  const data = utilityData;
+  const matches = data?.counties[county?.fips];
+  const stateRate = data?.state_residential_usd_per_kwh[county?.state_code] ?? null;
+  return {
+    status: matches?.length ? "ok" : "unavailable",
+    year: data?.year ?? null,
+    source: EIA_SOURCE,
+    state_commission_url: data?.state_commission_directory ?? null,
+    state_average_usd_per_kwh: stateRate,
+    county_fips: county?.fips ?? null,
+    providers: matches?.map((key) => data.utilities[key]) ?? [],
+    note: "EIA reports distribution equipment by county. Confirm address-level service and current tariffs with a provider.",
+  };
+}
+
 async function fetchJson(url, opts = {}, timeoutMs = 7000) {
   const res = await fetch(url, {
     ...opts,
@@ -143,18 +171,32 @@ async function queryUsgsElevation(lat, lon) {
     ["e2", lat, lon + dLon50 * 2],
     ["w2", lat, lon - dLon50 * 2],
   ];
-  const settled = await Promise.allSettled(
-    pts.map(async ([k, la, lo]) => {
-      const u = `https://epqs.nationalmap.gov/v1/json?x=${lo.toFixed(6)}&y=${la.toFixed(6)}&wkid=4326&units=Feet`;
-      const d = await fetchJson(u, {}, 6500);
-      const v = Number(d?.value);
-      if (!Number.isFinite(v) || v < -1000 || v > 30000) throw new Error("invalid elevation");
-      return [k, v];
-    })
-  );
   const vals = {};
-  for (const s of settled) {
-    if (s.status === "fulfilled") vals[s.value[0]] = s.value[1];
+  const sampleParams = new URLSearchParams({
+    f: "json",
+    geometryType: "esriGeometryMultipoint",
+    geometry: JSON.stringify({ points: pts.map(([, la, lo]) => [lo, la]), spatialReference: { wkid: 4326 } }),
+    returnFirstValueOnly: "true",
+    interpolation: "RSP_BilinearInterpolation",
+  });
+  try {
+    const url = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/getSamples?";
+    const body = await fetchJson(url + sampleParams, {}, 4500);
+    for (const point of body.samples || []) {
+      const key = pts[point.locationId]?.[0];
+      const meters = point.value == null ? NaN : Number(point.value);
+      if (key && Number.isFinite(meters) && meters > -420 && meters < 9200) vals[key] = meters / 0.3048;
+    }
+  } catch {
+    // The EPQS endpoint serves the same USGS elevation data when the image server is unavailable.
+  }
+  if (vals.c == null || Object.keys(vals).length < 5) {
+    await Promise.allSettled(pts.filter(([key]) => vals[key] == null).map(async ([key, la, lo]) => {
+      const url = `https://epqs.nationalmap.gov/v1/json?x=${lo.toFixed(6)}&y=${la.toFixed(6)}&wkid=4326&units=Feet`;
+      const body = await fetchJson(url, {}, 6500);
+      const value = body?.value == null ? NaN : Number(body.value);
+      if (Number.isFinite(value) && value > -1400 && value < 30500) vals[key] = value;
+    }));
   }
   if (vals.c == null) {
     return { status: "unavailable", source: "USGS 3DEP EPQS" };
@@ -841,6 +883,7 @@ export async function runXray(lat, lon) {
     public_land: publicLand,
     hazards,
     county,
+    utility: utilityForCounty(county),
     uses,
     disclaimer:
       "Automated federal GIS screening only—not a boundary survey, percolation test, wetland delineation, or legal/title determination.",

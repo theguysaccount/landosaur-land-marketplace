@@ -90,7 +90,7 @@
 
   function skeletonHtml() {
     var cards = "";
-    for (var i = 0; i < 9; i++) {
+    for (var i = 0; i < 10; i++) {
       cards += '<div class="xray-tile skel"><div class="skel-bar sm"></div><div class="skel-bar lg"></div><div class="skel-bar md"></div></div>';
     }
     return '<div class="xray-grid" aria-busy="true" aria-label="Loading live federal GIS data">' + cards + "</div>";
@@ -339,6 +339,29 @@
       grid.appendChild(tileNode("County Benchmark", "Unavailable", "County FIPS lookup unavailable.", "off", "50 States", base + "/land-prices/", "Land Prices"));
     }
 
+    var utility = d.utility || {};
+    var providers = utility.providers || [];
+    var utilities = tileNode("Electric utilities", providers.length ? providers.length + " county provider" +
+      (providers.length === 1 ? "" : "s") : "No matching report", utility.note || "Confirm service with the local utility.",
+      providers.length ? "ok" : "off", utility.year ? "EIA-861 · " + utility.year : "", utility.source, "EIA utility data");
+    utilities.setAttribute("data-utility-card", "");
+    if (providers.length) {
+      var list = el("ul", "utility-list");
+      providers.forEach(function (provider) {
+        var detail = provider.name + (provider.ownership ? " · " + provider.ownership : "");
+        if (provider.residential_usd_per_kwh != null) detail += " · " + (provider.residential_usd_per_kwh * 100).toFixed(2) + "¢/kWh";
+        list.appendChild(el("li", null, detail));
+      });
+      utilities.appendChild(list);
+    }
+    if (utility.state_commission_url) {
+      var stateDirectory = el("a", "xray-src", "Find your state utility commission ↗");
+      stateDirectory.href = utility.state_commission_url;
+      stateDirectory.rel = "noopener noreferrer";
+      stateDirectory.target = "_blank";
+      utilities.appendChild(stateDirectory);
+    }
+    grid.appendChild(utilities);
     container.appendChild(grid);
 
     // SVG Terrain Cross-Section Profile
@@ -367,11 +390,21 @@
 
     var foot = el("p", "small xray-disc",
       (d.disclaimer || "Automated federal GIS screening only.") +
-      " Coordinates: " + d.lat + ", " + d.lon + " · 9 official federal services queried live.");
+      " Coordinates: " + d.lat + ", " + d.lon + " · Sources include bundled EIA data and federal GIS lookups.");
     container.appendChild(foot);
   }
 
-  function loadXray(container, lat, lon, parcelCtx, onDone) {
+  function powerContext(params, data) {
+    var utility = data?.utility || {};
+    if (utility.state_average_usd_per_kwh > 0) {
+      params.set("kwhRate", String(utility.state_average_usd_per_kwh));
+      params.set("eiaYear", String(utility.year));
+      if (data.county?.state_code) params.set("eiaState", data.county.state_code);
+    }
+    return params;
+  }
+
+  function loadXray(container, lat, lon, parcelCtx, onDone, current) {
     if (!container) return;
     container.innerHTML = skeletonHtml();
     var url = base + "/api/xray/?lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon);
@@ -381,11 +414,13 @@
         return r.json();
       })
       .then(function (d) {
+        if (current && !current()) return;
         if (d.error) throw new Error(d.error);
         renderXrayInto(container, d, parcelCtx);
         if (onDone) onDone(d);
       })
       .catch(function () {
+        if (current && !current()) return;
         container.textContent = "";
         var box = el("div", "callout");
         box.innerHTML =
@@ -398,6 +433,7 @@
 
   window.LandosaurXray = {
     loadXray: loadXray,
+    powerContext: powerContext,
     renderXrayInto: renderXrayInto,
     skeletonHtml: skeletonHtml,
     exportKml: exportKml,
@@ -424,83 +460,150 @@
   var map = L.map(mapEl, { scrollWheelZoom: true, doubleClickZoom: true, touchZoom: true, maxZoom: 20, layers: [aerial] }).setView([38.5, -96.0], 4);
   L.control.layers({ "USGS Satellite": aerial, "Streets": streets, "USGS Topo": topo }, { "FEMA Flood Zones": fema }).addTo(map);
 
-  var pin = null;
+  var pin = null, requestId = 0, drawn = null, latest = null;
+  var measurements = document.getElementById("xray-measurements");
+  var geo = window.LandosaurGeo;
+  var draw = geo.drawer(map, document.getElementById("xray-draw"), function (shape, points) {
+    drawn = shape ? { shape: shape, points: points } : null;
+    if (drawn) runAt(shape.center[1], shape.center[0], "Drawn parcel", map.getZoom());
+    else if (latest) {
+      writeShare(latest.lat, latest.lon);
+      updateActions(latest.lat, latest.lon, latest.label, latest.data);
+    } else if (measurements) measurements.hidden = true;
+  });
+
+  function writeShare(lat, lon) {
+    var fields = new URLSearchParams({ lat: lat.toFixed(5), lon: lon.toFixed(5) });
+    if (drawn) fields.set("poly", geo.encode(drawn.points));
+    history.replaceState(null, "", location.pathname + location.search + "#" + fields);
+    return location.href;
+  }
+
+  function showMeasurements(d) {
+    measurements.hidden = !drawn;
+    measurements.replaceChildren();
+    if (!drawn) return;
+    var shape = drawn.shape;
+    measurements.appendChild(el("h2", null, "Drawn parcel measurements"));
+    measurements.appendChild(el("p", null, fmtNum(Number(shape.acres.toFixed(3)), " acres") + " · " +
+      fmtNum(Math.round(shape.squareFeet), " sq ft") + " · " + fmtNum(Math.round(shape.perimeterFeet), " ft perimeter")));
+    measurements.appendChild(el("p", "small", "Bounds W/S/E/N: " +
+      shape.bounds.map(function (v) { return v.toFixed(5); }).join(", ") + ". Map measurements are approximate."));
+    var benchmark = d?.county?.benchmark_usd_per_acre;
+    if (benchmark > 0) {
+      measurements.appendChild(el("p", null, "County benchmark × drawn area: $" +
+        fmtNum(Math.round(shape.acres * benchmark)) + ". Benchmark context, not an appraisal."));
+    }
+  }
+
   function updateActions(lat, lon, label, d) {
-    if (!actionBar) return;
     actionBar.hidden = false;
-    var title = label || ((d && d.county && d.county.county_name) ? (d.county.county_name + ", " + d.county.state_code) : ("Pin " + lat.toFixed(4) + ", " + lon.toFixed(4)));
-    var anaParts = ["title=" + encodeURIComponent(title)];
-    if (d && d.roads && d.roads.nearest_road_ft != null) anaParts.push("roadFt=" + d.roads.nearest_road_ft);
-    if (d && d.climate && d.climate.winter_min_sun_hours != null) anaParts.push("sun=" + d.climate.winter_min_sun_hours);
-    var anaUrl = base + "/analyze/?" + anaParts.join("&");
-    var gmaps = "https://www.google.com/maps/@" + lat.toFixed(6) + "," + lon.toFixed(6) + ",17z/data=!3m1!1e3";
-    var fccUrl = "https://broadbandmap.fcc.gov/location-summary/fixed?latlon=" + lat.toFixed(5) + "%2C" + lon.toFixed(5);
-    actionBar.innerHTML =
-      '<a class="button" href="' + anaUrl + '">Open in Deal &amp; Power Analyzer →</a>' +
-      '<button type="button" class="button ghost" id="xray-kml-btn">Download KML (OnX / Earth)</button>' +
-      '<button type="button" class="button ghost" id="xray-gpx-btn">Download GPX</button>' +
-      '<button type="button" class="button ghost" id="xray-print-btn">Print Field PDF</button>' +
-      '<a class="button ghost" href="' + gmaps + '" target="_blank" rel="noopener noreferrer">Google Satellite ↗</a>' +
-      '<a class="button ghost" href="' + fccUrl + '" target="_blank" rel="noopener noreferrer">FCC Broadband Map ↗</a>' +
-      '<button type="button" class="button ghost" id="xray-copy-btn">Copy share link</button>';
-    var pBtn = document.getElementById("xray-print-btn");
-    if (pBtn) pBtn.addEventListener("click", function () { window.print(); });
-    var kBtn = document.getElementById("xray-kml-btn");
-    if (kBtn) kBtn.addEventListener("click", function () { exportKml({ lat: lat, lon: lon, title: title }); });
-    var gBtn = document.getElementById("xray-gpx-btn");
-    if (gBtn) gBtn.addEventListener("click", function () { exportGpx({ lat: lat, lon: lon, title: title }); });
-    var cBtn = document.getElementById("xray-copy-btn");
-    if (cBtn) cBtn.addEventListener("click", function () {
-      var shareUrl = location.href.split("#")[0] + "#lat=" + lat.toFixed(5) + "&lon=" + lon.toFixed(5);
-      history.replaceState(null, "", shareUrl);
-      if (navigator.clipboard) navigator.clipboard.writeText(shareUrl).then(function () { cBtn.textContent = "Link copied ✓"; });
+    var title = label || ("Pin " + lat.toFixed(4) + ", " + lon.toFixed(4));
+    var anaParams = powerContext(new URLSearchParams({ title: title }), d);
+    if (d?.roads?.nearest_road_ft != null) anaParams.set("roadFt", d.roads.nearest_road_ft);
+    if (d?.climate?.winter_min_sun_hours != null) anaParams.set("sun", d.climate.winter_min_sun_hours);
+    if (drawn) anaParams.set("acres", drawn.shape.acres.toFixed(4));
+    var ana = el("a", "button", "Open Deal & Power Analyzer →");
+    ana.href = base + "/analyze/?" + anaParams;
+    actionBar.replaceChildren(ana);
+
+    var fields = new URLSearchParams({ service: "unlisted_outreach", lat: lat.toFixed(6), lon: lon.toFixed(6) });
+    if (d?.county?.county_name) fields.set("county", d.county.county_name);
+    if (d?.county?.state_code) fields.set("state", d.county.state_code);
+    if (drawn) {
+      fields.set("acres", drawn.shape.acres.toFixed(4));
+      fields.set("boundary", geo.encode(drawn.points));
+    }
+    var acquire = el("a", "button ghost", "Hire Land Agent for this tract · $20 →");
+    acquire.href = base + "/services/?" + fields;
+    actionBar.appendChild(acquire);
+
+    var boundary = drawn ? [drawn.points.concat([drawn.points[0]])] : null;
+    var file = { lat: lat, lon: lon, title: title, geometry: boundary };
+    [
+      ["xray-kml-btn", "Download KML", function () { exportKml(file); }],
+      ["xray-gpx-btn", "Download GPX", function () { exportGpx(file); }],
+      ["xray-print-btn", "Print / Save Field PDF", function () { window.print(); }],
+      ["xray-copy-btn", "Copy share link", function (button) {
+        var link = writeShare(lat, lon);
+        if (navigator.clipboard) navigator.clipboard.writeText(link).then(function () {
+          button.textContent = "Link copied";
+        }, function () { window.prompt("Copy share link", link); });
+        else window.prompt("Copy share link", link);
+      }]
+    ].forEach(function (action) {
+      var button = el("button", "button ghost", action[1]);
+      button.id = action[0];
+      button.type = "button";
+      button.addEventListener("click", function () { action[2](button); });
+      actionBar.appendChild(button);
     });
+    showMeasurements(d);
+  }
+
+  function placePin(lat, lon, zoom) {
+    if (pin) map.removeLayer(pin);
+    pin = L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 2.5, fillColor: "#c8f189", fillOpacity: 1 }).addTo(map);
+    if (!drawn) map.setView([lat, lon], zoom || Math.max(map.getZoom(), 14));
+    writeShare(lat, lon);
   }
 
   function runAt(lat, lon, label, zoom) {
-    lat = Number(lat); lon = Number(lon);
-    if (!isFinite(lat) || !isFinite(lon)) return;
-    if (pin) map.removeLayer(pin);
-    pin = L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 2.5, fillColor: "#c8f189", fillOpacity: 1 }).addTo(map);
-    map.setView([lat, lon], zoom || Math.max(map.getZoom(), 14));
-    history.replaceState(null, "", location.pathname + "#lat=" + lat.toFixed(5) + "&lon=" + lon.toFixed(5));
-    if (statusEl) statusEl.textContent = "Running 9-agency Federal X-Ray for " + (label || (lat.toFixed(5) + ", " + lon.toFixed(5))) + "…";
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    var job = ++requestId;
+    placePin(lat, lon, zoom);
+    latest = { lat: lat, lon: lon, label: label, data: null };
+    updateActions(lat, lon, label, null);
+    statusEl.textContent = "Running Parcel X-Ray for " + (label || (lat.toFixed(5) + ", " + lon.toFixed(5))) + "…";
     loadXray(outEl, lat, lon, null, function (d) {
-      var place = label || (d.county && d.county.county_name ? (d.county.county_name + ", " + d.county.state_name) : (lat.toFixed(5) + ", " + lon.toFixed(5)));
-      if (statusEl) statusEl.textContent = "Live 9-Agency Federal X-Ray complete: " + place + " (" + lat.toFixed(5) + ", " + lon.toFixed(5) + ")";
+      var place = label || (d.county?.county_name ? (d.county.county_name + ", " + d.county.state_code) :
+        (lat.toFixed(5) + ", " + lon.toFixed(5)));
+      statusEl.textContent = "Parcel X-Ray complete for " + place + ".";
+      latest = { lat: lat, lon: lon, label: place, data: d };
       updateActions(lat, lon, place, d);
-    });
+    }, function () { return job === requestId; });
   }
 
   function runQuery(q) {
     q = (q || "").trim();
     if (!q) return;
-    if (statusEl) statusEl.textContent = "Locating \"" + q + "\" and running 9-agency Federal X-Ray…";
+    var job = ++requestId;
+    drawn = null;
+    draw.set([]);
+    showMeasurements(null);
+    actionBar.hidden = true;
+    statusEl.textContent = "Looking up " + q + "…";
     outEl.innerHTML = skeletonHtml();
     fetch(base + "/api/xray/?q=" + encodeURIComponent(q))
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
+        if (job !== requestId) return;
         if (!res.ok || res.d.error) {
           outEl.textContent = "";
-          if (statusEl) statusEl.textContent = res.d.error || "Location not found in the United States.";
+          statusEl.textContent = res.d.error || "Location not found in the United States.";
           return;
         }
         var d = res.d;
-        var label = (d.geocode && d.geocode.label) || q;
-        if (pin) map.removeLayer(pin);
-        pin = L.circleMarker([d.lat, d.lon], { radius: 8, color: "#fff", weight: 2.5, fillColor: "#c8f189", fillOpacity: 1 }).addTo(map);
-        map.setView([d.lat, d.lon], 14);
-        history.replaceState(null, "", location.pathname + "#lat=" + d.lat.toFixed(5) + "&lon=" + d.lon.toFixed(5));
-        if (statusEl) statusEl.textContent = "Live 9-Agency Federal X-Ray complete: " + label;
+        var label = d.geocode?.label || q;
+        placePin(d.lat, d.lon, 14);
+        statusEl.textContent = "Parcel X-Ray complete for " + label + ".";
         renderXrayInto(outEl, d, null);
+        latest = { lat: d.lat, lon: d.lon, label: label, data: d };
         updateActions(d.lat, d.lon, label, d);
       })
       .catch(function () {
-        if (statusEl) statusEl.textContent = "Could not reach /api/xray/ from this host.";
+        if (job !== requestId) return;
+        outEl.textContent = "";
+        statusEl.textContent = "The Parcel X-Ray service could not be reached.";
       });
   }
 
   map.on("click", function (ev) {
+    if (draw.isActive()) return;
+    if (drawn) {
+      drawn = null;
+      draw.set([]);
+    }
     runAt(ev.latlng.lat, ev.latlng.lng, null, Math.max(map.getZoom(), 14));
   });
 
@@ -516,19 +619,23 @@
       var coords = btn.getAttribute("data-xray-preset").split(",");
       var lbl = btn.getAttribute("data-xray-label") || "";
       if (input) input.value = lbl;
+      drawn = null;
+      draw.set([]);
       runAt(parseFloat(coords[0]), parseFloat(coords[1]), lbl, 14);
     });
   });
 
-  var h = location.hash.slice(1) || location.search.slice(1);
-  var mLat = h.match(/(?:^|&)lat=([^&]+)/);
-  var mLon = h.match(/(?:^|&)lon=([^&]+)/);
-  var mQ = h.match(/(?:^|&)q=([^&]+)/);
-  if (mLat && mLon) {
-    runAt(parseFloat(mLat[1]), parseFloat(mLon[1]), null, 14);
-  } else if (mQ) {
-    var qv = decodeURIComponent(mQ[1].replace(/\+/g, " "));
-    if (input) input.value = qv;
-    runQuery(qv);
+  var q = new URLSearchParams(location.hash.slice(1) || location.search.slice(1));
+  var points = geo.decode(q.get("poly"));
+  var shape = draw.set(points);
+  if (shape) {
+    drawn = { shape: shape, points: points };
+    map.fitBounds(points.map(function (p) { return [p[1], p[0]]; }), { maxZoom: 18, padding: [25, 25] });
+    runAt(shape.center[1], shape.center[0], "Drawn parcel", map.getZoom());
+  } else if (q.has("lat") && q.has("lon")) {
+    runAt(parseFloat(q.get("lat")), parseFloat(q.get("lon")), null, 14);
+  } else if (q.get("q")) {
+    if (input) input.value = q.get("q");
+    runQuery(q.get("q"));
   }
 })();

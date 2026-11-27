@@ -5,6 +5,7 @@
 #   ./scripts/publish.sh --refresh             # Refresh 64+ official agencies across 50 states and verify
 #   ./scripts/publish.sh --refresh-only a,b    # Refresh specific agency IDs and verify
 #   ./scripts/publish.sh --refresh-only a,b --crawl-only  # Refresh data for review
+#   ./scripts/publish.sh --refresh-intelligence --crawl-only  # Refresh EIA-861 and CPI-U
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally
 #   ./scripts/publish.sh --skip-e2e            # Local build only, without browser verification
 set -euo pipefail
@@ -19,6 +20,7 @@ REFRESH_ONLY=""
 SKIP_E2E=0
 NO_DEPLOY=0
 CRAWL_ONLY=0
+REFRESH_INTELLIGENCE=0
 SRV_PID=""
 CHANGED=""
 
@@ -45,6 +47,7 @@ while [ $# -gt 0 ]; do
       shift
       REFRESH_ONLY="$1"
       ;;
+    --refresh-intelligence) REFRESH_INTELLIGENCE=1 ;;
     --crawl-only) CRAWL_ONLY=1 ;;
     --skip-e2e) SKIP_E2E=1 ;;
     --no-deploy) NO_DEPLOY=1 ;;
@@ -55,24 +58,29 @@ done
 
 cd "$ROOT"
 
-refresh_sources() {
+refresh_data() {
   local -a python_run=(python3)
-  if ! python3 -c 'import pypdf' 2>/dev/null && command -v uv >/dev/null; then
+  if ! python3 -c 'import pypdf, openpyxl' 2>/dev/null && command -v uv >/dev/null; then
     export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/work/uv-cache}"
-    python_run=(uv run --no-project --with-requirements "$ROOT/requirements-refresh.txt" python)
+    python_run=(uv run --with-requirements "$ROOT/requirements-refresh.txt" python)
   fi
-  if [ -n "$REFRESH_ONLY" ]; then
-    "${python_run[@]}" -m lando.refresh --only "$REFRESH_ONLY"
-  else
-    "${python_run[@]}" -m lando.refresh --land-index
+  if [ "$REFRESH" -eq 1 ]; then
+    if [ -n "$REFRESH_ONLY" ]; then
+      "${python_run[@]}" -m lando.refresh --only "$REFRESH_ONLY"
+    else
+      "${python_run[@]}" -m lando.refresh --land-index
+    fi
+  fi
+  if [ "$REFRESH_INTELLIGENCE" -eq 1 ]; then
+    "${python_run[@]}" -m lando.intelligence_data
   fi
 }
 if [ "$CRAWL_ONLY" -eq 1 ]; then
-  if [ "$REFRESH" -ne 1 ]; then
-    echo "--crawl-only requires --refresh or --refresh-only" >&2
+  if [ "$REFRESH" -ne 1 ] && [ "$REFRESH_INTELLIGENCE" -ne 1 ]; then
+    echo "--crawl-only requires an inventory or intelligence refresh flag" >&2
     exit 2
   fi
-  refresh_sources
+  refresh_data
   exit
 fi
 
@@ -90,9 +98,9 @@ for (const file of await readdir("api")) {
 JS
 python3 -m unittest discover -s tests -t .
 
-if [ "$REFRESH" -eq 1 ]; then
-  echo "==> 2/7 Refreshing official agency feeds locally"
-  refresh_sources
+if [ "$REFRESH" -eq 1 ] || [ "$REFRESH_INTELLIGENCE" -eq 1 ]; then
+  echo "==> 2/7 Refreshing requested official data locally"
+  refresh_data
 else
   echo "==> 2/7 Using the committed inventory snapshot"
 fi

@@ -1186,3 +1186,29 @@ footer p { margin: 0 0 9px; }
   .print-checklist h2 { font-size: 13pt; margin: 0 0 8pt; }
   .print-checklist ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6pt 14pt; font-size: 10pt; }
 }
+
+.geo-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin: .6rem 0; align-items: center; }
+.geo-toolbar [hidden] { display: none; }
+.geo-toolbar p { flex-basis: 100%; margin: 0; }
+.geo-toolbar p:empty { display: none; }
+.map.drawing-parcel, .map.drawing-parcel .leaflet-interactive { cursor: crosshair; }
+#xray-measurements { margin-top: 1rem; overflow-wrap: anywhere; }
+#xray-measurements[hidden] { display: none; }
+#xray-measurements h2 { margin: 0 0 .5rem; }
+@media print {
+  #xray-map { height: 325px; }
+  #xray-measurements, .xray-tile, .terrain-profile-card { break-inside: avoid; }
+  #xray-actions { display: none; }
+}
+.utility-list { margin: .5rem 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
+.atlas-scatter-svg { display: block; width: min(100%, 740px); height: auto; margin-inline: auto; overflow: visible; }
+.atlas-scatter-svg text { fill: currentColor; font-size: 9px; }
+.atlas-scatter-svg circle { fill: #2b9d66; fill-opacity: .77; stroke: var(--panel, white); stroke-width: 1; }
+.atlas-scatter-svg a:is(:hover, :focus) circle { fill: #f59e0b; stroke: currentColor; stroke-width: 2; }
+.atlas-region-row { display: grid; grid-template-columns: 6rem minmax(0,1fr) auto; align-items: center; column-gap: .65rem; margin: .6rem 0; }
+.atlas-region-row small { grid-column: 1/-1; color: var(--muted); }
+.chart-share-dialog { width: min(34rem, calc(100% - 2rem)); border: 1px solid var(--line); border-radius: .9rem; padding: 1rem; background: var(--paper, Canvas); color: var(--ink, CanvasText); }
+.chart-share-dialog::backdrop { background: #10241cc0; }
+.chart-share-dialog label, .chart-share-dialog textarea, .chart-share-dialog input { display: block; width: 100%; margin-bottom: .5rem; box-sizing: border-box; }
+.chart-embed > header, .chart-embed > footer, .chart-embed > .skip { display: none; }
+.chart-embed #main { width: 100%; }

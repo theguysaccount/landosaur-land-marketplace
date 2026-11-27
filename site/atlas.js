@@ -35,11 +35,16 @@
     .then(function (atlas) {
       initCartogram(atlas);
       initMultiStateChart(atlas);
+      initMomentum(atlas);
+      initRegions(atlas);
       initSupplyCharts(atlas);
       initCountyExplorer(atlas);
     })
     .catch(function () {
-      root.innerHTML = "<p class='callout'>Could not load /data/atlas.json right now.</p>";
+      const missing = document.createElement("p");
+      missing.className = "callout";
+      missing.textContent = "The Atlas data could not be loaded.";
+      document.getElementById("main").appendChild(missing);
     });
 
   // ------------------------------------------------------- 1. 50-State Interactive U.S. Cartogram
@@ -169,6 +174,24 @@
     function draw() {
       var mKey = metricSel ? metricSel.value : "farm_real_estate";
       var indexed = scaleSel && scaleSel.value === "index";
+      var real = scaleSel && scaleSel.value === "real";
+      var cpi = atlas.inflation;
+      var inflationNote = document.getElementById("atlas-inflation-note");
+      if (inflationNote) {
+        inflationNote.textContent = "";
+        if (real && cpi) {
+          const lastMonth = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" })
+            .format(new Date(Date.UTC(cpi.reference_year, cpi.reference_month - 1, 1)));
+          const reference = cpi.years[cpi.reference_year];
+          inflationNote.append(cpi.reference_year + " dollars using the " +
+            (reference.months === 12 ? "annual CPI-U average" : "CPI-U average through " + lastMonth) +
+            ". Years with missing observations use the months BLS published. ");
+          const source = document.createElement("a");
+          source.href = cpi.source;
+          source.textContent = "BLS CPI-U via FRED";
+          inflationNote.append(source);
+        }
+      }
       var years = atlas.years;
       var activeSeries = [];
       selEls.forEach(function (sel, idx) {
@@ -181,7 +204,9 @@
           var v = raw[i];
           if (v != null && v > 0) {
             if (baseVal == null) baseVal = v;
-            pts.push({ y: years[i], v: indexed ? (v / baseVal) * 100 : v, raw: v });
+            const factor = real ? cpi?.years[cpi.reference_year]?.mean / cpi?.years[years[i]]?.mean : 1;
+            if (!Number.isFinite(factor)) continue;
+            pts.push({ y: years[i], v: indexed ? (v / baseVal) * 100 : v * factor, raw: v * factor });
           }
         }
         if (pts.length >= 2) {
@@ -200,7 +225,8 @@
       activeSeries.forEach(function (s) { s.pts.forEach(function (p) { allVals.push(p.v); }); });
       var yMin = indexed ? Math.min(90, Math.min.apply(null, allVals)) : 0;
       var yMax = Math.max.apply(null, allVals) * 1.08;
-      var W = 820, H = 310, padL = 68, padR = 24, padT = 22, padB = 34;
+      var W = Math.max(320, Math.min(820, svgBox.clientWidth));
+      var H = W < 500 ? 228 : 310, padL = 63, padR = 20, padT = 20, padB = 34;
       var pw = W - padL - padR, ph = H - padT - padB;
       var y0 = years[0], yN = years[years.length - 1];
       function xPos(yr) { return padL + ((yr - y0) / Math.max(1, yN - y0)) * pw; }
@@ -214,7 +240,7 @@
         grid += "<line x1='" + padL + "' y1='" + gy + "' x2='" + (W - padR) + "' y2='" + gy + "' stroke='currentColor' stroke-opacity='0.14' stroke-dasharray='3 4'/>";
         grid += "<text x='" + (padL - 8) + "' y='" + (Number(gy) + 4) + "' text-anchor='end' font-size='11' fill='currentColor' fill-opacity='0.72'>" + lbl + "</text>";
       }
-      for (var yi = 0; yi < years.length; yi += 2) {
+      for (var yi = 0; yi < years.length; yi += W < 500 ? 4 : 2) {
         var yr = years[yi];
         grid += "<text x='" + xPos(yr).toFixed(1) + "' y='" + (H - 10) + "' text-anchor='middle' font-size='11' fill='currentColor' fill-opacity='0.72'>" + yr + "</text>";
       }
@@ -245,6 +271,74 @@
       }
     }
     draw();
+    if (window.ResizeObserver) {
+      let width = svgBox.clientWidth;
+      new ResizeObserver(() => {
+        if (svgBox.clientWidth === width) return;
+        width = svgBox.clientWidth;
+        draw();
+      }).observe(svgBox);
+    }
+  }
+
+  function initMomentum(atlas) {
+    const box = document.getElementById("atlas-scatter");
+    if (!box) return;
+    const note = document.getElementById("atlas-scatter-note");
+    const available = atlas.states.filter((state) => state.fre > 0 && Number.isFinite(state.chg_all));
+    if (!available.length) return;
+    const xValues = available.map((state) => Math.log10(state.fre));
+    const yValues = available.map((state) => state.chg_all);
+    const mid = (values) => values.slice().sort((a, b) => a - b)[Math.floor(values.length / 2)];
+    const logLow = Math.min(...xValues) - .03, logHigh = Math.max(...xValues) + .03;
+    const yLow = Math.floor((Math.min(0, ...yValues) - 4) / 20) * 20;
+    const yHigh = Math.ceil((Math.max(...yValues) + 4) / 20) * 20;
+    const x = (value) => 47 + ((Math.log10(value) - logLow) / (logHigh - logLow)) * 302;
+    const y = (value) => 193 - ((value - yLow) / (yHigh - yLow)) * 166;
+    const lines = [
+      `<path d="M47 26V193H349" fill="none" stroke="currentColor" opacity=".42"/>`,
+      `<path d="M${x(10 ** mid(xValues))} 26V193 M47 ${y(mid(yValues))}H349" fill="none" stroke="currentColor" opacity=".35" stroke-dasharray="4 3"/>`,
+    ];
+    for (const mark of [500, 1000, 2000, 5000, 10000, 20000, 50000]) {
+      if (x(mark) < 47 || x(mark) > 349) continue;
+      lines.push(`<text x="${x(mark)}" y="206" text-anchor="middle">${money(mark)}</text>`);
+    }
+    for (let i = 0; i <= 4; i++) {
+      const mark = yLow + ((yHigh - yLow) / 4) * i;
+      lines.push(`<text x="41" y="${y(mark) + 3}" text-anchor="end">${Math.round(mark)}%</text>`);
+    }
+    const peak = Math.max(1, ...available.map((state) => state.active));
+    const detail = (state) => state.name + " · " + money(state.fre) + "/acre · " +
+      pct(state.chg_all) + " nominal appreciation · " + state.active.toLocaleString() + " active parcels";
+    const points = available.slice().sort((a, b) => b.active - a.active).map((state) => {
+      const radius = Math.sqrt(11 + 135 * state.active / peak);
+      return `<a href="${base + state.price_path}" data-state-point="${state.code}" aria-label="${esc(detail(state))}">` +
+        `<circle cx="${x(state.fre)}" cy="${y(state.chg_all)}" r="${radius}"><title>${esc(detail(state))}</title></circle></a>`;
+    });
+    box.innerHTML = '<svg class="atlas-scatter-svg" viewBox="0 0 365 231" aria-label="State price and appreciation scatter plot">' +
+      '<text x="48" y="14">Nominal appreciation</text>' + lines.join("") + points.join("") +
+      '<text x="200" y="224" text-anchor="middle">USD per acre (log scale)</text></svg>';
+    note.textContent = available.length + " states with published price and history. Lines show the median of those states.";
+    box.querySelectorAll("[data-state-point]").forEach((point) => {
+      const state = available.find((item) => item.code === point.dataset.statePoint);
+      const show = () => { note.textContent = detail(state); };
+      point.addEventListener("focus", show);
+      point.addEventListener("pointerenter", show);
+    });
+  }
+
+  function initRegions(atlas) {
+    const box = document.getElementById("atlas-regions");
+    if (!box || !atlas.regions?.length) return;
+    const maximum = Math.max(1, ...atlas.regions.map((region) => region.farm_real_estate || 0));
+    box.innerHTML = atlas.regions.map((region) => {
+      const width = (region.farm_real_estate || 0) / maximum * 100;
+      return '<div class="atlas-region-row"><strong>' + esc(region.name) + '</strong><div class="bench-track">' +
+        '<div class="bench-fill" style="width:' + width.toFixed(2) + '%"></div></div><strong>' +
+        money(region.farm_real_estate) + '/ac</strong><small>' + pct(region.five_year_cagr_pct) +
+        ' 5-year annualized growth · ' + region.active.toLocaleString() + ' active parcels · ' +
+        region.reporting_states + '/' + region.total_states + ' states reporting</small></div>';
+    }).join("");
   }
 
   // ------------------------------------------------------- 3. Live 50-State Supply & Discount Analytics

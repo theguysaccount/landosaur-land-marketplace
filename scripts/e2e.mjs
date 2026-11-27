@@ -103,6 +103,48 @@ try {
       assert(concOk, "live /api/concierge/ metadata check failed");
     }
   });
+  await step("drawn X-Ray boundary measures and carries its coordinates into the Land Agent form", async () => {
+    await page.goto(base + "/xray/#lat=35.42&lon=-92.45");
+    await page.eval(`(() => {
+      document.querySelector("#xray-draw [data-draw-start]").click();
+      const map = document.getElementById("xray-map"), rect = map.getBoundingClientRect();
+      for (const [x, y] of [[.45,.45],[.54,.46],[.52,.54],[.44,.53]]) {
+        map.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: rect.left + rect.width*x, clientY: rect.top + rect.height*y }));
+      }
+      document.querySelector("#xray-draw [data-draw-finish]").click();
+    })()`);
+    assert(await page.eval("!document.getElementById('xray-measurements').hidden && document.getElementById('xray-measurements').textContent.includes('sq ft')"),
+           "drawing did not produce area and perimeter");
+    const links = await page.eval(`(() => {
+      const href = document.querySelector('#xray-actions a[href*="/services/"]').href;
+      const q = new URL(href).searchParams;
+      return [href, q.get("service"), Number(q.get("acres")), q.get("boundary"), location.hash];
+    })()`);
+    assert(links[1] === "unlisted_outreach" && links[2] > 0 && links[3] && links[4].includes("poly="),
+           "boundary or acreage missing from acquisition and share links");
+    if (!isLocal) {
+      await page.waitFor("document.querySelector('[data-utility-card] li')", 15000);
+      const power = await page.eval(`document.querySelector('#xray-actions a[href*="/analyze/"]').href`);
+      await page.goto(power);
+      assert(await page.eval("!document.getElementById('tab-power').hidden && document.getElementById('form-power').kwhRate.value > 0"),
+             "EIA rate did not open and prefill the power comparison");
+    }
+  });
+  await step("Atlas momentum, regions, inflation adjustment and embeds use the published series", async () => {
+    await page.goto(base + "/land-atlas/");
+    await page.waitFor("document.querySelectorAll('#atlas-scatter circle').length >= 45");
+    assert(await page.eval("document.querySelectorAll('.atlas-region-row').length === 4"), "missing Census regions");
+    await page.eval(`(() => { const s = document.getElementById("cmp-scale"); s.value = "real"; s.dispatchEvent(new Event("change")); })()`);
+    assert(await page.eval("document.getElementById('atlas-inflation-note').innerText.includes('CPI-U')"), "CPI source or period absent");
+    await page.eval("document.querySelector('[data-share-chart=momentum]').click()");
+    assert(await page.eval("document.querySelector('dialog[open] textarea').value.includes('embed=momentum')"), "no embeddable URL");
+    await page.goto(base + "/land-atlas/?embed=momentum");
+    await page.waitFor("document.querySelector('#atlas-scatter circle')");
+    assert(await page.eval("document.body.classList.contains('chart-embed')"), "embed did not select the chart view");
+    await page.goto(base + "/land-prices/georgia/");
+    assert(await page.eval(`document.querySelector('a[href="/tax-sales/#state-GA"]') && document.querySelector('#state-price-chart [data-share-chart]')`),
+           "state tax-sale or state chart share link missing");
+  });
   await step("Below-Market /deals/, 50-State /tax-sales/ Atlas, and /api/alerts/ load cleanly", async () => {
     await page.goto(base + "/deals/");
     assert(await page.eval("document.querySelectorAll('#below-benchmark tbody tr').length >= 10 && document.body.innerText.includes('Land Agent ($20)')"), "missing below-market deals rows");

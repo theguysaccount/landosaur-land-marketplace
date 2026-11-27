@@ -119,6 +119,7 @@
           var u = new URL(anaLink.href, location.origin);
           if (d.roads && d.roads.nearest_road_ft != null) u.searchParams.set("roadFt", String(d.roads.nearest_road_ft));
           if (d.climate && d.climate.winter_min_sun_hours != null) u.searchParams.set("sun", String(d.climate.winter_min_sun_hours));
+          window.LandosaurXray.powerContext(u.searchParams, d);
           anaLink.href = u.pathname + u.search;
         }
       });

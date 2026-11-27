@@ -6,11 +6,11 @@
   "functions": {
     "api/xray.js": {
       "maxDuration": 30,
-      "includeFiles": "data/usda/land-index-counties.json"
+      "includeFiles": "data/{usda/land-index-counties.json,utilities/county-utilities.json}"
     },
     "api/listings.js": {
       "maxDuration": 30,
-      "includeFiles": "data/usda/land-index-counties.json"
+      "includeFiles": "data/{usda/land-index-counties.json,utilities/county-utilities.json}"
     },
     "api/offers.js": {
       "maxDuration": 15
@@ -20,7 +20,7 @@
     },
     "api/concierge.js": {
       "maxDuration": 30,
-      "includeFiles": "data/usda/land-index-counties.json"
+      "includeFiles": "data/{usda/land-index-counties.json,utilities/county-utilities.json}"
     },
     "api/alerts.js": {
       "maxDuration": 15

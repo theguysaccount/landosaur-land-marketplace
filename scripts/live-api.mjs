@@ -7,7 +7,9 @@ const checks = [
   ["/api/concierge/", 200, (body) => body.ok && body.storage_configured && body.stripe_checkout_configured &&
       body.initiation_fee_usd === 20 && body.concierge_fee_pct === 10],
   ["/api/alerts/", 200, (body) => body.ok && body.storage_configured],
-  ["/api/xray/?lat=35.42&lon=-92.45", 200, (body) => body.usgs?.elevation_ft > 0 && body.county?.fips],
+  ["/api/xray/?lat=35.42&lon=-92.45", 200, (body) => body.usgs?.elevation_ft > 0 &&
+    body.county?.fips === "05141" && body.utility?.providers.some((provider) =>
+      provider.ownership === "Cooperative" && provider.residential_usd_per_kwh > 0)],
   ["/data/atlas.json", 200, (body) => body.states.length === 50 && body.counties.length > 3000],
   ["/.well-known/landosaur-agent.json", 200, (body) => Array.isArray(body.endpoints) || typeof body.endpoints === "object"],
 ];

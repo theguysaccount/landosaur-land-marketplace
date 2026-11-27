@@ -25,7 +25,7 @@ from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "theme.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "theme.js", "geo.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 
 
 class Writer(object):
@@ -286,6 +286,34 @@ def _urlset_xml(paths, updated):
     return "\n".join(out) + "\n"
 
 
+CENSUS_REGIONS = {
+    "Northeast": "CT ME MA NH RI VT NJ NY PA".split(),
+    "Midwest": "IN IL MI OH WI IA KS MN MO NE ND SD".split(),
+    "South": "DE FL GA MD NC SC VA WV AL KY MS TN AR LA OK TX".split(),
+    "West": "AZ CO ID MT NV NM UT WY AK CA HI OR WA".split(),
+}
+
+
+def atlas_regions(states, series):
+    by_code = {state["code"]: state for state in states}
+    regions = []
+    for name, codes in CENSUS_REGIONS.items():
+        pairs = []
+        for code in codes:
+            history = series.get(code, {}).get("farm_real_estate")
+            if history and len(history) >= 6 and history[-1] and history[-6]:
+                pairs.append((history[-6], history[-1]))
+        first = statistics.mean(p[0] for p in pairs) if pairs else None
+        latest = statistics.mean(p[1] for p in pairs) if pairs else None
+        regions.append({
+            "name": name, "farm_real_estate": round(latest, 2) if latest else None,
+            "five_year_cagr_pct": round(((latest / first) ** (1 / 5) - 1) * 100, 2) if first else None,
+            "reporting_states": len(pairs), "total_states": len(codes),
+            "active": sum(by_code[code]["active"] for code in codes if code in by_code),
+        })
+    return regions
+
+
 def _build_atlas_payload(cat, site):
     m = site.market
     cur = cat.current()
@@ -356,7 +384,7 @@ def _build_atlas_payload(cat, site):
                 "priced_count": len(st_rows),
                 "min_price": round(min(r["price"] for r in st_rows), 2),
                 "median_ppa": round(statistics.median(ppas), 2) if ppas else None,
-                "usda_fre": st["values"].get("farm_real_estate") or st["county_median"],
+                "usda_fre": st["values"].get("farm_real_estate"),
                 "browse_path": st["browse_path"] or st["path"],
             })
     priced_states.sort(key=lambda x: -x["priced_count"])
@@ -366,7 +394,15 @@ def _build_atlas_payload(cat, site):
         for c in m.counties_by_state.get(st["code"], []):
             counties.append([c["fips"], c["name"], st["code"], st["slug"], c["value"]])
 
+    inflation_path = os.path.join(cat.data_dir, "market", "cpi-u.json")
+    inflation = None
+    if os.path.exists(inflation_path):
+        with open(inflation_path, encoding="utf-8") as fh:
+            inflation = json.load(fh)
+
     return {
+        "inflation": inflation,
+        "regions": atlas_regions(states_out, series),
         "first_year": m.first_year,
         "latest_year": m.latest_year,
         "years": years,
@@ -375,8 +411,8 @@ def _build_atlas_payload(cat, site):
             "buy_now": buy_now,
             "auction": auction,
             "offer": offer,
-            "states_covered": len(cat.states),
-            "agencies_covered": len(adapters.SOURCES),
+            "states_covered": len({r["state"] for r in cur}),
+            "agencies_covered": len({cat.sources[r["source"]]["agency"] for r in cur}),
             "acre_tiers": acre_tiers,
         },
         "states": states_out,

@@ -375,7 +375,7 @@ class Site(object):
             '<td>Free for buyers to browse; paid brokerage marketing and featured-listing subscriptions.</td>'
             '<td>Free for buyers to browse; funded by Premier Agent / broker advertising and lead referrals.</td></tr>'
             '<tr><th scope="row">Public-record hazard, soil &amp; ownership visibility</th>'
-            '<td class="col-ours">Built-in free 9-agency Federal Parcel X-Ray (USGS LiDAR slope, FEMA flood &amp; hazard risk, USFWS wetlands, USDA soil/bedrock depth, Census roads, USGS public lands, NASA solar, 3,115-county USDA/FHFA benchmarks); excludes previous-owner PII for privacy.</td>'
+            '<td class="col-ours">Built-in free federal Parcel X-Ray (USGS LiDAR slope, FEMA flood &amp; hazard risk, USFWS wetlands, USDA soil/bedrock depth, Census roads, USGS public lands, NASA solar, 3,115-county USDA/FHFA benchmarks); excludes previous-owner PII for privacy.</td>'
             '<td>Relies on broker-entered descriptions and photos; buyers run FEMA flood, wetland, soil, and zoning checks externally.</td>'
             '<td>Listing summaries with select map overlays; buyers verify soils, wetlands, and county zoning outside the listing.</td>'
             '<td>Broker descriptions and aerial maps; no built-in 9-agency federal GIS screening workbench.</td>'
@@ -442,7 +442,7 @@ class Site(object):
             '<h3>U.S. Land Data Atlas (2010–%d)</h3>'
             '<p>Explore our interactive 50-state cartogram, multi-state USDA growth charts (%s/ac U.S. avg), live inventory supply breakdowns, and searchable 3,115-county table.</p>'
             '<a class="card-link" href="%s" data-vital-event="tool_used">Open Land Data Atlas &amp; Charts →</a></article>'
-            '<article class="info-card"><div class="eyebrow">All 50 States · 9 Live Federal APIs</div>'
+            '<article class="info-card"><div class="eyebrow">All 50 States · Federal GIS &amp; EIA Utility Data</div>'
             '<h3>Free U.S. Parcel X-Ray &amp; Deal Analyzer</h3>'
             '<p>Drop a pin anywhere for USGS LiDAR terrain profile, FEMA flood &amp; wildfire risk, wetlands, soil/bedrock, Census roads, public lands, solar, and full ROI modeling.</p>'
             '<a class="card-link" href="%s" data-vital-event="tool_used">Open Parcel X-Ray →</a> · <a class="card-link" href="%s" data-vital-event="tool_used">Deal Analyzer →</a></article>'
@@ -531,7 +531,7 @@ class Site(object):
                     "publisher": {"@id": self.absu("/#organization")},
                     "featureList": [
                         "Split-screen interactive map with Buy It Now, Auction/Min Bid, Land Bank, and Direct deal-mode filters plus 4-parcel side-by-side comparison",
-                        "Free 9-agency Federal Parcel X-Ray (USGS 3DEP LiDAR, FEMA NFHL flood & hazard risk, USFWS wetlands, USDA SSURGO soils, Census roads, PAD-US public lands, NASA solar)",
+                        "Free federal Parcel X-Ray (USGS 3DEP LiDAR, FEMA NFHL flood & hazard risk, USFWS wetlands, USDA SSURGO soils, Census roads, PAD-US public lands, NASA solar)",
                         "50-state USDA NASS 2010-2026 land price observatory and 3,115 county USDA/FHFA land value benchmarks",
                         "Deterministic land deal, loan/balloon, grid vs. off-grid electricity, comparable sales, and residual development workbench",
                         "Daily verified official public-agency feeds with free CSV, JSON, and Atom XML downloads",
@@ -584,9 +584,9 @@ class Site(object):
         ]
         body = [
             crumbs,
-            '<div class="eyebrow">All 50 U.S. States · 9 Live Federal APIs · KML/GPX Export · Free Forever</div>',
+            '<div class="eyebrow">All 50 U.S. States · Federal GIS &amp; EIA Utility Data · KML/GPX Export · Free Forever</div>',
             '<h1>Free U.S. Parcel X-Ray: Flood, Soil, Roads, Public Land &amp; Slope</h1>',
-            '<p class="lede">Click anywhere on the satellite map—or enter any U.S. address, town, or GPS coordinates—to screen raw land across <strong>USGS 3DEP LiDAR (with 656-ft terrain cross-section)</strong>, <strong>FEMA Flood &amp; Wildfire/Hazard Risk</strong>, <strong>USFWS Wetlands</strong>, <strong>USDA SSURGO Soil/Bedrock</strong>, <strong>Census Road Proximity</strong>, <strong>USGS Public Lands</strong>, <strong>NASA Solar &amp; Growing Zone</strong>, and <strong>3,115-county land values</strong>.</p>',
+            '<p class="lede">Click anywhere on the satellite map—or enter any U.S. address, town, or GPS coordinates—to screen raw land across <strong>USGS 3DEP LiDAR (with 656-ft terrain cross-section)</strong>, <strong>FEMA Flood &amp; Wildfire/Hazard Risk</strong>, <strong>USFWS Wetlands</strong>, <strong>USDA SSURGO Soil/Bedrock</strong>, <strong>Census Road Proximity</strong>, <strong>USGS Public Lands</strong>, <strong>NASA Solar &amp; Growing Zone</strong>, <strong>EIA-861 electric utilities</strong>, and <strong>county land benchmarks</strong>.</p>',
             '<div id="xray-app">',
             '<form id="xray-search-form" class="xray-search-bar" aria-label="Search any U.S. location">'
             '<input id="xray-q" type="search" placeholder="Enter address, town &amp; state, ZIP, or lat, lon (e.g. Sedona, AZ or 35.42, -92.45)" aria-label="U.S. address, town, or coordinates">'
@@ -599,9 +599,16 @@ class Site(object):
             '<button type="button" class="pill-btn" data-xray-preset="34.8689,-111.7614" data-xray-label="Sedona, AZ" data-vital-event="tool_used">High Desert Parcel (AZ)</button>'
             '<button type="button" class="pill-btn" data-xray-preset="41.6639,-83.5379" data-xray-label="Toledo, OH" data-vital-event="tool_used">Toledo Land Bank Lot (OH)</button>'
             '</div>',
+            '<div id="xray-draw" class="geo-toolbar no-print">'
+            '<button type="button" class="button ghost sm" data-draw-start>Draw a parcel boundary</button>'
+            '<button type="button" class="button sm" data-draw-finish hidden>Finish boundary</button>'
+            '<button type="button" class="button ghost sm" data-draw-undo hidden>Undo vertex</button>'
+            '<button type="button" class="button ghost sm" data-draw-clear hidden>Clear boundary</button>'
+            '<p class="small" data-draw-status aria-live="polite"></p></div>'
             '<div id="xray-map" class="map xray-tall" aria-label="Click anywhere on the U.S. map to run Parcel X-Ray">'
             '<noscript><p>Enable JavaScript to use the interactive Parcel X-Ray map.</p></noscript></div>',
-            '<p id="xray-status" class="small" aria-live="polite" style="margin-top:10px;font-weight:600">Click anywhere on the map above or search a U.S. location to run an instant 6-agency Federal Parcel X-Ray.</p>',
+            '<section id="xray-measurements" class="dossier-card" hidden aria-live="polite"></section>',
+            '<p id="xray-status" class="small" aria-live="polite" style="margin-top:10px;font-weight:600">Click anywhere on the map above or search a U.S. location to run an federal and utility screening.</p>',
             '<div id="xray-actions" class="btn-row" hidden></div>',
             '<section class="xray-section" style="margin-top:16px">'
             '<div class="xray-header"><div><div class="eyebrow">Live Federal GIS Screening</div>'
@@ -636,7 +643,7 @@ class Site(object):
         return self.layout(
             "Free U.S. Parcel X-Ray — Flood, Soil, Slope, Wetlands & Solar Checker | Landosaur",
             desc, "/xray/", "".join(body), indexable=True, jsonld=ld,
-            scripts=["vendor/leaflet.js", "xray.js"], wide=True,
+            scripts=["vendor/leaflet.js", "geo.js", "xray.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /list/ Agent-First Land Listing Flow
@@ -753,7 +760,7 @@ class Site(object):
             '</section>'
             '</div>',
         ]
-        desc = "List land for sale in any of the 50 U.S. states in 60 seconds—or let your AI agent (Claude, ChatGPT, Codex) publish Buy It Now or Auction listings via one API call with automatic 9-agency Federal Parcel X-Ray."
+        desc = "List land for sale in any of the 50 U.S. states in 60 seconds—or let your AI agent (Claude, ChatGPT, Codex) publish Buy It Now or Auction listings via one API call with automatic federal Parcel X-Ray."
         return self.layout(
             "List Your Land Free (Owners, Real Estate Agents & AI Agents) | Landosaur",
             desc, "/list/", "".join(body), indexable=True, jsonld=[crumb_ld],
@@ -770,7 +777,7 @@ class Site(object):
             '<p class="lede">Live Buy It Now and Auction parcels listed directly by landowners, real estate agents, and AI agents across all 50 states—each auto-screened with 9 live federal GIS services. <a href="%s"><strong>List your land free →</strong></a></p>'
             '</div>' % self.u("/list/"),
         ]
-        desc = "Browse, bid on, or Buy It Now direct owner and real estate agent land listings across all 50 U.S. states, complete with live 9-agency Federal Parcel X-Ray and real-time bidding."
+        desc = "Browse, bid on, or Buy It Now direct owner and real estate agent land listings across all 50 U.S. states, complete with live federal Parcel X-Ray and real-time bidding."
         return self.layout(
             "Direct by Owner & Agent Land Marketplace — Bid or Buy It Now | Landosaur",
             desc, "/direct/", "".join(body), indexable=True, jsonld=[crumb_ld],
@@ -914,7 +921,7 @@ class Site(object):
             '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · 3,115 U.S. Counties · Live Public Supply</div>' % m.latest_year,
             '<h1>U.S. Land Data Atlas &amp; Interactive Market Charts</h1>',
             '<p class="lede">The open reference atlas for American land—combining <strong>%s live public-agency parcels across all %d U.S. states (%d agencies)</strong>, <strong>17 years of official USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks across <strong>all 3,115 U.S. counties</strong>. Zero fabricated metrics.</p>' % (
-                "{:,}".format(len(cur)), len(cat.states), len(adapters.SOURCES), m.first_year, m.latest_year),
+                "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}), m.first_year, m.latest_year),
 
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>Live Official Database</span><strong>%s</strong><small>Active parcels · %d/50 states · %d agencies</small></div>'
@@ -922,7 +929,7 @@ class Site(object):
             '<div class="kpi-card"><span>%d–%d Nominal Growth</span><strong>%s</strong><small>U.S. agricultural land appreciation</small></div>'
             '<div class="kpi-card"><span>County Benchmark Coverage</span><strong>3,115</strong><small>Every U.S. county searchable &amp; CSV-ready</small></div>'
             '</div>' % (
-                "{:,}".format(len(cur)), len(cat.states), len(adapters.SOURCES),
+                "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}),
                 m.latest_year, esc(market_mod.usd(us.get("farm_real_estate"))),
                 y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)),
             ),
@@ -940,7 +947,7 @@ class Site(object):
             '<p id="cartogram-readout" class="small" style="margin-top:10px">Hover any state tile to inspect 2026 $/acre, historical appreciation, and live official parcel count. Click any state to explore.</p>'
             '</section>' % m.latest_year,
 
-            '<section class="dossier-card" style="margin-top:24px">'
+            '<section id="atlas-history" data-embed-view="history" class="dossier-card" style="margin-top:24px">'
             '<div class="eyebrow">Interactive Multi-State Time Series (%d–%d)</div>'
             '<h2>Compare Land Value Growth Across Any 4 States</h2>'
             '<div class="atlas-controls">'
@@ -949,11 +956,25 @@ class Site(object):
             '<label>Series 3 <select id="cmp-st-3"></select></label>'
             '<label>Series 4 <select id="cmp-st-4"></select></label>'
             '<label>Land Class <select id="cmp-metric"><option value="farm_real_estate">Farm Real Estate</option><option value="cropland">Cropland</option><option value="pasture">Pasture</option></select></label>'
-            '<label>Scale <select id="cmp-scale"><option value="usd">Nominal $/acre</option><option value="index">Indexed Growth (Start = 100)</option></select></label>'
+            '<label>Scale <select id="cmp-scale"><option value="usd">Nominal $/acre</option><option value="real">Inflation-adjusted $/acre</option><option value="index">Indexed Growth (Start = 100)</option></select></label>'
             '</div>'
             '<div id="atlas-compare-chart" style="margin-top:12px"></div>'
+            '<p id="atlas-inflation-note" class="small"></p>'
+            '<button type="button" class="button ghost sm no-print" data-share-chart="history">Embed or cite this chart</button>'
             '<div id="atlas-compare-stats" class="kpi-grid" style="margin-top:12px"></div>'
             '</section>' % (m.first_year, m.latest_year),
+
+            '<section id="atlas-momentum" data-embed-view="momentum" class="dossier-card" style="margin-top:24px">'
+            '<h2>Price per Acre vs. Long-Term Appreciation</h2>'
+            '<p class="small">States with published USDA values. Bubble area reflects active Landosaur supply.</p>'
+            '<div id="atlas-scatter"></div><p id="atlas-scatter-note" class="small" aria-live="polite">Select a state point for details.</p>'
+            '<button type="button" class="button ghost sm no-print" data-share-chart="momentum">Embed or cite this chart</button></section>',
+
+            '<section id="atlas-regional" data-embed-view="regions" class="dossier-card" style="margin-top:24px">'
+            '<h2>Land Values by U.S. Census Region</h2>'
+            '<p class="small">Equal-weight mean of states reporting in both comparison years. Inventory includes every state in the region.</p>'
+            '<div id="atlas-regions"></div>'
+            '<button type="button" class="button ghost sm no-print" data-share-chart="regions">Embed or cite this chart</button></section>',
 
             '<section class="dossier" style="margin-top:24px">'
             '<div class="dossier-card"><div class="eyebrow">Live 50-State Official Supply</div><h2>Top States by Active Official Parcels</h2><div id="atlas-top-states"></div></div>'
@@ -992,7 +1013,7 @@ class Site(object):
         return self.layout(
             "U.S. Land Data Atlas — 50-State Charts, 3,115 County Prices & Live Supply | Landosaur",
             desc, "/land-atlas/", "".join(body), indexable=True, jsonld=[crumb_ld],
-            scripts=["atlas.js"], wide=True,
+            scripts=["atlas.js", "share-chart.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /deals/ Live Below-Market Land Bargain Scanner
@@ -1580,8 +1601,9 @@ class Site(object):
                     st["change_start"] or m.first_year, st["change_end"] or y, esc(market_mod.pct(st["change_pct"])),
                 )
             )
-            chart_html = '<section><h2>%s land values over time (%d–%d)</h2>%s</section>' % (
-                esc(name), m.first_year, y, m.svg_trend_chart(st["code"], "%s agricultural land values per acre, %d to %d" % (name, m.first_year, y)))
+            chart_html = ('<section id="state-price-chart" data-embed-view="history" data-chart-state="%s"><h2>%s land values over time (%d–%d)</h2>%s'
+                          '<button type="button" class="button ghost sm no-print" data-share-chart="history">Embed or cite this chart</button></section>') % (
+                esc(st["code"]), esc(name), m.first_year, y, m.svg_trend_chart(st["code"], "%s agricultural land values per acre, %d to %d" % (name, m.first_year, y)))
             comp_rows = []
             for metric in m.metrics:
                 sv, uv = vals.get(metric["id"]), us.get(metric["id"])
@@ -1671,16 +1693,38 @@ class Site(object):
                 '<section class="callout"><h2>Finding or selling land in %s?</h2>'
                 '<p>Landosaur does not yet ingest an automated open-data feed for %s (we show 0 automated agency listings honestly rather than scraping unverified ads).%s '
                 'Have land for sale in %s? <a href="%s"><strong>List it free in 60 seconds (or via your AI Agent) →</strong></a> — or screen any %s parcel with our free '
-                '<a href="%s"><strong>9-Agency Parcel X-Ray</strong></a> and <a href="%s"><strong>Land Analyzer</strong></a>.</p></section>' % (
+                '<a href="%s"><strong>Parcel X-Ray</strong></a> and <a href="%s"><strong>Land Analyzer</strong></a>.</p></section>' % (
                     esc(name), esc(name), portal_html, esc(name), self.u("/list/"), esc(name), self.u("/xray/"), self.u("/analyze/"))
             )
+
+        deals = []
+        for listing in st["active_listings"]:
+            if not listing.get("price") or not listing.get("acres"):
+                continue
+            benchmark = self.cat.county_value(listing)
+            value = benchmark.get("value") if benchmark else None
+            if value and listing["price"] / listing["acres"] < value:
+                deals.append((listing["price"] / listing["acres"] / value, listing))
+        deals.sort(key=lambda item: (item[0], item[1]["id"]))
+        deals_html = ('<section><h2>Current listings below their county benchmark</h2>'
+                      '<p class="small">Compare published prices or minimum bids per acre with county averages.</p>%s</section>'
+                      % self.rows([listing for _, listing in deals[:5]], show_ppa=True)
+                      if deals else '<section><h2>Current listings below their county benchmark</h2>'
+                                    '<p>No active listings in this state currently qualify for this comparison.</p></section>')
+        tax = tax_sales_mod.BY_CODE[st["code"]]
+        state_services = self.u("/services/?state=" + st["code"])
+        tax_html = ('<section class="callout"><h2>%s tax-sale framework</h2>'
+                    '<p>%s. Review redemption, deed and eligibility requirements before bidding. '
+                    '<a href="%s">Explore the state tax-sale reference →</a></p>'
+                    '<a class="button" href="%s">Hire Land Agent for listed or unlisted land in %s · $20 →</a></section>'
+                    % (esc(name), esc(tax["mode_label"]), self.u("/tax-sales/#state-" + st["code"]), state_services, esc(name)))
 
         body = [
             crumbs,
             '<div class="eyebrow">%s · %d Land Price Reference</div>' % (esc(name), y),
             '<h1>%s Land Prices Per Acre (%d): State History &amp; County Values</h1>' % (esc(name), y),
             self.land_prices_nav(st["path"]),
-            answer, kpis, chart_html, comp_html, county_section, inv_section,
+            answer, kpis, chart_html, comp_html, deals_html, tax_html, county_section, inv_section,
             self.faq_block(faqs, heading="Frequently asked questions about %s land prices" % name, section_id="state-faq"),
         ]
         fre_txt = "%s/acre farm real estate" % market_mod.usd(vals.get("farm_real_estate")) if vals.get("farm_real_estate") else "%d county benchmarks" % st["county_count"]
@@ -1700,7 +1744,7 @@ class Site(object):
         ]}]
         return self.layout(
             "%s Land Prices Per Acre (%d) — County Values & History | Landosaur" % (name, y),
-            desc, st["path"], "".join(body), indexable=True, jsonld=ld, scripts=["tables.js"], wide=True,
+            desc, st["path"], "".join(body), indexable=True, jsonld=ld, scripts=["tables.js", "share-chart.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /analyze/ workbench
@@ -1773,6 +1817,7 @@ class Site(object):
             '<section id="tab-power" role="tabpanel" hidden>'
             '<h2>Electricity feasibility: Utility Grid Extension vs. Off-Grid Solar</h2>'
             '<p class="small">Power is often the single biggest hidden cost on raw land. Compare real utility line-extension quotes against an off-grid solar + LiFePO4 battery + backup generator system over your ownership horizon.</p>'
+            '<p id="pwr-utility-hint" class="callout" hidden></p>'
             '<p id="pwr-solar-hint" class="callout" hidden style="margin-bottom:12px"></p>'
             '<form id="form-power" class="worksheet" onsubmit="return false">'
             '<label><span>Comparison horizon</span><span class="in"><input name="horizonYears" type="number" min="1" max="50" step="1" value="10"><i>yrs</i></span></label>'

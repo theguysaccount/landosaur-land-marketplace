@@ -257,7 +257,7 @@ class Site(object):
             '<button type="button" class="mode-btn" data-deal-mode="min_bid">Auction / Bid</button>'
             '<button type="button" class="mode-btn" data-deal-mode="none">Land Bank / Offer</button>'
             '<button type="button" class="mode-btn" data-deal-mode="direct">Direct Owner / Agent</button>'
-            '<a class="mode-btn" href="%s" style="margin-left:auto;border-color:var(--accent);color:var(--accent)">+ List Land Free</a>'
+            '<a class="mode-btn" href="%s" style="margin-left:auto;border-color:var(--forest);color:var(--forest)">+ List Land Free</a>'
             '</div>'
             '<form class="filters" id="filters" onsubmit="return false">'
             '<label>State<select name="state"><option value="">All tracked states</option>%s</select></label>'

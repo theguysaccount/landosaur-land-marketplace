@@ -1,4 +1,4 @@
-/* Landosaur Live Federal Parcel X-Ray v2 — 9 live federal signals, SVG terrain cross-section profile,
+/* Landosaur Live Federal Parcel X-Ray v2 — federal GIS and EIA utility data, SVG terrain cross-section profile,
    KML/GPX field GPS export, Land Potential Screening, and standalone /xray/ controller. */
 (function () {
   "use strict";

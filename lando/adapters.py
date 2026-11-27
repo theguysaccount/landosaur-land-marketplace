@@ -5118,6 +5118,218 @@ def muncie_landbank(fetch, now, warn):
     return [r for r in rows if r], {"complete": True, "upstream_total": len(urls)}
 
 
+HARRIS_SALE = "https://www.hctax.net/Property/listings/taxsalelisting"
+HARRIS_ASSESSOR = "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0/query"
+
+
+def parse_harris_notices(page):
+    date = re.search(r"<h2\b[^>]*>\s*Sale Date:\s*([A-Za-z]+ \d{1,2}, \d{4})\s*</h2>", page)
+    if not date or "list-listings-2" not in page:
+        raise StructureError("Harris County's current sale directory changed")
+    sales_date = datetime.datetime.strptime(date[1], "%B %d, %Y").date()
+    notices = {}
+    for card in re.split(r'<li class="row listing">', page)[1:]:
+        summary = card.split('<div class="modal fade"', 1)[0]
+        if not re.search(r'''class=["']For Sale-small["']''', summary):
+            continue
+        parcel = re.search(r"Account#:\s*<strong>\s*(\d{13})\s*</strong>", summary)
+        price = re.search(r"Minimum Bid:\s*\$\s*<strong>\s*([\d,]+(?:\.\d{2})?)\s*</strong>", summary)
+        if not parcel:
+            raise StructureError("Harris County's current sale card has no HCAD account")
+        notices[parcel[1]] = number(price[1]) if price else None
+    return sales_date, notices
+
+
+def parse_harris_sale(sales_date, notices, features):
+    rows, seen = [], set()
+    for feature in features:
+        attr = feature.get("attributes") or {}
+        pid = attr.get("acct_num")
+        if pid not in notices or pid in seen or attr.get("state_class") not in ("C1", "C2"):
+            continue
+        if attr.get("bld_value") != 0 or attr.get("impr_value") != 0:
+            continue
+        seen.add(pid)
+        price = notices[pid]
+        city = clean(attr.get("site_city") or "").title()
+        acres = number(attr.get("acreage_1")) or rings_acres((feature.get("geometry") or {}).get("rings") or [])
+        row = {
+            "id": "tx-harris-" + pid, "source": "harris-county-tax-sales",
+            "title": "Harris County parcel %s (tax sale)" % pid, "state": "TX", "county": "Harris",
+            "locality": city, "apn": pid, "acres": round(acres, 4) if acres else None,
+            "price": price, "price_kind": "min_bid" if price else "none",
+            "offering": "auction", "status": "auction_terms", "deadline": None,
+            "offer_close_date": sales_date.isoformat(), "url": HARRIS_SALE, "address": "",
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "For sale in the county's current tax auction", "="),
+                      fact("parcel_number", pid, "="),
+                      fact("deadline", sales_date.strftime("%B %d, %Y"), "=")],
+            "tags": ["county tax sale", "vacant lot", "auction terms apply"],
+        }
+        if price:
+            row["facts"].append(fact("price", "$%s published minimum bid" % "{:,.2f}".format(price), "=",
+                                     "Confirm the bid amount and terms with the county before the sale."))
+        if rings := (feature.get("geometry") or {}).get("rings"):
+            outline = one_parcel_url(HARRIS_ASSESSOR, "acct_num='%s'" % pid)
+            apply_geometry(row, rings, outline, "Harris Central Appraisal District")
+        rows.append(row)
+    return rows
+
+
+def harris_county_tax_sales(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    sales_date, notices = parse_harris_notices(fetch.text(HARRIS_SALE))
+    if sales_date < now.astimezone(ZoneInfo("America/Chicago")).date():
+        return [], {"complete": True, "upstream_total": 0}
+    ids, parcels = sorted(notices), []
+    for start in range(0, len(ids), 20):
+        where = "acct_num IN (%s)" % quote_list(ids[start:start + 20])
+        _, items = arcgis_query(fetch, HARRIS_ASSESSOR, where, "acct_num,site_city,state_class,acreage_1,bld_value,impr_value")
+        parcels.extend(items)
+    rows = parse_harris_sale(sales_date, notices, parcels)
+    return rows, {"complete": True, "upstream_total": len(notices)}
+
+
+GLYNN_SALE = "https://www.gblba.org/properties"
+
+
+def parse_glynn_landbank(page):
+    section = re.search(r"<h2\b[^>]*>\s*Available Properties\s*</h2>(.*?)</main>", page, re.I | re.S)
+    if not section:
+        raise StructureError("Glynn-Brunswick's available properties section changed")
+    rows = []
+    for heading, rest in re.findall(r"<h3\b[^>]*>(.*?)</h3>(.*?)(?=<h3|$)", section[1], re.I | re.S):
+        details = re.match(r"\s*<h4\b[^>]*>(.*?)</h4>(.*?)</div>", rest, re.I | re.S)
+        if not details:
+            continue
+        description = clean(details[2])
+        acreage = re.search(r"\b([\d.]+)\s+acre\s+(?:wooded|commercial|cleared|vacant|residential)\s+lot\b", description, re.I)
+        amount = re.fullmatch(r"\$([\d,]+(?:\.\d{2})?)", clean(details[1]))
+        if not acreage or not amount or re.search(r"\b(?:foreclosure|demolition|structure|dwelling|sold|pending)\b", description, re.I):
+            continue
+        address = clean(heading)
+        if not re.match(r"^\d+\s+[\w-]", address):
+            continue
+        rows.append({
+            "id": "ga-glynn-" + slug(address), "source": "glynn-brunswick-landbank",
+            "title": "%s, Brunswick (land bank lot)" % address,
+            "state": "GA", "county": "Glynn", "locality": "Brunswick", "apn": "",
+            "acres": number(acreage[1]), "price": number(amount[1]), "price_kind": "application",
+            "offering": "sale", "status": "listed", "deadline": None,
+            "url": GLYNN_SALE, "address": address, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Available from the Glynn-Brunswick Land Bank Authority", "="),
+                      fact("price", clean(details[1]) + " published price", "=", "The Land Bank reviews purchase applications.")],
+            "tags": ["land bank vacant lot", "application required"],
+        })
+    return rows
+
+
+def glynn_brunswick_landbank(fetch, now, warn):
+    rows = parse_glynn_landbank(fetch.text(GLYNN_SALE))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+KING_SURPLUS = "https://kingcounty.gov/en/dept/executive-services/buildings-property/facilities-management/real-estate-services/sales"
+KING_ASSESSOR = "https://blue.kingcounty.com/Assessor/eRealProperty/Detail.aspx"
+
+
+def parse_king_surplus(page):
+    section = re.search(r"<h2\b[^>]*>\s*Surplus Property\s*</h2>(.*?)</div>", page, re.I | re.S)
+    if not section:
+        raise StructureError("King County's surplus sales section changed")
+    paragraphs = re.findall(r"<p\b[^>]*>(.*?)</p>", section[1], re.I | re.S)
+    rows = []
+    for i, paragraph in enumerate(paragraphs[:-4]):
+        if clean(paragraph) != "Vacant Land":
+            continue
+        pid = re.fullmatch(r"Parcel Number (\d{6}-\d{4})", clean(paragraphs[i + 1]))
+        price = re.fullmatch(r"\$([\d,]+(?:\.\d{2})?)", clean(paragraphs[i + 4]))
+        address = clean(paragraphs[i + 2])
+        if not pid or not price or not address:
+            continue
+        rows.append((pid[1], address, number(price[1])))
+    return rows
+
+
+def king_county_surplus(fetch, now, warn):
+    rows = []
+    for pid, address, price in parse_king_surplus(fetch.text(KING_SURPLUS)):
+        assessor = KING_ASSESSOR + "?ParcelNbr=" + pid.replace("-", "")
+        acreage = re.search(r"\bAcres\s+([\d.]+)\b", clean(fetch.text(assessor)))
+        rows.append({
+            "id": "wa-king-surplus-" + slug(pid), "source": "king-county-current-surplus",
+            "title": "King County parcel %s (vacant surplus land)" % pid,
+            "state": "WA", "county": "King", "locality": "", "apn": pid,
+            "acres": number(acreage[1]) if acreage else None, "price": price, "price_kind": "cash",
+            "offering": "sale", "status": "listed", "deadline": None, "url": KING_SURPLUS, "address": address,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Vacant land offered for sale by King County", "="),
+                      fact("price", "$%s asking price" % "{:,.2f}".format(price), "="),
+                      fact("parcel_number", pid, assessor)],
+            "tags": ["county surplus land", "vacant lot"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+CALTRANS_LAND = "https://dot.ca.gov/programs/right-of-way/excess-lands-properties-for-sale"
+
+
+def parse_caltrans_brochure(brochure, url, now):
+    from zoneinfo import ZoneInfo
+
+    text = " ".join(brochure.split())
+    identifying_parcel = re.search(r"\bDATA SHEET\s+DD\s+(\d{4,6}-\d{2}-\d{2})\b", text)
+    if not identifying_parcel:
+        return None
+    data_sheet = text[identifying_parcel.end():]
+    price = re.search(r"\bMINIMUM BID\s+\$([\d,]+(?:\.\d{2})?)\b", data_sheet)
+    location = re.search(r"\bLOCATION\s+([^$]{1,160}?)\s*-\s*Google Maps\s+SIZE\b", data_sheet)
+    area = re.search(r"\bTotal\s+([\d,]+(?:\.\d+)?)\s*(?:\+/-\s*)?sf\.", data_sheet, re.I)
+    county = re.search(r"\bPROPERTY\s+Unimproved vacant lot\..{0,400}?\bin ([A-Za-z][A-Za-z .'-]+) County\.", data_sheet)
+    cutoff = re.search(r"Submittal Deadline\s*[–-]\s*\w+,\s+([A-Za-z]+ \d+, \d{4}),\s+by\s+(\d{1,2}:\d{2} [AP]M)\s+\(Pacific", text)
+    if not all((price, location, county, cutoff)):
+        return None
+    deadline = datetime.datetime.strptime(" ".join(cutoff.groups()), "%B %d, %Y %I:%M %p").replace(
+        tzinfo=ZoneInfo("America/Los_Angeles")).astimezone(datetime.timezone.utc)
+    if deadline <= now:
+        return None
+    pid, address, county_name = identifying_parcel[1], location[1], county[1]
+    sqft = number(area[1]) if area else None
+    bid = number(price[1])
+    return {
+        "id": "ca-caltrans-" + slug(pid), "source": "caltrans-surplus",
+        "title": "%s, %s County (Caltrans sealed bid)" % (address, county_name),
+        "state": "CA", "county": county_name, "locality": "", "apn": "", "address": address,
+        "acres": round(sqft / 43560, 4) if sqft else None, "price": bid, "price_kind": "min_bid",
+        "offering": "auction", "status": "auction_open", "deadline": deadline.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": url, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "Unimproved vacant lot offered by sealed bid", "="),
+                  fact("parcel_number", "Caltrans file DD " + pid, "=")],
+        "tags": ["state surplus land", "sealed bid"],
+    }
+
+
+def caltrans_surplus(fetch, now, warn):
+    page = fetch.text(CALTRANS_LAND)
+    if "Auction Brochure/Information" not in page:
+        raise StructureError("Caltrans excess lands sale table changed")
+    rows = []
+    for raw in re.findall(r"<tr\b[^>]*>(.*?)</tr>", page, re.I | re.S):
+        if not re.search(r"\b(?:unimproved vacant land|vacant lot)\b", clean(raw), re.I):
+            continue
+        link = re.search(r'<a\b[^>]+\bhref="([^"]+\.pdf)"', raw, re.I)
+        if not link:
+            continue
+        url = urllib.parse.urljoin(CALTRANS_LAND, html.unescape(link[1]))
+        if urllib.parse.urlsplit(url).hostname != "dot.ca.gov":
+            continue
+        row = parse_caltrans_brochure(pdf_text(fetch, url, extraction_mode="plain"), url, now)
+        if row:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -5213,8 +5425,8 @@ SOURCES = [
      "url": SHAWNEE_KS_URL, "state": "KS", "run": shawnee_ks,
      "about": "County-owned vacant parcels for sale in Shawnee County, Kansas with published fixed sale prices and GIS outlines."},
     {"id": "wilmington-de", "name": "City of Wilmington Land Bank Side-Lot Parcels", "agency": "City of Wilmington, Delaware",
-     "url": WILMINGTON_DE_URL, "state": "DE", "run": wilmington_de,
-     "about": "Land Bank side-lot parcels in Wilmington, Delaware with GIS outlines and acreage."},
+     "url": WILMINGTON_DE_URL, "state": "DE", "run": wilmington_de, "historical_only": True,
+     "about": "The Wilmington Neighborhood Conservancy Land Bank states that its current sale process is on hold."},
     {"id": "hartford-ct", "name": "City of Hartford City-Owned Vacant Lots", "agency": "City of Hartford, Connecticut",
      "url": HARTFORD_CT_URL, "state": "CT", "run": hartford_ct, "historical_only": True,
      "about": "This city ownership map needs a match to a current sale notice."},
@@ -5344,12 +5556,37 @@ SOURCES = [
      "agency": "Muncie Land Bank", "url": MUNCIE_VACANT, "state": "IN",
      "run": muncie_landbank, "requires_sale_match": True,
      "about": "Active vacant land auctions with an open bid form, a future deadline, and a published minimum bid."},
+    {"id": "harris-county-tax-sales", "name": "Harris County tax auctions for unimproved land",
+     "agency": "Harris County Tax Assessor-Collector", "url": HARRIS_SALE, "state": "TX",
+     "run": harris_county_tax_sales, "requires_sale_match": True, "timezone": "America/Chicago",
+     "about": "County sale cards marked For Sale, matched to vacant HCAD land classes with zero recorded building and improvement value."},
+    {"id": "glynn-brunswick-landbank", "name": "Glynn-Brunswick available land bank lots",
+     "agency": "Glynn-Brunswick Land Bank Authority", "url": GLYNN_SALE, "state": "GA",
+     "run": glynn_brunswick_landbank, "requires_sale_match": True,
+     "about": "Priced vacant lots published as available. Properties under foreclosure or containing structures are excluded."},
+    {"id": "king-county-current-surplus", "name": "King County current vacant surplus sale notices",
+     "agency": "King County Real Estate Services", "url": KING_SURPLUS, "state": "WA",
+     "run": king_county_surplus, "requires_sale_match": True,
+     "about": "Vacant parcels with published asking prices on the county's current surplus sale page."},
+    {"id": "caltrans-surplus", "name": "Caltrans unimproved land auctions",
+     "agency": "California Department of Transportation", "url": CALTRANS_LAND, "state": "CA",
+     "run": caltrans_surplus, "requires_sale_match": True,
+     "about": "Current sealed-bid land auction brochures with a published minimum bid and a future bid deadline."},
 ]
 NOT_CARRIED = [
+    ("Macon-Bibb Land Bank inventory", "https://maconlandbank.org/available-inventory/",
+     "The sale page identifies the official price, but robots.txt disallows the table endpoint that contains the individual properties."),
+    ("Shelby County, Cook County, Metro Atlanta, Waterbury and Greater Syracuse land bank portals",
+     "https://www.shelbycountytrustee.com/198/Shelby-County-Land-Bank",
+     "The linked listing portals could not serve their robots.txt files over HTTPS. Browse the public agency links directly."),
+    ("Omaha and Birmingham Land Bank portal maps", "https://omahalandbank.org/property-sales/",
+     "The linked listing portals returned HTML instead of crawler rules at their robots.txt endpoints."),
+    ("Gadsden Land Bank catalog", "https://www.gadsdenlandbank.org/",
+     "The catalog is excluded by the official site's robots.txt."),
+    ("Onslow County public surplus land", "https://www.onslowcountync.gov/DocumentCenter/View/6669/SURPLUS-LAND-FOR-WEBSITE-",
+     "Automated reads are skipped because the agency's robots.txt returned HTTP 403."),
     ("BuyIntoBmore and Dallas Land Bank public portals", "https://buyintobmore.baltimorecity.gov/",
      "Automated reads skipped because both listing portals returned HTML instead of crawler rules at their robots.txt endpoints."),
-    ("Greater Syracuse Land Bank property search", "https://syracuselandbank.org/properties/",
-     "The linked listing portal could not serve its robots.txt over HTTPS. Browse the published property search directly."),
     ("Kenai Peninsula Borough land sales", "https://www.kpb.us/landmgt/landsales",
      "Automated reads are skipped because the official robots.txt endpoint returned HTML instead of crawler rules."),
     ("Arizona DOT and Arizona State Land Department sales", "https://azdot.gov/business/right-way-properties/vacant-land-and-commercial-properties-sale",

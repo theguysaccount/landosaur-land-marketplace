@@ -394,7 +394,7 @@ class Site(object):
             '<td class="col-ours">Built-in free federal Parcel X-Ray (USGS LiDAR slope, FEMA flood &amp; hazard risk, USFWS wetlands, USDA soil/bedrock depth, Census roads, USGS public lands, NASA solar, 3,115-county USDA/FHFA benchmarks); excludes previous-owner PII for privacy.</td>'
             '<td>Relies on broker-entered descriptions and photos; buyers run FEMA flood, wetland, soil, and zoning checks externally.</td>'
             '<td>Listing summaries with select map overlays; buyers verify soils, wetlands, and county zoning outside the listing.</td>'
-            '<td>Broker descriptions and aerial maps; no built-in 9-agency federal GIS screening workbench.</td>'
+            '<td>Broker descriptions and aerial maps; no built-in federal GIS and electric utility screening workbench.</td>'
             '<td>Parcel outline and third-party flood/fire summary; limited rural soil/septic, wetland, and BLM/Forest adjacency data.</td></tr>'
             '<tr><th scope="row">Direct buyer/seller inquiry &amp; open data flow</th>'
             '<td class="col-ours">Direct link to official government bidding/application pages, on-site offers/bids for direct listings, turnkey Land Agent desk, plus open CSV/JSON downloads, Atom feeds, and <code>/api/search/</code>.</td>'
@@ -404,7 +404,7 @@ class Site(object):
             '<td>&ldquo;Contact agent&rdquo; form routed to buyer/Premier agents or listing brokers; closed MLS data terms.</td></tr>'
             '</tbody></table></div>'
             '<p class="small">Marketplace features reflect publicly documented product models as of November 2026; verify current terms directly with each platform. '
-            '<a href="%s" data-vital-event="tool_used">Run a free 9-agency Parcel X-Ray →</a> · <a href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20) →</a></p>'
+            '<a href="%s" data-vital-event="tool_used">Run a free Parcel X-Ray →</a> · <a href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20) →</a></p>'
             '</section>'
         ) % (
             "{:,}".format(active_count), agency_count, state_count,
@@ -415,7 +415,7 @@ class Site(object):
         return (
             '<section><h2>How Landosaur works</h2><ul class="notes">'
             '<li><strong>Official public sources + direct listings.</strong> City, county, state trust, and tax-sale feeds across %d states plus 50-state direct owner, real estate agent, and AI-agent listings. Zero scraped broker spam.</li>'
-            '<li><strong>9-agency GIS Parcel X-Ray.</strong> Instant USGS 3DEP terrain profile, FEMA flood &amp; disaster risk, USFWS wetlands, USDA soil/septic depth, Census roads, USGS public-land adjacency, NASA solar/hardiness, and USDA/FHFA county benchmarks.</li>'
+            '<li><strong>GIS &amp; Electric Utility Parcel X-Ray.</strong> Instant USGS 3DEP terrain profile, FEMA flood &amp; disaster risk, USFWS wetlands, USDA soil/septic depth, Census roads, USGS public-land adjacency, NASA solar and USDA hardiness, EIA electric utilities, and USDA/FHFA county benchmarks.</li>'
             '<li><strong>Clear Buy It Now vs. Auction bidding.</strong> Filter fixed-price Buy It Now parcels separately from auctions; bid or reserve direct listings on-site and link directly to official portals for government parcels.</li>'
             '<li><strong>Two-sided Agent-native API &amp; Analyzer.</strong> Search %s+ parcels via <code>/api/search/</code>, save custom RSS/JSON alerts via <code>/api/alerts/</code>, publish any U.S. parcel in 60 seconds via <a href="%s">/list/</a> or a single AI agent API call, and model full all-in deal economics in the <a href="%s">Land Analyzer</a>.</li>'
             '</ul><p><a href="%s">Below-Market Deals</a> · <a href="%s">50-State Tax-Sale Atlas</a> · <a href="%s">All official sources</a> · <a href="%s">50-State Land Prices</a> · <a href="%s">Open Data &amp; RSS Feeds</a></p></section>'
@@ -470,7 +470,7 @@ class Site(object):
         body = [
             '<section class="hero-shell"><div class="hero"><div class="hero-left">'
             '<img src="%s" alt="" width="76" height="76" class="mascot"><div>'
-            '<div class="eyebrow">All 50 States Live · Open Land Database, Data Atlas &amp; Land Agent</div>'
+            '<div class="eyebrow">Official Land Listings · 50-State Data Atlas &amp; Land Agent</div>'
             '<h1>Find, X-Ray, and acquire land in all 50 states</h1>'
             '<p class="lede">%s</p></div></div>'
             '<div class="hero-cta-group">'
@@ -480,10 +480,10 @@ class Site(object):
             '</div></div>'
             '<div class="hero-stats">'
             '<span class="stat-pill"><strong>%s</strong> active parcels</span>'
-            '<span class="stat-pill"><strong>%d/50</strong> U.S. states live</span>'
+            '<span class="stat-pill"><strong>%d/50</strong> states with active listings</span>'
             '<span class="stat-pill"><strong>%d</strong> official agencies</span>'
             '<span class="stat-pill"><strong>3,115</strong> county benchmarks</span>'
-            '<span class="stat-pill"><strong>9</strong> live federal X-Ray APIs</span>'
+            '<span class="stat-pill"><strong>10</strong> Parcel X-Ray data layers</span>'
             '<span class="stat-pill">Updated <strong>%s</strong></span>'
             '</div></section>' % (
                 self.u("/assets/mascot.png"), lede, self.u("/services/"), self.u("/land-atlas/"), self.u("/list/"),
@@ -826,7 +826,7 @@ class Site(object):
             '<article class="info-card service-card" data-select-service="listed_acquisition" style="cursor:pointer">'
             '<div class="eyebrow">$20 Start + 10% Transfer Fee</div>'
             '<h3>Buy &amp; Transfer Listed Public Land</h3>'
-            '<p>Full hands-free acquisition for any fixed-price, OTC, or surplus government parcel in our 50-state database—application prep, payment routing, and deed recording.</p>'
+            '<p>Full hands-free acquisition for any fixed-price, OTC, or surplus government parcel in our public-agency catalog—application prep, payment routing, and deed recording.</p>'
             '<span class="card-link">Select Listed Acquisition →</span></article>'
 
             '<article class="info-card service-card" data-select-service="unlisted_outreach" style="cursor:pointer">'
@@ -955,8 +955,9 @@ class Site(object):
             '<div id="atlas-app">',
             '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · %s county benchmarks · Live Public Supply</div>' % (m.latest_year, county_count),
             '<h1>U.S. Land Data Atlas &amp; Interactive Market Charts</h1>',
-            '<p class="lede">The open reference atlas for American land—combining <strong>%s live public-agency parcels across all %d U.S. states (%d agencies)</strong>, <strong>%d years of official USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks across <strong>%s counties and county equivalents</strong>.</p>' % (
-                "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}), m.latest_year - m.first_year + 1, m.first_year, m.latest_year, county_count),
+            '<p class="lede">Explore <strong>%s active public-agency parcels in %d states (%d agencies)</strong>, <strong>%d years of USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks for <strong>%s counties and county equivalents across 50 states</strong>.</p>' % (
+                "{:,}".format(len(cur)), self.benchmarks["state_count"], self.benchmarks["agency_count"],
+                m.latest_year - m.first_year + 1, m.first_year, m.latest_year, county_count),
 
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>Live Official Database</span><strong>%s</strong><small>Active parcels · %d/50 states · %d agencies</small></div>'
@@ -964,7 +965,7 @@ class Site(object):
             '<div class="kpi-card"><span>%d–%d Nominal Growth</span><strong>%s</strong><small>U.S. agricultural land appreciation</small></div>'
             '<div class="kpi-card"><span>County Benchmark Coverage</span><strong>%s</strong><small>Searchable &amp; CSV-ready</small></div>'
             '</div>' % (
-                "{:,}".format(len(cur)), len(cat.states), len({cat.sources[r["source"]]["agency"] for r in cur}),
+                "{:,}".format(len(cur)), self.benchmarks["state_count"], self.benchmarks["agency_count"],
                 m.latest_year, esc(market_mod.usd(us.get("farm_real_estate"))),
                 y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)), county_count,
             ),
@@ -1250,7 +1251,7 @@ class Site(object):
             crumbs,
             '<div class="eyebrow">Live Algorithmic Deal Scanner · Official Agency Prices vs. 3,115 County USDA/FHFA Benchmarks</div>',
             '<h1>Below-Market Land Deals &amp; Rural Bargain Scanner</h1>',
-            '<p class="lede">Every active priced public-agency parcel across our <strong>%s-parcel, 50-state database</strong> ranked strictly against official USDA/FHFA county land values—zero inflated estimates, zero broker markup. Click <strong>Land Agent ($20)</strong> on any parcel to have our desk verify title/liens and handle the full transfer (+10%% only on close).</p>' % "{:,}".format(len(cur)),
+            '<p class="lede">Compare qualifying priced parcels from the <strong>%s active public-agency listings</strong> against USDA/FHFA county benchmarks. Hire Land Agent for $20 to check title and liens and coordinate transfer, with a 10%% fee due only at closing.</p>' % "{:,}".format(len(cur)),
 
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>Below County Benchmark</span><strong>%s</strong><small>Active parcels ≥0.2 ac priced ≥15%% under avg</small></div>'
@@ -1264,7 +1265,7 @@ class Site(object):
                 (esc(money(lowest_ppa)) + "/ac") if lowest_ppa else "–",
             ),
 
-            '<p class="notice" style="margin:14px 0 22px"><strong>Verify before buying:</strong> Deep discounts on public-agency, tax-sale, and surplus land often reflect minimum opening bids, redemption windows, missing utilities, wetlands, or access limits. Run our free <a href="%s">9-agency Parcel X-Ray</a> on any tract—or pay $20 for our <a href="%s">Land Agent desk</a> to audit liens, access, and deed transfer before you commit.</p>' % (self.u("/xray/"), self.u("/services/")),
+            '<p class="notice" style="margin:14px 0 22px"><strong>Verify before buying:</strong> Deep discounts on public-agency, tax-sale, and surplus land often reflect minimum opening bids, redemption windows, missing utilities, wetlands, or access limits. Run our free <a href="%s">Parcel X-Ray</a> on any tract—or pay $20 for our <a href="%s">Land Agent desk</a> to audit liens, access, and deed transfer before you commit.</p>' % (self.u("/xray/"), self.u("/services/")),
 
             '<section id="below-benchmark"><h2>Biggest Discounts vs. County USDA/FHFA Benchmark (Top %d)</h2>'
             '<p class="small">Active parcels of at least 0.2 acres with published official prices or minimum bids at least 15%% below their county (or state) USDA/FHFA benchmark per acre. <a href="%s">Filter all on interactive map →</a></p>%s</section>' % (
@@ -1326,7 +1327,7 @@ class Site(object):
             ("What is a Redeemable Tax Deed state?",
              "In Redeemable Deed states like Texas, Georgia, Tennessee, Connecticut, and South Carolina, the winning auction bidder receives a tax deed immediately after the sale, but the delinquent taxpayer retains a post-sale statutory right to buy the property back within a set window (e.g., 180 days to 2 years in Texas) by paying the bid amount plus a steep statutory penalty (25%–50% in Texas, 20% in Georgia)."),
             ("Can Landosaur handle county tax-sale registration, verification, and deed transfer for me?",
-             "Yes. Our Land Agent Concierge ($20 initiation + transparent 10% fee only upon closed acquisition) runs 9-agency GIS due diligence, verifies county tax/lien/redemption status, coordinates bidding or agency paperwork, and works with a licensed local title company or closing attorney wherever state law requires one."),
+             "Yes. Our Land Agent Concierge ($20 initiation + transparent 10% fee only upon closed acquisition) checks GIS and electric utility records, verifies county tax/lien/redemption status, coordinates bidding or agency paperwork, and works with a licensed local title company or closing attorney wherever state law requires one."),
             ("Are tax-sale deeds automatically free and clear of mortgages and liens?",
              "Not always. While judicial tax foreclosures often wipe junior mortgages and private judgments, federal IRS tax liens (which carry a 120-day federal redemption right), municipal utility/demolition liens, HOA assessments, and unnotified parties can survive a tax sale—and many buyers need a quiet-title action or tax-title certification before title insurance will issue."),
         ]
@@ -1338,15 +1339,15 @@ class Site(object):
             '<div id="tax-sales-app">',
             '<div class="eyebrow">All 50 U.S. States · Statutory Tax-Deed, Tax-Lien &amp; Redemption Reference</div>',
             '<h1>50-State U.S. Tax-Sale, Tax-Deed &amp; Redemption Law Atlas</h1>',
-            '<p class="lede">Every U.S. state\'s property tax-sale structure in one interactive map and filterable directory—paired directly with <strong>%s live public-agency parcels across all 50 states</strong> and our <a href="%s">$20 Tax-Sale &amp; Auction Concierge</a>.</p>' % (
-                "{:,}".format(len(cat.current())), self.u("/services/?service=auction_proxy")),
+            '<p class="lede">Explore the tax-sale rules for all 50 states and browse <strong>%s active public-agency parcels in %d states</strong>. The <a href="%s">$20 Tax-Sale &amp; Auction Concierge</a> can help research a parcel and prepare a bid.</p>' % (
+                "{:,}".format(len(cat.current())), self.benchmarks["state_count"], self.u("/services/?service=auction_proxy")),
 
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>Tax Deed States</span><strong>%d</strong><small>Direct ownership deed sold at auction/OTC</small></div>'
             '<div class="kpi-card"><span>Tax Lien States</span><strong>%d</strong><small>Lien certificates with statutory interest/foreclosure</small></div>'
             '<div class="kpi-card"><span>Redeemable Deed / Hybrid</span><strong>%d</strong><small>Deed issued with post-sale statutory redemption</small></div>'
-            '<div class="kpi-card"><span>Live Official Parcels</span><strong>%s</strong><small>Active listings tracked across all 50/50 states</small></div>'
-            '</div>' % (n_deed, n_lien, n_red, "{:,}".format(len(cat.current()))),
+            '<div class="kpi-card"><span>Live Official Parcels</span><strong>%s</strong><small>Active listings in %d states</small></div>'
+            '</div>' % (n_deed, n_lien, n_red, "{:,}".format(len(cat.current())), self.benchmarks["state_count"]),
 
             '<section class="dossier-card" style="margin-top:20px">'
             '<div class="eyebrow">Interactive 50-State Tax-Sale Cartogram</div>'
@@ -1392,6 +1393,8 @@ class Site(object):
         active_cards = []
         for st in sorted(cat.states.values(), key=lambda s: -sum(1 for r in s["listings"] if r["available"])):
             avail = [r for r in st["listings"] if r["available"]]
+            if not avail:
+                continue
             priced = [r["price"] for r in avail if r.get("price") is not None]
             low = money(min(priced)) if priced else "Offer / app"
             active_cards.append(
@@ -1421,9 +1424,9 @@ class Site(object):
             crumbs,
             '<h1>Official Government, Tax-Sale &amp; Rural Land for Sale by State</h1>',
             '<p class="lede">Browse <strong>%s</strong> live public-agency parcels across %d tracked states, or inspect %d USDA/FHFA land prices per acre and county benchmarks across all 50 states.</p>' % (
-                "{:,}".format(len(cur)), len(cat.states), self.market.latest_year),
-            '<section><h2>States with live official inventories (%d tracked)</h2><div class="card-grid">%s</div></section>' % (
-                len(cat.states), "".join(active_cards)),
+                "{:,}".format(len(cur)), self.benchmarks["state_count"], self.market.latest_year),
+            '<section><h2>States with live official inventory (%d)</h2><div class="card-grid">%s</div></section>' % (
+                self.benchmarks["state_count"], "".join(active_cards)),
             '<section><h2>All 50 U.S. states — listings &amp; %d land price benchmarks</h2>'
             '<p class="small">States with live agency connectors open directly to active listings; all other states open their %d USDA &amp; county land price reference hub.</p>'
             '<div class="state-grid">%s</div></section>' % (self.market.latest_year, self.market.latest_year, "".join(all_tiles)),
@@ -2405,7 +2408,7 @@ class Site(object):
             ) % (json.dumps(parcel, separators=(",", ":")).replace("</", "<\\/"), diligence_links, la, lo)
             xray_section = (
                 '<section class="xray-section" id="parcel-xray">'
-                '<div class="xray-header"><div><div class="eyebrow">Live 9-Agency Federal Screening</div>'
+                '<div class="xray-header"><div><div class="eyebrow">Federal GIS &amp; EIA Utility Screening</div>'
                 '<h2>Live Parcel X-Ray, Terrain Profile &amp; Land Potential</h2></div>'
                 '<a class="button ghost sm no-print" href="%s#lat=%.5f&amp;lon=%.5f">Open full-screen X-Ray →</a></div>'
                 '<div id="parcel-xray-body"><p class="small">Loading live USGS 9-point terrain cross-section, FEMA flood &amp; wildfire risk, USFWS wetlands, USDA soil/bedrock depth, Census road proximity, USGS public lands, and NASA solar/climate data…</p></div>'

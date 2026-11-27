@@ -2,7 +2,7 @@
   "name": "Landosaur Agent-First Land Marketplace API",
   "version": "1.1.0",
   "base_url": "https://landosaur.com",
-  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search 30,000+ official + direct land parcels across all 50 U.S. states, create custom saved-search Atom/JSON alerts, publish Buy It Now or Auction land listings in all 50 states, run 9-agency Federal Parcel X-Rays, hire Landosaur Land Agent ($20 + 10%), and record live auction bids or Buy It Now reservations.",
+  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search current official and direct land listings with filters for all 50 states, create custom saved-search Atom/JSON alerts, publish Buy It Now or Auction land listings in all 50 states, run federal GIS and electric utility Parcel X-Rays, hire Landosaur Land Agent ($20 + 10%), and record live auction bids or Buy It Now reservations.",
   "endpoints": {
     "search_land": {
       "method": "GET",
@@ -25,7 +25,7 @@
       "method": "POST",
       "url": "https://landosaur.com/api/listings/",
       "content_type": "application/json",
-      "auto_enrichment": "Landosaur automatically runs a 9-agency Federal Parcel X-Ray (USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood zone, FEMA National Risk Index wildfire/hazards, USFWS wetlands, USDA SSURGO soil/bedrock, Census TIGERweb nearest road/highway, USGS PAD-US public lands, NASA solar & USDA hardiness zone, and 3,115-county USDA/FHFA land value benchmark) from lat/lon or location.",
+      "auto_enrichment": "Landosaur automatically runs a Parcel X-Ray (USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood zone, FEMA National Risk Index wildfire/hazards, USFWS wetlands, USDA SSURGO soil/bedrock, Census TIGERweb nearest road/highway, USGS PAD-US public lands, NASA solar & USDA hardiness zone, EIA electric utilities, and 3,115-county USDA/FHFA land value benchmark) from lat/lon or location.",
       "required_fields": {
         "lat_lon_or_location": "Provide lat & lon (US bounds) OR location/address string",
         "acres": "Positive number of acres",

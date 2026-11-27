@@ -97,6 +97,51 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertIsNone(adapters.parse_muncie_lot(page, url, NOW + datetime.timedelta(days=45)))
         self.assertIsNone(adapters.parse_muncie_lot(page.replace("Vacant Lot", "House"), url, NOW))
 
+    def test_harris_matches_active_sale_cards_to_unimproved_appraisal_records(self):
+        template = ('<li class="row listing"><div class="{status}-small"></div>'
+                    'Account#: <strong>{pid}</strong> Minimum Bid: $<strong>2,500.10</strong></li>')
+        page = '<h2>Sale Date: December 01, 2026</h2><ul class="list-listings-2">'
+        page += template.format(status="For Sale", pid="0000000000001")
+        page += template.format(status="Cancelled", pid="0000000000002")
+        page += template.format(status="For Sale", pid="0000000000003")
+        date, notices = adapters.parse_harris_notices(page + "</ul>")
+        land = {"state_class": "C1", "bld_value": 0, "impr_value": 0, "acreage_1": 0.4}
+        features = [{"attributes": dict(land, acct_num="0000000000001")},
+                    {"attributes": dict(land, acct_num="0000000000002")},
+                    {"attributes": dict(land, acct_num="0000000000003", impr_value=15000)}]
+        rows = adapters.parse_harris_sale(date, notices, features)
+        self.assertEqual([(r["apn"], r["price"], r["acres"], r["offer_close_date"]) for r in rows],
+                         [("0000000000001", 2500.10, 0.4, "2026-12-01")])
+
+    def test_glynn_filters_out_structures_and_properties_in_foreclosure(self):
+        page = ('<main><h2>Available Properties</h2>'
+                '<div><h3>1 Test St</h3><h4>$5,000</h4><p>A 0.17 acre wooded lot.</p></div>'
+                '<div><h3>2 Test St</h3><h4>$6,000</h4><p>A 0.25 acre vacant lot in foreclosure.</p></div>'
+                '<div><h3>3 Test St</h3><h4>$7,000</h4><p>A 0.4 acre lot with a structure.</p></div></main>')
+        rows = adapters.parse_glynn_landbank(page)
+        self.assertEqual([(r["address"], r["price"], r["price_kind"]) for r in rows], [("1 Test St", 5000, "application")])
+
+    def test_king_uses_only_vacant_land_in_the_surplus_section(self):
+        page = ('<h2>Tax Title Property</h2><p>Vacant Land</p><p>Parcel Number 987654-3210</p>'
+                '<div><h2>Surplus Property</h2><p>Former mills</p><p>Parcel Number 111111-1111</p>'
+                '<p>Vacant Land</p><p><a>Parcel Number 123456-7890</a></p>'
+                '<p>312 Way SE</p><p>Near Enumclaw</p><p>$225,000</p></div>')
+        self.assertEqual(adapters.parse_king_surplus(page), [("123456-7890", "312 Way SE", 225000)])
+
+    def test_caltrans_uses_lot_location_from_the_data_sheet_only(self):
+        brochure = (
+            "PROPERTY LOCATION State Route 99 - Google Maps CONTACT Private Test Contact "
+            "DATA SHEET DD 84998-01-01 PROPERTY Unimproved vacant lot. Access is in Madera County. "
+            "LOCATION State Route 99 - Google Maps SIZE Total 22,930+/- sf. ft. "
+            "MINIMUM BID $500.00 Submittal Deadline – Friday, January 15, 2027, by 3:00 PM (Pacific Standard Time)."
+        )
+        url = "https://dot.ca.gov/auction.pdf"
+        row = adapters.parse_caltrans_brochure(brochure, url, NOW)
+        self.assertEqual((row["address"], row["price"], row["deadline"], row["county"]),
+                         ("State Route 99", 500, "2027-01-15T23:00:00Z", "Madera"))
+        self.assertNotIn("Private Test Contact", repr(row))
+        self.assertIsNone(adapters.parse_caltrans_brochure(brochure, url, NOW + datetime.timedelta(days=100)))
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,

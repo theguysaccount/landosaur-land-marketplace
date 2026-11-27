@@ -97,8 +97,8 @@ try {
     await page.goto(base + "/list/");
     assert(await page.eval("!!document.getElementById('direct-list-form') && !!document.getElementById('agent-prompt-text')"), "missing /list/ form or AI agent prompt");
     if (!isLocal) {
-      const xrayOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/xray/?lat=34.8689&lon=-111.7614").then(r => r.ok ? r.json() : null).then(d => !!(d && d.usgs && d.usgs.elevation_ft > 0 && d.usgs.profile_we && d.usgs.profile_we.length >= 3 && d.roads && d.public_land && d.hazards && d.county && d.county.fips))`);
-      assert(xrayOk, "live /api/xray/ failed or returned incomplete 9-agency federal GIS data");
+      const xrayOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/xray/?lat=34.8689&lon=-111.7614").then(r => r.ok ? r.json() : null).then(d => !!(d && d.usgs && d.usgs.elevation_ft > 0 && d.usgs.profile_we && d.usgs.profile_we.length >= 3 && d.roads && d.public_land && d.hazards && d.county && d.county.fips && d.utility?.providers?.some(p => p.residential_usd_per_kwh > 0)))`);
+      assert(xrayOk, "live /api/xray/ failed or returned incomplete federal GIS or EIA utility data");
       const listOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/listings/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.storage_configured === true && Array.isArray(d.listings)))`);
       assert(listOk, "live /api/listings/ Blob store check failed");
     }

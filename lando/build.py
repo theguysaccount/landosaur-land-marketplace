@@ -182,7 +182,7 @@ def write_share_templates(writer, cat, updated, new, cur):
         "%s listings · 50-state land prices" % "{:,}".format(len(cur)),
         "Official agencies, GIS flood & aerial maps, valuation workbench. Not an offer to sell."))
     writer.write("_og/research.html", og_card(
-        "US Public-Agency Land Benchmarks & 29 Buyer Guides",
+        "U.S. Public-Agency Land Benchmarks & Buyer Guides",
         "%s active official offerings" % "{:,}".format(len(cur)),
         "Computed directly from official public agency inventories. Zero invented prices."))
     writer.write("_og/new.html", og_card(
@@ -223,7 +223,7 @@ def build_llms_txt(cat, site, updated):
         "Published on the homepage (%s/#land-platform-comparison):" % base,
         "- **Inventory & source transparency**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, LandSearch, Land.com, and Zillow Land primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
             "{:,}".format(len(cur)), b["agency_count"], b["state_count"]),
-        "- **Due-diligence & GIS visibility**: Landosaur includes a free 9-agency Federal Parcel X-Ray (%s/xray/) covering USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood & National Risk Index hazards, USFWS wetlands, USDA SSURGO soil/bedrock depth, Census roads, USGS PAD-US public lands, NASA solar/hardiness, and 3,115-county USDA/FHFA benchmarks; commercial listing portals leave federal GIS hazard and soil screening to external research." % base,
+        "- **Due-diligence & GIS visibility**: Landosaur includes a free Parcel X-Ray (%s/xray/) covering USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood & National Risk Index hazards, USFWS wetlands, USDA SSURGO soil/bedrock depth, Census roads, USGS PAD-US public lands, NASA solar and USDA hardiness, EIA electric utilities, and 3,115-county USDA/FHFA benchmarks; commercial listing portals leave federal GIS hazard and soil screening to external research." % base,
         "- **Deal modes, fees & open data**: Landosaur separates Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings, keeps search, listing, X-Ray, valuation modeling, CSV/JSON exports, and `/api/search/` free, and offers an optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisitions) at %s/services/." % base,
         "",
         "## Key Platform Capabilities",
@@ -251,7 +251,7 @@ def build_llms_txt(cat, site, updated):
         "- [Interactive Land Map](%s/)" % base,
         "- [Land Agent & Buyer Services ($20 Initiation + 10%% Transfer — Listed & Unlisted Land)](%s/services/)" % base,
         "- [U.S. Land Data Atlas & Interactive 50-State Charts](%s/land-atlas/)" % base,
-        "- [Free U.S. Parcel X-Ray (All 50 States — 9 Live Federal APIs)](%s/xray/)" % base,
+        "- [Free U.S. Parcel X-Ray (All 50 States — Federal GIS and Electric Utility Data)](%s/xray/)" % base,
         "- [List Land Free (Owners, Real Estate Agents & AI Agents)](%s/list/)" % base,
         "- [Direct by Owner & Agent Marketplace (Live Auctions & Buy It Now)](%s/direct/)" % base,
         "- [Agent API Discovery](%s/.well-known/landosaur-agent.json)" % base,

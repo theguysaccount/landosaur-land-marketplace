@@ -51,7 +51,7 @@
     syncSeller();
   }
 
-  // Interactive Drop-a-Pin Satellite Map + Instant Auto-Fill from 9-Agency Federal X-Ray
+  // Interactive Drop-a-Pin Satellite Map + Instant Auto-Fill from Parcel X-Ray
   var mapEl = document.getElementById("list-pin-map");
   var previewEl = document.getElementById("list-xray-preview");
   var pin = null, map = null;
@@ -80,7 +80,7 @@
     }
     if (runPreview && previewEl) {
       previewEl.hidden = false;
-      previewEl.innerHTML = "<p class='small'>Running live 9-agency Federal Parcel X-Ray to auto-fill county, flood zone, elevation, soil &amp; road proximity…</p>";
+      previewEl.innerHTML = "<p class='small'>Running live Parcel X-Ray to auto-fill county, flood zone, elevation, soil &amp; road proximity…</p>";
       fetch(base + "/api/xray/?lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon))
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
@@ -122,8 +122,8 @@
   if (form) {
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Enriching with 9 Federal APIs & publishing…"; }
-      if (outBox) { outBox.hidden = false; outBox.className = "callout"; outBox.textContent = "Running live 9-agency Federal Parcel X-Ray and publishing your listing…"; }
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Checking federal data and publishing…"; }
+      if (outBox) { outBox.hidden = false; outBox.className = "callout"; outBox.textContent = "Running live Parcel X-Ray and publishing your listing…"; }
       var payload = {
         sale_mode: form.sale_mode.value,
         seller_type: form.seller_type.value,
@@ -168,7 +168,7 @@
           var localHref = base + "/direct/?id=" + encodeURIComponent(d.id);
           outBox.innerHTML =
             "<h3>Listing Published Live on Landosaur!</h3>" +
-            "<p>Your parcel is now live on the map and searchable nationwide, enriched with 9 live federal GIS signals.</p>" +
+            "<p>Your parcel is now live on the map and searchable nationwide, with available federal land data.</p>" +
             "<p><a class='button' href='" + localHref + "'>View Live Listing, Bidding &amp; Seller Console →</a></p>" +
             "<p class='small' style='margin-top:10px'><strong>Save your Seller Edit Token</strong> (needed to update price, add checkout URL, mark sold, or withdraw on the listing page or via API): <code>" + d.edit_token + "</code></p>";
           form.reset();

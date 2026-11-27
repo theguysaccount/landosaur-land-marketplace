@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T08:31:25Z",
+ "checked": "2026-11-27T09:10:06Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -55,6 +55,24 @@
    "upstream_total": 374,
    "url": "https://www.albanycountylandbank.org/"
   },
+  "albany-wy": {
+   "about": "Unimproved vacant land parcels on the Albany County, Wyoming 2026 tax-sale roll with GIS outlines and acreage.",
+   "agency": "Albany County, Wyoming",
+   "complete": true,
+   "count": 15,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Albany County 2026 Tax Sale Vacant Land",
+   "notes": [],
+   "ok": true,
+   "read": 15,
+   "seconds": 1,
+   "state": "WY",
+   "upstream_total": 15,
+   "url": "https://www.albanycountywy.gov/"
+  },
   "arkansas-cosl": {
    "about": "Tax-forfeited parcels offered after the county tax-sale auctions. Prices are minimum bids; terms and redemption rules apply.",
    "agency": "Arkansas Commissioner of State Lands",
@@ -74,6 +92,24 @@
    "state": "AR",
    "upstream_total": 2650,
    "url": "https://auction.cosl.org/Auctions/ListingsView"
+  },
+  "auburn-me": {
+   "about": "Unimproved undeveloped, commercial, and industrial municipal parcels in Auburn, Maine with GIS outlines and acreage.",
+   "agency": "City of Auburn, Maine",
+   "complete": true,
+   "count": 77,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "City of Auburn Unimproved Municipal Land",
+   "notes": [],
+   "ok": true,
+   "read": 77,
+   "seconds": 1,
+   "state": "ME",
+   "upstream_total": 77,
+   "url": "https://www.auburnmaine.gov/"
   },
   "baltimore-vacant": {
    "about": "City-owned vacant parcels in Baltimore with GIS outlines, zoning codes, and lot dimensions.",
@@ -147,6 +183,24 @@
    "upstream_total": 27,
    "url": "https://www.bluefieldwv.gov/"
   },
+  "boise-id": {
+   "about": "City of Boise Community Development (COMDEV) land parcels in Ada County, Idaho with GIS outlines and acreage.",
+   "agency": "City of Boise, Idaho",
+   "complete": true,
+   "count": 40,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "City of Boise Housing & Community Development Land",
+   "notes": [],
+   "ok": true,
+   "read": 40,
+   "seconds": 0,
+   "state": "ID",
+   "upstream_total": 40,
+   "url": "https://www.cityofboise.org/"
+  },
   "boston-ma": {
    "about": "City-owned parcels held by Boston's Mayor's Office of Housing (MOH) with GIS outlines and lot area.",
    "agency": "City of Boston Mayor's Office of Housing",
@@ -182,6 +236,24 @@
    "state": "FL",
    "upstream_total": 57,
    "url": "https://web.bcpa.net/BcpaClient/#/Record-Search"
+  },
+  "burleigh-nd": {
+   "about": "Unimproved county- and city-owned vacant parcels in Burleigh County / Bismarck, North Dakota with GIS outlines and acreage.",
+   "agency": "Burleigh County / City of Bismarck, North Dakota",
+   "complete": true,
+   "count": 66,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Burleigh County / Bismarck Vacant Public Land",
+   "notes": [],
+   "ok": true,
+   "read": 66,
+   "seconds": 2,
+   "state": "ND",
+   "upstream_total": 66,
+   "url": "https://www.burleigh.gov/"
   },
   "california-dgs": {
    "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines.",
@@ -327,6 +399,24 @@
    "upstream_total": 37,
    "url": "https://www.hartfordct.gov/"
   },
+  "horry-sc": {
+   "about": "Delinquent tax-sale land parcels in Horry County, South Carolina with published opening bid amounts and GIS outlines.",
+   "agency": "Horry County, South Carolina",
+   "complete": true,
+   "count": 189,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Horry County Delinquent Tax Sale Land",
+   "notes": [],
+   "ok": true,
+   "read": 189,
+   "seconds": 1,
+   "state": "SC",
+   "upstream_total": 189,
+   "url": "https://www.horrycountysc.gov/"
+  },
   "kansas-city-landbank": {
    "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context.",
    "agency": "Land Bank of Kansas City, Missouri",
@@ -399,6 +489,24 @@
    "upstream_total": 48,
    "url": "https://lascruces.gov/"
   },
+  "lasvegas-nv": {
+   "about": "Vacant city-owned real estate parcels in Las Vegas / Clark County Open Data with coordinates and parcel numbers.",
+   "agency": "City of Las Vegas, Nevada",
+   "complete": true,
+   "count": 30,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "City of Las Vegas Vacant Real Estate Assets",
+   "notes": [],
+   "ok": true,
+   "read": 30,
+   "seconds": 0,
+   "state": "NV",
+   "upstream_total": 30,
+   "url": "https://www.lasvegasnevada.gov/"
+  },
   "louisville-landbank": {
    "about": "Available vacant landbank lots in Louisville/Jefferson County with GIS polygon boundaries and official buildability flags.",
    "agency": "Louisville Metro Landbank Authority",
@@ -434,6 +542,24 @@
    "state": "OH",
    "upstream_total": 1466,
    "url": "https://lucascountylandbank.org/"
+  },
+  "maui-hi": {
+   "about": "Vacant government-owned parcels in West Maui with Tax Map Key (TMK) IDs, acreage, and GIS outlines.",
+   "agency": "County of Maui / Hawaii Public Lands",
+   "complete": true,
+   "count": 79,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "West Maui Vacant Government-Owned Parcels",
+   "notes": [],
+   "ok": true,
+   "read": 79,
+   "seconds": 2,
+   "state": "HI",
+   "upstream_total": 79,
+   "url": "https://www.mauicounty.gov/"
   },
   "memphis-tn": {
    "about": "Surplus vacant city properties in Memphis / Shelby County, Tennessee with GIS outlines and zoning.",
@@ -471,6 +597,24 @@
    "upstream_total": 8,
    "url": "https://www.millelacs.mn.gov/"
   },
+  "montana-cad": {
+   "about": "County- and city-owned vacant land tracts across Montana from the Montana Statewide Cadastral Framework with GIS outlines and acreage.",
+   "agency": "Montana State Library / County Treasurers",
+   "complete": true,
+   "count": 180,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Montana Statewide County & City Vacant Land",
+   "notes": [],
+   "ok": true,
+   "read": 180,
+   "seconds": 3,
+   "state": "MT",
+   "upstream_total": 180,
+   "url": "https://dnrc.mt.gov/"
+  },
   "montgomery-al": {
    "about": "Public surplus city-owned properties in Montgomery, Alabama with coordinates and acreage.",
    "agency": "City of Montgomery, Alabama",
@@ -489,6 +633,24 @@
    "upstream_total": 77,
    "url": "https://www.montgomeryal.gov/"
   },
+  "ms-surplus": {
+   "about": "Unimproved surplus parcels from the State of Mississippi GIS inventory with parcel outlines and acreage.",
+   "agency": "State of Mississippi Public Lands",
+   "complete": true,
+   "count": 229,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "State of Mississippi Surplus Land",
+   "notes": [],
+   "ok": true,
+   "read": 229,
+   "seconds": 1,
+   "state": "MS",
+   "upstream_total": 229,
+   "url": "https://www.sos.ms.gov/public-lands"
+  },
   "navajo-county-az": {
    "about": "Rural Arizona back-tax auction parcels with GIS outlines and direct official auction links.",
    "agency": "Navajo County, Arizona",
@@ -506,6 +668,24 @@
    "state": "AZ",
    "upstream_total": 191,
    "url": "https://www.navajocountyaz.gov/"
+  },
+  "odot-ok": {
+   "about": "Statewide surplus highway right-of-way parcels across Oklahoma counties with GIS outlines, acreage, and PLSS descriptions.",
+   "agency": "Oklahoma Department of Transportation",
+   "complete": true,
+   "count": 157,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Oklahoma DOT Statewide Surplus Property",
+   "notes": [],
+   "ok": true,
+   "read": 157,
+   "seconds": 1,
+   "state": "OK",
+   "upstream_total": 157,
+   "url": "https://oklahoma.gov/odot.html"
   },
   "omaha-ne": {
    "about": "City-owned unimproved vacant land parcels in Omaha / Douglas County, Nebraska with GIS outlines and acreage.",
@@ -579,6 +759,24 @@
    "upstream_total": 18,
    "url": "https://ottertailcounty.gov/"
   },
+  "peterborough-nh": {
+   "about": "Tax-deeded municipal land parcels in Peterborough, New Hampshire with GIS outlines, acreage, and zoning.",
+   "agency": "Town of Peterborough, New Hampshire",
+   "complete": true,
+   "count": 10,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Town of Peterborough Tax-Deeded Lands",
+   "notes": [],
+   "ok": true,
+   "read": 10,
+   "seconds": 1,
+   "state": "NH",
+   "upstream_total": 10,
+   "url": "https://www.peterboroughnh.gov/"
+  },
   "pittsburgh-vacant": {
    "about": "Vacant city-owned parcels marked Available for Sale (Public Sale) in Pittsburgh's daily open-data inventory, with zoning, square footage, and coordinates.",
    "agency": "City of Pittsburgh / Pittsburgh Land Bank",
@@ -596,6 +794,42 @@
    "state": "PA",
    "upstream_total": 2769,
    "url": "https://pghlandbank.org/"
+  },
+  "portland-me": {
+   "about": "Municipal land bank and vacant land parcels in Portland, Maine with GIS outlines.",
+   "agency": "City of Portland, Maine",
+   "complete": true,
+   "count": 146,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "City of Portland Municipal Land Bank",
+   "notes": [],
+   "ok": true,
+   "read": 146,
+   "seconds": 1,
+   "state": "ME",
+   "upstream_total": 146,
+   "url": "https://www.portlandmaine.gov/"
+  },
+  "portland-or": {
+   "about": "Vacant city-owned parcels in Portland / Multnomah County from PortlandMaps Open Data with GIS outlines.",
+   "agency": "City of Portland, Oregon",
+   "complete": true,
+   "count": 40,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "City of Portland Vacant City-Owned Land",
+   "notes": [],
+   "ok": true,
+   "read": 40,
+   "seconds": 2,
+   "state": "OR",
+   "upstream_total": 40,
+   "url": "https://www.portland.gov/"
   },
   "richmond-va": {
    "about": "City-owned vacant surplus properties in Richmond, Virginia with GIS outlines and lot area.",
@@ -687,6 +921,24 @@
    "upstream_total": 3,
    "url": "https://connect.udot.utah.gov/business/surplus-property/"
   },
+  "vcgi-vt": {
+   "about": "Unimproved town- and city-owned parcels across Vermont from VCGI Statewide Standardized Parcel Data with SPAN IDs and GIS outlines.",
+   "agency": "Vermont Center for Geographic Information (VCGI)",
+   "complete": true,
+   "count": 160,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "Vermont Statewide Municipal Vacant Land",
+   "notes": [],
+   "ok": true,
+   "read": 160,
+   "seconds": 1,
+   "state": "VT",
+   "upstream_total": 160,
+   "url": "https://vcgi.vermont.gov/"
+  },
   "warwick-ri": {
    "about": "Tax-title vacant residential and developable land parcels in Warwick, Rhode Island with GIS outlines and acreage.",
    "agency": "City of Warwick, Rhode Island",
@@ -776,6 +1028,24 @@
    "state": "KS",
    "upstream_total": 350,
    "url": "https://www.wycokck.org/"
+  },
+  "yankton-sd": {
+   "about": "Vacant city-owned parcels in Yankton, South Dakota with GIS outlines and legal descriptions.",
+   "agency": "City of Yankton, South Dakota",
+   "complete": true,
+   "count": 140,
+   "failures": 0,
+   "last_attempt": "2026-11-27T09:10:06Z",
+   "last_success": "2026-11-27T09:10:06Z",
+   "message": "",
+   "name": "City of Yankton Vacant Municipal Lots",
+   "notes": [],
+   "ok": true,
+   "read": 140,
+   "seconds": 0,
+   "state": "SD",
+   "upstream_total": 140,
+   "url": "https://www.cityofyankton.org/"
   }
  }
 }

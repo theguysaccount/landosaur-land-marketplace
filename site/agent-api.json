@@ -2,7 +2,7 @@
   "name": "Landosaur Agent-First Land Marketplace API",
   "version": "1.1.0",
   "base_url": "https://landosaur.com",
-  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search 23,500+ official + direct land parcels across 36+ live states, publish Buy It Now or Auction land listings in all 50 U.S. states, run 9-agency Federal Parcel X-Rays, and record live auction bids or Buy It Now reservations.",
+  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search 25,000+ official + direct land parcels across all 50 U.S. states, publish Buy It Now or Auction land listings in all 50 states, run 9-agency Federal Parcel X-Rays, and record live auction bids or Buy It Now reservations.",
   "endpoints": {
     "search_land": {
       "method": "GET",

@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/publish.sh                       # Test, build, guard, E2E, push, deploy to landosaur.com
-#   ./scripts/publish.sh --refresh             # Live-crawl all 43 official agencies first, then verify & deploy
+#   ./scripts/publish.sh --refresh             # Live-crawl all 58 official agencies (50 states) first, then verify & deploy
 #   ./scripts/publish.sh --refresh-only a,b    # Crawl only specific agency IDs, then verify & deploy
 #   ./scripts/publish.sh --skip-e2e            # Skip headless Chrome E2E (still runs unit tests + check_dist)
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally without pushing or deploying
@@ -45,7 +45,7 @@ if [ "$REFRESH" -eq 1 ]; then
     python3 -m lando.refresh --land-index
   fi
 else
-  echo "==> 2/7 Skipping live crawl (pass --refresh to crawl all 43 agencies)"
+  echo "==> 2/7 Skipping live crawl (pass --refresh to crawl all 58 agencies across 50 states)"
 fi
 
 echo "==> 3/7 Building static site into dist/"

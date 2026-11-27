@@ -397,6 +397,27 @@ class Phase2AdaptersTest(unittest.TestCase):
         }], lambda w: None)
         self.assertEqual((len(ma), ma[0]["state"]), (1, "MA"))
 
+    def test_phase6_final_14_states_all_50(self):
+        wy = adapters.parse_albany_wy_features([{"attributes": {"pidn": "20760610002700", "grossacres": 31.69, "landval": 79550, "totalval": 79550, "accttype": "Res Vacant Land"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        ok = adapters.parse_odot_ok_features([{"attributes": {"OBJECTID_1": 1, "Name": "F-410", "Parcel": 27, "County": "MUSKOGEE", "Acres_Remaining": 4.74}, "geometry": {"rings": self.RING}}], lambda w: None)
+        ms = adapters.parse_ms_surplus_features([{"attributes": {"DPIN": "006110000329", "acres_gis": 0.24, "tv_imp": " ", "loc_num": "193", "loc_alpha": "CRESTON AVE"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        sc = adapters.parse_horry_sc_features([{"attributes": {"PIN_1": "44314040003", "Description": "SEAVIEW PLACE LT 4 BL 1", "FLC_Bid_Amount": "$14,691.11"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        or_r = adapters.parse_portland_or_features([{"attributes": {"STATE_ID": "11E25BA23600", "SITEADDR": "123 MAIN ST", "BLDGSQFT": 0, "A_T_ACRES": 0.25}, "geometry": {"rings": self.RING}}], lambda w: None)
+        hi = adapters.parse_maui_hi_features([{"attributes": {"TMK_txt": "246007003", "BldgValue": 0, "TaxAcres": 0.43, "Jurisdiction": "Maui County"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        nv = adapters.parse_lasvegas_nv_features([{"attributes": {"PARCEL": "13805501015", "LOCATION": "RED COACH & DURANGO", "IMPROVEMENTNAME": "VACANT SITE", "LAT": 36.245, "LONG": -115.279}, "geometry": {}}], lambda w: None)
+        nh = adapters.parse_peterborough_nh_features([{"attributes": {"PIN": "R011-041-000", "CLASSIFY": "Tax", "LOCATION": "Off Scott Mitchell", "ACREAGE": 22.34}, "geometry": {"rings": self.RING}}], lambda w: None)
+        sd = adapters.parse_yankton_sd_features([{"attributes": {"PARCEL_ID": "78.790.033.250", "Location": "MAIN ST", "LEGALS": "LTS 12 BLK 33"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        nd = adapters.parse_burleigh_nd_features([{"attributes": {"PID": "38-138-80-60-01-013", "Acres": "0.19", "Legal": "MEADOW VIEW BLK 1", "Commercial_Building_Market": 0, "Residential_Building_Market": 0}, "geometry": {"rings": self.RING}}], lambda w: None)
+        vt = adapters.parse_vcgi_vt_features([{"attributes": {"SPAN": "033-010-11098", "TOWN": "BARNET", "E911ADDR": "259 CHURCH ST", "DESCPROP": "VACANT LOT", "ACRESGL": 0.59, "IMPRV_LV": 0}, "geometry": {"rings": self.RING}}], lambda w: None)
+        mt = adapters.parse_montana_cad_features([{"attributes": {"PARCELID": "36236214102010000", "CountyName": "Judith Basin", "GISAcres": 319.3, "TotalBuildingValue": 0}, "geometry": {"rings": self.RING}}], lambda w: None)
+        id_r = adapters.parse_boise_id_features([{"attributes": {"PARCEL": "R0096000100", "DEPT": "COMDEV", "ACRES": 0.25, "PROPADDNUM": "100", "PROPSTNM": "MAIN", "PROPSTTYPE": "ST"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        me1 = adapters.parse_auburn_me_features([{"attributes": {"ParcelID": "135-100", "Address": "355 Old Danville Rd", "LandUse": "UNDEVELOPED", "Acreage": 0.34, "BldgValue": 0}, "geometry": {"rings": self.RING}}], lambda w: None)
+        me2 = adapters.parse_portland_me_features([{"attributes": {"OBJECTID": 1, "Parcel_ID": "001 A001001", "Land_Use": "LAND BANKS"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        states = [x[0]["state"] for x in (wy, ok, ms, sc, or_r, hi, nv, nh, sd, nd, vt, mt, id_r, me1, me2)]
+        self.assertEqual(states, ["WY", "OK", "MS", "SC", "OR", "HI", "NV", "NH", "SD", "ND", "VT", "MT", "ID", "ME", "ME"])
+        self.assertEqual(sc[0]["price_kind"], "min_bid")
+        self.assertEqual(len({s["state"] for s in adapters.SOURCES}), 50)
+
 
 class GeometryTest(unittest.TestCase):
     def test_centroid_and_outline_link(self):

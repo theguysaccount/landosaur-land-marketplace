@@ -59,17 +59,77 @@
     renderCards(lastShown);
   }
 
-  var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
-  var topo = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map" });
-  var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map: imagery" });
+  var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxNativeZoom: 19, maxZoom: 20, attribution: "&copy; OpenStreetMap contributors" });
+  var topo = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 16, maxZoom: 20, attribution: "USGS The National Map" });
+  var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 16, maxZoom: 20, attribution: "USGS The National Map: imagery" });
   var fema = L.tileLayer.wms("https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer", {
-    layers: "28", format: "image/png", transparent: true, opacity: 0.45, attribution: "FEMA NFHL"
+    layers: "28", format: "image/png", transparent: true, opacity: 0.45, maxZoom: 20, attribution: "FEMA NFHL"
   });
-  var map = L.map(box, { preferCanvas: true, scrollWheelZoom: false, layers: [streets] }).setView([38.5, -96], 4);
-  L.control.layers({ "Streets": streets, "USGS Topo": topo, "USGS Aerial": aerial }, { "FEMA Flood Zones": fema }).addTo(map);
-  map.on("focus", function () { map.scrollWheelZoom.enable(); });
-  var cluster = L.markerClusterGroup({ chunkedLoading: true, showCoverageOnHover: false, maxClusterRadius: 48 });
+  var map = L.map(box, {
+    preferCanvas: true,
+    scrollWheelZoom: true,
+    doubleClickZoom: true,
+    touchZoom: true,
+    boxZoom: true,
+    minZoom: 3,
+    maxZoom: 20,
+    wheelPxPerZoomLevel: 80,
+    layers: [streets]
+  }).setView([38.5, -96], 4);
+  L.control.layers({ "Streets": streets, "USGS Aerial": aerial, "USGS Topo": topo }, { "FEMA Flood Zones": fema }).addTo(map);
+  var cluster = L.markerClusterGroup({
+    chunkedLoading: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: true,
+    spiderfyOnMaxZoom: true,
+    disableClusteringAtZoom: 14,
+    maxClusterRadius: 42
+  });
   map.addLayer(cluster);
+  var lastBounds = [];
+
+  // Custom map toolbar control: Fit Results + Expand Full-Screen Map
+  var MapTools = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd: function () {
+      var wrap = L.DomUtil.create("div", "leaflet-bar lando-map-tools");
+      L.DomEvent.disableClickPropagation(wrap);
+      L.DomEvent.disableScrollPropagation(wrap);
+      var fitBtn = L.DomUtil.create("a", "lando-tool-btn", wrap);
+      fitBtn.href = "#";
+      fitBtn.title = "Zoom to fit matching parcels";
+      fitBtn.setAttribute("aria-label", "Zoom to fit matching parcels");
+      fitBtn.textContent = "Fit";
+      fitBtn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        if (lastBounds.length) {
+          map.fitBounds(L.latLngBounds(lastBounds), { padding: [26, 26], maxZoom: 16 });
+        } else {
+          map.setView([38.5, -96], 4);
+        }
+      });
+      var fsBtn = L.DomUtil.create("a", "lando-tool-btn", wrap);
+      fsBtn.href = "#";
+      fsBtn.title = "Expand map full screen";
+      fsBtn.setAttribute("aria-label", "Toggle full-screen map");
+      fsBtn.textContent = "⛶";
+      var col = box.closest(".explorer-map-col") || box;
+      function toggleFs(forceOff) {
+        var on = forceOff ? false : !col.classList.contains("map-fullscreen");
+        col.classList.toggle("map-fullscreen", on);
+        document.body.classList.toggle("map-fs-open", on);
+        fsBtn.textContent = on ? "✕" : "⛶";
+        fsBtn.title = on ? "Exit full-screen map (Esc)" : "Expand map full screen";
+        setTimeout(function () { map.invalidateSize(); }, 80);
+      }
+      fsBtn.addEventListener("click", function (ev) { ev.preventDefault(); toggleFs(false); });
+      document.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape" && col.classList.contains("map-fullscreen")) toggleFs(true);
+      });
+      return wrap;
+    }
+  });
+  map.addControl(new MapTools());
 
   function hashState() {
     var out = {};
@@ -196,7 +256,7 @@
         var zBtn = el("button", "chip-btn", "Zoom");
         zBtn.type = "button";
         zBtn.addEventListener("click", function () {
-          map.flyTo([r[1], r[2]], 16, { duration: 0.65 });
+          map.flyTo([r[1], r[2]], 17, { duration: 0.65 });
           L.popup({ maxWidth: 280 }).setLatLng([r[1], r[2]]).setContent(popup(r)).openOn(map);
         });
         acts.appendChild(zBtn);
@@ -274,12 +334,13 @@
       }
     }
     syncModeTabs(f.kind, modeCounts);
+    lastBounds = bounds;
     if (!skipFit) {
       cluster.clearLayers();
       cluster.addLayers(markers);
     }
     if ((first || f.state !== apply.lastState) && !skipFit) {
-      if (f.state && bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [20, 20], maxZoom: 13, animate: false });
+      if (f.state && bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [22, 22], maxZoom: 15, animate: false });
       else map.setView([39, -96], 4, { animate: false });
     }
     first = false;

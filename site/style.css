@@ -509,6 +509,26 @@ code {
   background: var(--surface);
 }
 .explorer-map-col { position: relative; min-width: 0; }
+.explorer-map-col.map-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  background: var(--paper);
+}
+.explorer-map-col.map-fullscreen .map { height: 100vh; height: 100dvh; }
+body.map-fs-open { overflow: hidden; }
+.lando-map-tools a.lando-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 32px;
+  font: 700 12px var(--font-sans);
+  color: #0f261b;
+  background: #ffffff;
+  text-decoration: none;
+}
+.lando-map-tools a.lando-tool-btn:hover { background: #eef8de; color: #166534; }
 .map { height: 630px; width: 100%; background: var(--lime-soft); z-index: 0; }
 .map.small { height: 420px; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-xs); }
 .map.xray-tall { height: 480px; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }

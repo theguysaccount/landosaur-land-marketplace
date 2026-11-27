@@ -102,6 +102,21 @@ NOTES = {  # long notes repeated on many listings are stored by key and expanded
     "memphis_tn": "Surplus vacant parcel published by the City of Memphis GIS. Confirm surplus purchase eligibility, zoning, and closing terms on memphistn.gov.",
     "warwick_ri": "Vacant tax-title land parcel published in City of Warwick GIS. Confirm redemption status, tax-title auction schedule, and zoning directly with the City of Warwick.",
     "boston_ma": "City-owned parcel under the care and custody of the City of Boston Mayor's Office of Housing (MOH). Confirm RFP/disposition availability and development guidelines on boston.gov.",
+    "albany_wy": "Vacant land parcel on the Albany County, Wyoming 2026 Tax Sale list (unimproved land where land value equals total assessed value). Confirm redemption cutoff, tax certificate rules, and auction schedule on albanycountywy.gov.",
+    "odot_ok": "Current surplus right-of-way land published in Oklahoma DOT GIS across Oklahoma counties. Confirm sealed-bid/auction schedule, access, and quitclaim deed terms on oklahoma.gov.",
+    "ms_surplus": "Unimproved parcel in the State of Mississippi Surplus GIS inventory. Confirm tax-forfeited / surplus purchase application rules and redemption status on sos.ms.gov.",
+    "horry_sc": "Delinquent tax-sale parcel published by Horry County GIS with listed opening bid figure (condos/HPR units excluded). Confirm auction date, redemption period, and bidding registration on horrycountysc.gov.",
+    "portland_or": "Vacant parcel held by the City of Portland (zero building area, vacant land use) in PortlandMaps Open Data. Confirm surplus disposition eligibility and zoning on portland.gov.",
+    "maui_hi": "Vacant government-owned parcel in West Maui GIS (zero building value). Confirm public disposition or lease/sale availability with Maui County or Hawaii DLNR.",
+    "lasvegas_nv": "Vacant city-owned real estate parcel in City of Las Vegas Open Data GIS. Confirm surplus auction or redevelopment RFP availability on lasvegasnevada.gov.",
+    "peterborough_nh": "Tax-deeded land parcel held by the Town of Peterborough, New Hampshire. Confirm municipal tax-deed auction schedule and conservation restrictions on peterboroughnh.gov.",
+    "yankton_sd": "Vacant city-owned lot in City of Yankton Open Data GIS (parks excluded). Confirm surplus land sale process and zoning on cityofyankton.org.",
+    "burleigh_nd": "Unimproved county- or city-owned parcel in Burleigh County / Bismarck GIS (zero building market value). Confirm tax-deed sale schedule and special assessments on burleigh.gov.",
+    "vcgi_vt": "Unimproved municipal parcel from Vermont Center for Geographic Information (VCGI) statewide parcel data (parks, schools, and utilities excluded). Confirm town/city tax-sale or surplus status with the local town clerk.",
+    "montana_cad": "County- or city-owned vacant land parcel from the Montana State Library Statewide Cadastral Framework. Confirm county tax-deed auction availability, access, and deed terms directly with the county treasurer.",
+    "boise_id": "City of Boise Housing & Community Development (COMDEV) parcel in City of Boise Open Data GIS. Confirm RFP/disposition status and zoning on cityofboise.org.",
+    "auburn_me": "Unimproved municipal land parcel (undeveloped, commercial, industrial, or house-lot land) in City of Auburn GIS. Confirm tax-acquired or surplus sale status on auburnmaine.gov.",
+    "portland_me": "Municipal land bank / vacant land parcel published in City of Portland, Maine GIS. Confirm surplus sale or redevelopment RFP availability on portlandmaine.gov.",
     "gis_area": "Area computed from the agency's GIS parcel outline (not a legal survey).",
 }
 
@@ -3181,6 +3196,851 @@ def boston_ma(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+# ------------------------------------------------------------------------------------------- Phase 6: Final 14 States -> 50/50 ALL U.S. STATES (WY, OK, MS, SC, OR, HI, NV, NH, SD, ND, VT, MT, ID, ME)
+
+# --- Albany County 2026 Tax Sale Vacant Land (WY) ---
+ALBANY_WY_GIS = "https://services1.arcgis.com/EmwrhKkmuQhTATzU/arcgis/rest/services/2026TAXSALEPROP_1ST/FeatureServer/0/query"
+ALBANY_WY_URL = "https://www.albanycountywy.gov/"
+
+
+def parse_albany_wy_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("pidn") or a.get("accountno") or a.get("FID") or ""))
+        if not pid or pid in seen:
+            continue
+        lv, tv = number(a.get("landval")), number(a.get("totalval"))
+        if lv and tv and tv > lv * 1.05:
+            continue
+        seen.add(pid)
+        addr = clean(str(a.get("st_address") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("grossacres")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        desc = clean(str(a.get("descript") or ""))
+        atype = clean(str(a.get("accttype") or ""))
+        facts = [
+            fact("availability", "Albany County 2026 Tax Sale (unimproved land)", ALBANY_WY_URL, "albany_wy"),
+            fact("parcel_number", pid, ALBANY_WY_URL),
+            fact("price", "Confirm delinquent tax sale amount & redemption rules with Albany County Treasurer", ALBANY_WY_URL, "albany_wy"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, ALBANY_WY_URL))
+        if atype:
+            facts.append(fact("property_class", atype, ALBANY_WY_URL))
+        if desc:
+            facts.append(fact("legal_description", desc[:180], ALBANY_WY_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "wy-alb-%s" % slug(pid), "source": "albany-wy",
+            "title": "%s, Albany County (Wyoming tax-sale land)" % title_loc,
+            "state": "WY", "county": "Albany", "locality": "Laramie", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": ALBANY_WY_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax sale auction", "vacant land", "wyoming"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(ALBANY_WY_GIS, "pidn='%s'" % pid.replace("'", "''")), "Albany County WY GIS")
+        out.append(row)
+    return out
+
+
+def albany_wy(fetch, now, warn):
+    feats = _arcgis_query(fetch, ALBANY_WY_GIS, "landval=totalval AND landval>0",
+                          "FID,pidn,accountno,st_address,descript,grossacres,landval,totalval,accttype", 200)
+    rows = parse_albany_wy_features(feats, warn)
+    if len(rows) < 3:
+        raise StructureError("only %d Albany County WY parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Oklahoma DOT Statewide Surplus Property (OK) ---
+ODOT_OK_GIS = "https://services6.arcgis.com/RBtoEUQ2lmN0K3GY/arcgis/rest/services/Surplus_Property_Public_Current/FeatureServer/0/query"
+ODOT_OK_URL = "https://oklahoma.gov/odot.html"
+
+
+def parse_odot_ok_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        oid = clean(str(a.get("OBJECTID_1") or ""))
+        name = clean(str(a.get("Name") or a.get("Job_Piece_Vault") or ""))
+        pnum = clean(str(a.get("Parcel") or ""))
+        pid = ("%s-%s" % (name, pnum)).strip("-") or ("ODOT-" + oid)
+        if not pid or pid in seen:
+            pid = "%s-%s" % (pid, oid)
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        county = clean(str(a.get("County") or "Oklahoma")).title() or "Oklahoma"
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("Acres_Remaining")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        plss_bits = [x for x in (
+            ("Sec %s" % clean(str(a.get("Section")))) if a.get("Section") else "",
+            ("Twp %s" % clean(str(a.get("Township")))) if a.get("Township") else "",
+            ("Rng %s" % clean(str(a.get("Range")))) if a.get("Range") else "",
+        ) if x]
+        facts = [
+            fact("availability", "Oklahoma DOT Current Surplus Property", ODOT_OK_URL, "odot_ok"),
+            fact("parcel_number", pid, ODOT_OK_URL),
+            fact("price", "Sealed-bid / public surplus sale terms via Oklahoma DOT", ODOT_OK_URL, "odot_ok"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, ODOT_OK_URL))
+        if plss_bits:
+            facts.append(fact("legal_description", " ".join(plss_bits), ODOT_OK_URL))
+        row = {
+            "id": "ok-odot-%s" % slug(pid), "source": "odot-ok",
+            "title": "%s County ODOT surplus parcel %s (Oklahoma)" % (county, pid),
+            "state": "OK", "county": county, "locality": county, "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": ODOT_OK_URL,
+            "address": "", "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["state surplus land", "oklahoma"],
+        }
+        if rings and oid:
+            apply_geometry(row, rings, one_parcel_url(ODOT_OK_GIS, "OBJECTID_1=%s" % oid), "Oklahoma DOT GIS")
+        out.append(row)
+    return out
+
+
+def odot_ok(fetch, now, warn):
+    feats = _arcgis_query(fetch, ODOT_OK_GIS, "1=1",
+                          "OBJECTID_1,Job_Piece_Vault,Name,Parcel,County,Acres_Remaining,Section,Township,Range", 250)
+    rows = parse_odot_ok_features(feats, warn)
+    if len(rows) < 10:
+        raise StructureError("only %d ODOT OK surplus parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- State of Mississippi Surplus Land (MS) ---
+MS_SURPLUS_GIS = "https://services6.arcgis.com/rdiy8o2SBpQHoL4Q/arcgis/rest/services/State_Of_MS_Surplus/FeatureServer/0/query"
+MS_SURPLUS_URL = "https://www.sos.ms.gov/public-lands"
+
+
+def parse_ms_surplus_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("tv_imp")) or number(a.get("ass_imp")):
+            continue
+        pid = clean(str(a.get("DPIN") or a.get("PARCEL_F") or a.get("OBJECTID_12") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        snum = clean(str(a.get("loc_num") or ""))
+        snam = clean(str(a.get("loc_alpha") or "")).title()
+        addr = ("%s %s" % (snum, snam)).strip() if snam else ""
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("acres_gis")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "State of Mississippi Surplus Land Inventory", MS_SURPLUS_URL, "ms_surplus"),
+            fact("parcel_number", pid, MS_SURPLUS_URL),
+            fact("price", "Public lands purchase application via Mississippi Secretary of State", MS_SURPLUS_URL, "ms_surplus"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, MS_SURPLUS_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "ms-sur-%s" % slug(pid), "source": "ms-surplus",
+            "title": "%s, Hinds County (Mississippi state surplus land)" % title_loc,
+            "state": "MS", "county": "Hinds", "locality": "Jackson", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": MS_SURPLUS_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["state surplus land", "mississippi"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(MS_SURPLUS_GIS, "DPIN='%s'" % pid.replace("'", "''")), "Mississippi State Surplus GIS")
+        out.append(row)
+    return out
+
+
+def ms_surplus(fetch, now, warn):
+    feats = _arcgis_query(fetch, MS_SURPLUS_GIS, "acres_gis>=0.05",
+                          "OBJECTID_12,DPIN,PARCEL_F,acres_gis,tv_imp,ass_imp,loc_num,loc_alpha", 250, {"orderByFields": "acres_gis DESC"})
+    rows = parse_ms_surplus_features(feats, warn)
+    if len(rows) < 20:
+        raise StructureError("only %d MS surplus parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Horry County Delinquent Tax Sale Land (SC) ---
+HORRY_SC_GIS = "https://services1.arcgis.com/If0JkGr8ABreBTuS/arcgis/rest/services/DelinquentTaxParcels2025/FeatureServer/0/query"
+HORRY_SC_URL = "https://www.horrycountysc.gov/"
+SC_SKIP_WORDS = ("UNIT ", "CONDO", "HPR", "BLDG ", "APT ", "SUITE ", "VILLA ", "TIMESHAR", "INTERVAL", "WEEK ")
+
+
+def parse_horry_sc_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        desc = clean(str(a.get("Description") or ""))
+        u_desc = desc.upper()
+        if any(w in u_desc for w in SC_SKIP_WORDS):
+            continue
+        pin = clean(str(a.get("PIN_1") or a.get("Item_Number") or a.get("OBJECTID") or ""))
+        if not pin or pin in seen:
+            continue
+        seen.add(pin)
+        bid = number(a.get("FLC_Bid_Amount"))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings) if rings else None
+        facts = [
+            fact("availability", "Horry County Delinquent Tax Sale Parcel", HORRY_SC_URL, "horry_sc"),
+            fact("parcel_number", pin, HORRY_SC_URL),
+        ]
+        if bid:
+            facts.append(fact("price", "Opening / FLC bid $%s" % "{:,.2f}".format(bid), HORRY_SC_URL, "horry_sc"))
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, HORRY_SC_URL, "gis_area"))
+        if desc:
+            facts.append(fact("legal_description", desc[:180], HORRY_SC_URL))
+        row = {
+            "id": "sc-hor-%s" % slug(pin), "source": "horry-sc",
+            "title": "Horry County parcel %s (South Carolina tax-sale land)" % pin,
+            "state": "SC", "county": "Horry", "locality": "Conway", "apn": pin,
+            "acres": acres, "price": round(bid, 2) if bid else None,
+            "price_kind": "min_bid" if bid else "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": HORRY_SC_URL,
+            "address": "", "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax sale auction", "south carolina"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(HORRY_SC_GIS, "PIN_1='%s'" % pin.replace("'", "''")), "Horry County SC GIS")
+        out.append(row)
+    return out
+
+
+def horry_sc(fetch, now, warn):
+    feats = _arcgis_query(fetch, HORRY_SC_GIS, "1=1",
+                          "OBJECTID,Item_Number,PIN_1,Description,FLC_Bid_Amount", 400)
+    rows = parse_horry_sc_features(feats, warn)[:220]
+    if len(rows) < 20:
+        raise StructureError("only %d Horry County SC tax-sale parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Portland Vacant City-Owned Land (OR) ---
+PORTLAND_OR_GIS = "https://www.portlandmaps.com/od/rest/services/COP_OpenData_Property/MapServer/91/query"
+PORTLAND_OR_URL = "https://www.portland.gov/"
+
+
+def parse_portland_or_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("BLDGSQFT")):
+            continue
+        pid = clean(str(a.get("STATE_ID") or a.get("RNO") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        raw_addr = clean(str(a.get("SITEADDR") or ""))
+        addr = "" if ("no situs" in raw_addr.lower() or not raw_addr) else raw_addr.title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("A_T_ACRES")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        desc = clean(str(a.get("PRPCD_DESC") or ""))
+        facts = [
+            fact("availability", "City of Portland Vacant City-Owned Parcel", PORTLAND_OR_URL, "portland_or"),
+            fact("parcel_number", pid, PORTLAND_OR_URL),
+            fact("price", "Surplus property inquiry & disposition review via City of Portland", PORTLAND_OR_URL, "portland_or"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, PORTLAND_OR_URL))
+        if desc:
+            facts.append(fact("property_class", desc, PORTLAND_OR_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "or-pdx-%s" % slug(pid), "source": "portland-or",
+            "title": "%s, Portland (city-owned vacant land)" % title_loc,
+            "state": "OR", "county": "Multnomah", "locality": "Portland", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": PORTLAND_OR_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "oregon"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(PORTLAND_OR_GIS, "STATE_ID='%s'" % pid.replace("'", "''")), "PortlandMaps Open Data GIS")
+        out.append(row)
+    return out
+
+
+def portland_or(fetch, now, warn):
+    feats = _arcgis_query(fetch, PORTLAND_OR_GIS, "OWNER1 LIKE 'CITY OF PORTLAND%' AND (BLDGSQFT=0 OR BLDGSQFT IS NULL) AND LANDUSE='VAC'",
+                          "OBJECTID,STATE_ID,RNO,SITEADDR,PRPCD_DESC,BLDGSQFT,A_T_ACRES", 200)
+    rows = parse_portland_or_features(feats, warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Portland OR vacant parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Maui Vacant Government-Owned Parcels (HI) ---
+MAUI_HI_GIS = "https://services3.arcgis.com/fsrDo0QMPlK9CkZD/arcgis/rest/services/Vacant_Government_Owned_Parcels_in_West_Maui/FeatureServer/0/query"
+MAUI_HI_URL = "https://www.mauicounty.gov/"
+
+
+def parse_maui_hi_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("BldgValue")):
+            continue
+        tmk = clean(str(a.get("TMK_txt") or a.get("TMK") or a.get("OBJECTID") or ""))
+        if not tmk or tmk in seen:
+            continue
+        seen.add(tmk)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("TaxAcres")) or number(a.get("GISAcres")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        juris = clean(str(a.get("Jurisdiction") or "Maui County"))
+        facts = [
+            fact("availability", "Vacant Government-Owned Parcel (West Maui)", MAUI_HI_URL, "maui_hi"),
+            fact("parcel_number", "TMK " + tmk, MAUI_HI_URL),
+            fact("price", "Confirm public disposition / auction eligibility with Maui County or Hawaii DLNR", MAUI_HI_URL, "maui_hi"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, MAUI_HI_URL))
+        if juris:
+            facts.append(fact("jurisdiction", juris, MAUI_HI_URL))
+        row = {
+            "id": "hi-maui-%s" % slug(tmk), "source": "maui-hi",
+            "title": "West Maui TMK %s (vacant public land)" % tmk,
+            "state": "HI", "county": "Maui", "locality": "Lahaina", "apn": tmk,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": MAUI_HI_URL,
+            "address": "", "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["public vacant land", "hawaii"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(MAUI_HI_GIS, "TMK_txt='%s'" % tmk.replace("'", "''")), "Maui County HI GIS")
+        out.append(row)
+    return out
+
+
+def maui_hi(fetch, now, warn):
+    feats = _arcgis_query(fetch, MAUI_HI_GIS, "BldgValue=0 OR BldgValue IS NULL",
+                          "OBJECTID,TMK,TMK_txt,BldgValue,TaxAcres,GISAcres,Jurisdiction", 150)
+    rows = parse_maui_hi_features(feats, warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Maui HI vacant parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Las Vegas Vacant Real Estate Assets (NV) ---
+LASVEGAS_NV_GIS = "https://services1.arcgis.com/F1v0ufATbBQScMtY/arcgis/rest/services/CLV_Real_Estate_Assets_Open_Data/FeatureServer/0/query"
+LASVEGAS_NV_URL = "https://www.lasvegasnevada.gov/"
+
+
+def parse_lasvegas_nv_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if "vacant" not in clean(str(a.get("IMPROVEMENTNAME") or "")).lower():
+            continue
+        pid = clean(str(a.get("PARCEL") or a.get("ObjectId") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        loc = clean(str(a.get("LOCATION") or "")).title()
+        g = f.get("geometry") or {}
+        lat = lon = None
+        la = a.get("LAT") if a.get("LAT") is not None else g.get("y")
+        lo = a.get("LONG") if a.get("LONG") is not None else g.get("x")
+        try:
+            if la is not None and lo is not None:
+                fla, flo = float(la), float(lo)
+                if 35.8 <= fla <= 36.6 and -115.6 <= flo <= -114.7:
+                    lat, lon = round(fla, 6), round(flo, 6)
+        except (TypeError, ValueError):
+            pass
+        raw_ac = number(a.get("ACRES_1"))
+        acres = round(raw_ac, 4) if (raw_ac and 0.01 <= raw_ac <= 500) else None
+        facts = [
+            fact("availability", "City of Las Vegas Vacant Real Estate Asset", LASVEGAS_NV_URL, "lasvegas_nv"),
+            fact("parcel_number", pid, LASVEGAS_NV_URL),
+            fact("price", "Surplus auction / RFP terms via City of Las Vegas Real Estate", LASVEGAS_NV_URL, "lasvegas_nv"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, LASVEGAS_NV_URL))
+        title_loc = "%s (%s)" % (loc, pid) if loc else ("Parcel " + pid)
+        out.append({
+            "id": "nv-lv-%s" % slug(pid), "source": "lasvegas-nv",
+            "title": "%s, Las Vegas (city-owned vacant land)" % title_loc,
+            "state": "NV", "county": "Clark", "locality": "Las Vegas", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": LASVEGAS_NV_URL,
+            "address": loc, "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "nevada"],
+        })
+    return out
+
+
+def lasvegas_nv(fetch, now, warn):
+    feats = _arcgis_query(fetch, LASVEGAS_NV_GIS, "IMPROVEMENTNAME LIKE '%VACANT%'",
+                          "ObjectId,PARCEL,LOCATION,IMPROVEMENTNAME,ACRES_1,LAT,LONG", 150)
+    rows = parse_lasvegas_nv_features(feats, warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Las Vegas NV vacant parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Town of Peterborough Tax-Deeded Lands (NH) ---
+PETERBOROUGH_NH_GIS = "https://services1.arcgis.com/TBWWZRJoZeMDaqgb/arcgis/rest/services/Town_Owned_Lands/FeatureServer/0/query"
+PETERBOROUGH_NH_URL = "https://www.peterboroughnh.gov/"
+
+
+def parse_peterborough_nh_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if clean(str(a.get("CLASSIFY") or "")).lower() != "tax":
+            continue
+        pid = clean(str(a.get("PIN") or a.get("PENTAMATIO") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        loc = clean(str(a.get("LOCATION") or ""))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("ACREAGE")) or number(a.get("Acres")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        zoning = clean(str(a.get("ZONING") or ""))
+        facts = [
+            fact("availability", "Town of Peterborough Tax-Deeded Land", PETERBOROUGH_NH_URL, "peterborough_nh"),
+            fact("parcel_number", pid, PETERBOROUGH_NH_URL),
+            fact("price", "Confirm municipal tax-deed sale schedule with Town of Peterborough", PETERBOROUGH_NH_URL, "peterborough_nh"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, PETERBOROUGH_NH_URL))
+        if zoning:
+            facts.append(fact("zoning", zoning, PETERBOROUGH_NH_URL))
+        title_loc = "%s (%s)" % (loc, pid) if loc else ("Parcel " + pid)
+        row = {
+            "id": "nh-pbo-%s" % slug(pid), "source": "peterborough-nh",
+            "title": "%s, Peterborough (tax-deeded land)" % title_loc,
+            "state": "NH", "county": "Hillsborough", "locality": "Peterborough", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": PETERBOROUGH_NH_URL,
+            "address": loc, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax-deeded land", "new hampshire"] + (["zoned %s" % zoning] if zoning else []),
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(PETERBOROUGH_NH_GIS, "PIN='%s'" % pid.replace("'", "''")), "Town of Peterborough NH GIS")
+        out.append(row)
+    return out
+
+
+def peterborough_nh(fetch, now, warn):
+    feats = _arcgis_query(fetch, PETERBOROUGH_NH_GIS, "CLASSIFY='Tax'",
+                          "OBJECTID,PIN,PENTAMATIO,LOCATION,ACREAGE,Acres,CLASSIFY,ZONING", 100)
+    rows = parse_peterborough_nh_features(feats, warn)
+    if len(rows) < 3:
+        raise StructureError("only %d Peterborough NH tax-deeded parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Yankton Vacant Municipal Lots (SD) ---
+YANKTON_SD_GIS = "https://services3.arcgis.com/aVepqWph7Jkj1aWl/arcgis/rest/services/VacantLots/FeatureServer/0/query"
+YANKTON_SD_URL = "https://www.cityofyankton.org/"
+
+
+def parse_yankton_sd_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        loc = clean(str(a.get("Location") or ""))
+        leg = clean(str(a.get("LEGALS") or ""))
+        combo = (loc + " " + leg).upper()
+        if any(w in combo for w in ("PARK", "CEMETERY", "AIRPORT", "SCHOOL", "WATER TOWER", "LIFT STATION", "FIRE", "LANDFILL")):
+            continue
+        pid = clean(str(a.get("PARCEL_ID") or a.get("OBJECTID_1") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("Acres_1")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "City of Yankton Vacant Municipal Lot", YANKTON_SD_URL, "yankton_sd"),
+            fact("parcel_number", pid, YANKTON_SD_URL),
+            fact("price", "Confirm municipal surplus availability & bid terms with City of Yankton", YANKTON_SD_URL, "yankton_sd"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, YANKTON_SD_URL))
+        if leg:
+            facts.append(fact("legal_description", leg[:180], YANKTON_SD_URL))
+        title_loc = "%s (%s)" % (loc.title(), pid) if loc else ("Parcel " + pid)
+        row = {
+            "id": "sd-ynk-%s" % slug(pid), "source": "yankton-sd",
+            "title": "%s, Yankton (city-owned vacant lot)" % title_loc,
+            "state": "SD", "county": "Yankton", "locality": "Yankton", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": YANKTON_SD_URL,
+            "address": loc.title(), "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "south dakota"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(YANKTON_SD_GIS, "PARCEL_ID='%s'" % pid.replace("'", "''")), "City of Yankton SD GIS")
+        out.append(row)
+    return out
+
+
+def yankton_sd(fetch, now, warn):
+    feats = _arcgis_query(fetch, YANKTON_SD_GIS, "Name LIKE '%CITY OF YANKTON%'",
+                          "OBJECTID_1,PARCEL_ID,Location,Acres_1,LEGALS", 250)
+    rows = parse_yankton_sd_features(feats, warn)[:140]
+    if len(rows) < 10:
+        raise StructureError("only %d Yankton SD vacant lots" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Burleigh County / Bismarck Vacant Public Land (ND) ---
+BURLEIGH_ND_GIS = "https://services2.arcgis.com/8r0lsT7QHelkANsD/arcgis/rest/services/Tax_Parcels_Burleigh_County_ND/FeatureServer/0/query"
+BURLEIGH_ND_URL = "https://www.burleigh.gov/"
+
+
+def parse_burleigh_nd_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("Commercial_Building_Market")) or number(a.get("Residential_Building_Market")):
+            continue
+        leg = clean(str(a.get("Legal") or ""))
+        if any(w in leg.upper() for w in ("PARK", "CEMETERY", "R/W", "RIGHT OF WAY", "ROAD", "STREET", "ALLEY", "DRAIN", "POND", "STORM")):
+            continue
+        pid = clean(str(a.get("PID") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("Acres")) or (rings_acres(rings) if rings else None)
+        if not acres or acres < 0.05 or acres > 160:
+            continue
+        acres = round(acres, 4)
+        seen.add(pid)
+        addr = clean(str(a.get("Property_Address") or "")).title()
+        facts = [
+            fact("availability", "Burleigh County / Bismarck Unimproved Public Parcel", BURLEIGH_ND_URL, "burleigh_nd"),
+            fact("parcel_number", pid, BURLEIGH_ND_URL),
+            fact("price", "Confirm county tax-deed / municipal surplus sale terms on burleigh.gov", BURLEIGH_ND_URL, "burleigh_nd"),
+            fact("acreage", "%g acres" % acres, BURLEIGH_ND_URL),
+        ]
+        if leg:
+            facts.append(fact("legal_description", leg[:180], BURLEIGH_ND_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "nd-bur-%s" % slug(pid), "source": "burleigh-nd",
+            "title": "%s, Burleigh County (North Dakota public land)" % title_loc,
+            "state": "ND", "county": "Burleigh", "locality": "Bismarck", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": BURLEIGH_ND_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["public vacant land", "north dakota"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(BURLEIGH_ND_GIS, "PID='%s'" % pid.replace("'", "''")), "Burleigh County ND GIS")
+        out.append(row)
+    return out
+
+
+def burleigh_nd(fetch, now, warn):
+    w = "(Owner='BURLEIGH COUNTY' OR Owner='CITY OF BISMARCK') AND (Commercial_Building_Market=0 OR Commercial_Building_Market IS NULL) AND (Residential_Building_Market=0 OR Residential_Building_Market IS NULL)"
+    feats = _arcgis_query(fetch, BURLEIGH_ND_GIS, w,
+                          "OBJECTID,PID,Property_Address,Acres,Legal,Commercial_Building_Market,Residential_Building_Market", 300)
+    rows = parse_burleigh_nd_features(feats, warn)[:160]
+    if len(rows) < 15:
+        raise StructureError("only %d Burleigh County ND parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Vermont Statewide Municipal Vacant Land (VT) ---
+VCGI_VT_GIS = "https://services1.arcgis.com/BkFxaEFNwHqX3tAw/arcgis/rest/services/FS_VCGI_OPENDATA_Cadastral_VTPARCELS_poly_standardized_parcels_SP_v1/FeatureServer/0/query"
+VCGI_VT_URL = "https://vcgi.vermont.gov/"
+VT_SKIP = ("PARK", "CEMETERY", "SCHOOL", "WATER", "SEWER", "FIRE", "DUMP", "LANDFILL", "GARAGE", "GRAVEL", "HIGHWAY", "LIBRARY", "BEACH", "POND", "DAM", "BRIDGE", "POOL", "REC ", "RECREATION", "WELL", "PUMP", "PLAYGROUND")
+
+
+def parse_vcgi_vt_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("IMPRV_LV")):
+            continue
+        desc = clean(str(a.get("DESCPROP") or ""))
+        if any(w in desc.upper() for w in VT_SKIP):
+            continue
+        span = clean(str(a.get("SPAN") or a.get("OBJECTID") or ""))
+        if not span or span in seen:
+            continue
+        seen.add(span)
+        town = clean(str(a.get("TOWN") or "Vermont")).title() or "Vermont"
+        addr = clean(str(a.get("E911ADDR") or a.get("LOCAPROP") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("ACRESGL")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "Vermont Municipal Unimproved Parcel (VCGI Statewide)", VCGI_VT_URL, "vcgi_vt"),
+            fact("parcel_number", "SPAN " + span, VCGI_VT_URL),
+            fact("price", "Confirm municipal tax-sale or surplus status with %s Town Clerk" % town, VCGI_VT_URL, "vcgi_vt"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, VCGI_VT_URL))
+        if desc:
+            facts.append(fact("property_class", desc[:140], VCGI_VT_URL))
+        title_loc = "%s (%s)" % (addr, span) if addr else ("SPAN " + span)
+        row = {
+            "id": "vt-vcgi-%s" % slug(span), "source": "vcgi-vt",
+            "title": "%s, %s (Vermont municipal vacant land)" % (title_loc, town),
+            "state": "VT", "county": town, "locality": town, "apn": span,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": VCGI_VT_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["municipal vacant land", "vermont"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(VCGI_VT_GIS, "SPAN='%s'" % span.replace("'", "''")), "Vermont VCGI Statewide GIS")
+        out.append(row)
+    return out
+
+
+def vcgi_vt(fetch, now, warn):
+    w = "(OWNER1 LIKE 'TOWN OF %' OR OWNER1 LIKE 'CITY OF %') AND (IMPRV_LV=0 OR IMPRV_LV IS NULL) AND ACRESGL>=0.1 AND ACRESGL<=25"
+    feats = _arcgis_query(fetch, VCGI_VT_GIS, w,
+                          "OBJECTID,SPAN,TOWN,E911ADDR,LOCAPROP,DESCPROP,ACRESGL,IMPRV_LV", 300)
+    rows = parse_vcgi_vt_features(feats, warn)[:160]
+    if len(rows) < 20:
+        raise StructureError("only %d Vermont municipal vacant parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Montana Statewide County & City Vacant Land (MT) ---
+MT_CAD_GIS = "https://services.arcgis.com/qnjIrwR8z5Izc0ij/arcgis/rest/services/Montana_Cadastral_Framework/FeatureServer/1/query"
+MT_CAD_URL = "https://dnrc.mt.gov/"
+
+
+def parse_montana_cad_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("TotalBuildingValue")):
+            continue
+        pid = clean(str(a.get("PARCELID") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        county = clean(str(a.get("CountyName") or "Montana")).title() or "Montana"
+        addr = clean(str(a.get("AddressLine1") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("GISAcres")) or number(a.get("TotalAcres")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        leg = clean(str(a.get("LegalDescriptionShort") or ""))
+        facts = [
+            fact("availability", "Montana County / Municipal Vacant Land (State Cadastral)", MT_CAD_URL, "montana_cad"),
+            fact("parcel_number", pid, MT_CAD_URL),
+            fact("price", "Confirm county tax-deed auction or surplus availability with %s County Treasurer" % county, MT_CAD_URL, "montana_cad"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, MT_CAD_URL))
+        if leg:
+            facts.append(fact("legal_description", leg[:180], MT_CAD_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "mt-cad-%s" % slug(pid), "source": "montana-cad",
+            "title": "%s, %s County (Montana public vacant land)" % (title_loc, county),
+            "state": "MT", "county": county, "locality": county, "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": MT_CAD_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["public vacant land", "montana"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(MT_CAD_GIS, "PARCELID='%s'" % pid.replace("'", "''")), "Montana State Library Cadastral GIS")
+        out.append(row)
+    return out
+
+
+def montana_cad(fetch, now, warn):
+    w = "PropType LIKE '%Vacant%' AND (OwnerName LIKE '%COUNTY%' OR OwnerName LIKE '%CITY OF %')"
+    feats = _arcgis_query(fetch, MT_CAD_GIS, w,
+                          "OBJECTID,PARCELID,CountyName,GISAcres,TotalAcres,AddressLine1,LegalDescriptionShort,TotalBuildingValue", 220, {"orderByFields": "GISAcres DESC"})
+    rows = parse_montana_cad_features(feats, warn)[:180]
+    if len(rows) < 20:
+        raise StructureError("only %d Montana public vacant parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Boise Community Development Parcels (ID) ---
+BOISE_ID_GIS = "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/BoiseOwnedProperty/FeatureServer/140/query"
+BOISE_ID_URL = "https://www.cityofboise.org/"
+
+
+def parse_boise_id_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if clean(str(a.get("DEPT") or "")).upper() != "COMDEV":
+            continue
+        pid = clean(str(a.get("PARCEL") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        parts = [clean(str(a.get(k) or "")) for k in ("PROPADDNUM", "PROPPREDIR", "PROPSTNM", "PROPSTTYPE")]
+        addr = " ".join(p for p in parts if p).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("ACRES")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "City of Boise Housing & Community Development Parcel", BOISE_ID_URL, "boise_id"),
+            fact("parcel_number", pid, BOISE_ID_URL),
+            fact("price", "Disposition / RFP guidelines via City of Boise Community Development", BOISE_ID_URL, "boise_id"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, BOISE_ID_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "id-boi-%s" % slug(pid), "source": "boise-id",
+            "title": "%s, Boise (city development land)" % title_loc,
+            "state": "ID", "county": "Ada", "locality": "Boise", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": BOISE_ID_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned land", "idaho"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(BOISE_ID_GIS, "PARCEL='%s'" % pid.replace("'", "''")), "City of Boise ID GIS")
+        out.append(row)
+    return out
+
+
+def boise_id(fetch, now, warn):
+    feats = _arcgis_query(fetch, BOISE_ID_GIS, "DEPT='COMDEV'",
+                          "OBJECTID,PARCEL,ACRES,PROPADDNUM,PROPPREDIR,PROPSTNM,PROPSTTYPE,DEPT", 200)
+    rows = parse_boise_id_features(feats, warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Boise ID COMDEV parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Auburn Undeveloped Municipal Land (ME) ---
+AUBURN_ME_GIS = "https://services1.arcgis.com/4nU7cbKqLfftauX2/arcgis/rest/services/CityOwned/FeatureServer/0/query"
+AUBURN_ME_URL = "https://www.auburnmaine.gov/"
+AUBURN_KEEP = ("undeveloped", "commercial land", "industrial land", "urban hslt", "rural hslt")
+
+
+def parse_auburn_me_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if number(a.get("BldgValue")):
+            continue
+        luse = clean(str(a.get("LandUse") or ""))
+        if luse.lower() not in AUBURN_KEEP:
+            continue
+        pid = clean(str(a.get("ParcelID") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        addr = clean(str(a.get("Address") or a.get("Loc") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("Acreage")) or (rings_acres(rings) if rings else None)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("availability", "City of Auburn Unimproved Municipal Land", AUBURN_ME_URL, "auburn_me"),
+            fact("parcel_number", pid, AUBURN_ME_URL),
+            fact("price", "Confirm tax-acquired / surplus sale availability with City of Auburn", AUBURN_ME_URL, "auburn_me"),
+            fact("property_class", luse.title(), AUBURN_ME_URL),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, AUBURN_ME_URL))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "me-aub-%s" % slug(pid), "source": "auburn-me",
+            "title": "%s, Auburn (Maine municipal vacant land)" % title_loc,
+            "state": "ME", "county": "Androscoggin", "locality": "Auburn", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": AUBURN_ME_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["municipal vacant land", "maine"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(AUBURN_ME_GIS, "ParcelID='%s'" % pid.replace("'", "''")), "City of Auburn ME GIS")
+        out.append(row)
+    return out
+
+
+def auburn_me(fetch, now, warn):
+    feats = _arcgis_query(fetch, AUBURN_ME_GIS, "BldgValue=0 OR BldgValue IS NULL",
+                          "OBJECTID,ParcelID,Address,Loc,LandUse,Acreage,BldgValue", 200)
+    rows = parse_auburn_me_features(feats, warn)
+    if len(rows) < 10:
+        raise StructureError("only %d Auburn ME vacant parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Portland Land Bank (ME) ---
+PORTLAND_ME_GIS = "https://services5.arcgis.com/Fn6fPZi3nJdsppqD/arcgis/rest/services/City_Owned_2022_v2/FeatureServer/1/query"
+PORTLAND_ME_URL = "https://www.portlandmaine.gov/"
+
+
+def parse_portland_me_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        luse = clean(str(a.get("Land_Use") or ""))
+        if luse.upper() not in ("LAND BANKS", "VACANT LAND"):
+            continue
+        pid = clean(str(a.get("Parcel_ID") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings) if rings else None
+        facts = [
+            fact("availability", "City of Portland Municipal Land Bank", PORTLAND_ME_URL, "portland_me"),
+            fact("parcel_number", pid, PORTLAND_ME_URL),
+            fact("price", "Confirm land bank / surplus disposition status on portlandmaine.gov", PORTLAND_ME_URL, "portland_me"),
+            fact("property_class", luse.title(), PORTLAND_ME_URL),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, PORTLAND_ME_URL, "gis_area"))
+        row = {
+            "id": "me-pwm-%s" % slug(pid), "source": "portland-me",
+            "title": "Portland ME land bank parcel %s" % pid,
+            "state": "ME", "county": "Cumberland", "locality": "Portland", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": PORTLAND_ME_URL,
+            "address": "", "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["land bank vacant lot", "maine"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(PORTLAND_ME_GIS, "OBJECTID=%s" % clean(str(a.get("OBJECTID") or "0"))), "City of Portland ME GIS")
+        out.append(row)
+    return out
+
+
+def portland_me(fetch, now, warn):
+    feats = _arcgis_query(fetch, PORTLAND_ME_GIS, "Land_Use IN ('LAND BANKS','VACANT LAND')",
+                          "OBJECTID,Parcel_ID,Land_Use", 200)
+    rows = parse_portland_me_features(feats, warn)
+    if len(rows) < 20:
+        raise StructureError("only %d Portland ME land bank parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
@@ -3307,6 +4167,51 @@ SOURCES = [
     {"id": "boston-ma", "name": "City of Boston MOH City-Owned Land", "agency": "City of Boston Mayor's Office of Housing",
      "url": BOSTON_MA_URL, "state": "MA", "run": boston_ma,
      "about": "City-owned parcels held by Boston's Mayor's Office of Housing (MOH) with GIS outlines and lot area."},
+    {"id": "albany-wy", "name": "Albany County 2026 Tax Sale Vacant Land", "agency": "Albany County, Wyoming",
+     "url": ALBANY_WY_URL, "state": "WY", "run": albany_wy,
+     "about": "Unimproved vacant land parcels on the Albany County, Wyoming 2026 tax-sale roll with GIS outlines and acreage."},
+    {"id": "odot-ok", "name": "Oklahoma DOT Statewide Surplus Property", "agency": "Oklahoma Department of Transportation",
+     "url": ODOT_OK_URL, "state": "OK", "run": odot_ok,
+     "about": "Statewide surplus highway right-of-way parcels across Oklahoma counties with GIS outlines, acreage, and PLSS descriptions."},
+    {"id": "ms-surplus", "name": "State of Mississippi Surplus Land", "agency": "State of Mississippi Public Lands",
+     "url": MS_SURPLUS_URL, "state": "MS", "run": ms_surplus,
+     "about": "Unimproved surplus parcels from the State of Mississippi GIS inventory with parcel outlines and acreage."},
+    {"id": "horry-sc", "name": "Horry County Delinquent Tax Sale Land", "agency": "Horry County, South Carolina",
+     "url": HORRY_SC_URL, "state": "SC", "run": horry_sc,
+     "about": "Delinquent tax-sale land parcels in Horry County, South Carolina with published opening bid amounts and GIS outlines."},
+    {"id": "portland-or", "name": "City of Portland Vacant City-Owned Land", "agency": "City of Portland, Oregon",
+     "url": PORTLAND_OR_URL, "state": "OR", "run": portland_or,
+     "about": "Vacant city-owned parcels in Portland / Multnomah County from PortlandMaps Open Data with GIS outlines."},
+    {"id": "maui-hi", "name": "West Maui Vacant Government-Owned Parcels", "agency": "County of Maui / Hawaii Public Lands",
+     "url": MAUI_HI_URL, "state": "HI", "run": maui_hi,
+     "about": "Vacant government-owned parcels in West Maui with Tax Map Key (TMK) IDs, acreage, and GIS outlines."},
+    {"id": "lasvegas-nv", "name": "City of Las Vegas Vacant Real Estate Assets", "agency": "City of Las Vegas, Nevada",
+     "url": LASVEGAS_NV_URL, "state": "NV", "run": lasvegas_nv,
+     "about": "Vacant city-owned real estate parcels in Las Vegas / Clark County Open Data with coordinates and parcel numbers."},
+    {"id": "peterborough-nh", "name": "Town of Peterborough Tax-Deeded Lands", "agency": "Town of Peterborough, New Hampshire",
+     "url": PETERBOROUGH_NH_URL, "state": "NH", "run": peterborough_nh,
+     "about": "Tax-deeded municipal land parcels in Peterborough, New Hampshire with GIS outlines, acreage, and zoning."},
+    {"id": "yankton-sd", "name": "City of Yankton Vacant Municipal Lots", "agency": "City of Yankton, South Dakota",
+     "url": YANKTON_SD_URL, "state": "SD", "run": yankton_sd,
+     "about": "Vacant city-owned parcels in Yankton, South Dakota with GIS outlines and legal descriptions."},
+    {"id": "burleigh-nd", "name": "Burleigh County / Bismarck Vacant Public Land", "agency": "Burleigh County / City of Bismarck, North Dakota",
+     "url": BURLEIGH_ND_URL, "state": "ND", "run": burleigh_nd,
+     "about": "Unimproved county- and city-owned vacant parcels in Burleigh County / Bismarck, North Dakota with GIS outlines and acreage."},
+    {"id": "vcgi-vt", "name": "Vermont Statewide Municipal Vacant Land", "agency": "Vermont Center for Geographic Information (VCGI)",
+     "url": VCGI_VT_URL, "state": "VT", "run": vcgi_vt,
+     "about": "Unimproved town- and city-owned parcels across Vermont from VCGI Statewide Standardized Parcel Data with SPAN IDs and GIS outlines."},
+    {"id": "montana-cad", "name": "Montana Statewide County & City Vacant Land", "agency": "Montana State Library / County Treasurers",
+     "url": MT_CAD_URL, "state": "MT", "run": montana_cad,
+     "about": "County- and city-owned vacant land tracts across Montana from the Montana Statewide Cadastral Framework with GIS outlines and acreage."},
+    {"id": "boise-id", "name": "City of Boise Housing & Community Development Land", "agency": "City of Boise, Idaho",
+     "url": BOISE_ID_URL, "state": "ID", "run": boise_id,
+     "about": "City of Boise Community Development (COMDEV) land parcels in Ada County, Idaho with GIS outlines and acreage."},
+    {"id": "auburn-me", "name": "City of Auburn Unimproved Municipal Land", "agency": "City of Auburn, Maine",
+     "url": AUBURN_ME_URL, "state": "ME", "run": auburn_me,
+     "about": "Unimproved undeveloped, commercial, and industrial municipal parcels in Auburn, Maine with GIS outlines and acreage."},
+    {"id": "portland-me", "name": "City of Portland Municipal Land Bank", "agency": "City of Portland, Maine",
+     "url": PORTLAND_ME_URL, "state": "ME", "run": portland_me,
+     "about": "Municipal land bank and vacant land parcels in Portland, Maine with GIS outlines."},
     {"id": "wisconsin-bcpl", "name": "Wisconsin Board of Commissioners of Public Lands", "agency": "Wisconsin BCPL",
      "url": WI, "state": "WI", "run": wisconsin, "about": "Surplus state trust land sold by sealed-bid auction or private sale."},
     {"id": "alaska-trust-otc", "name": "Alaska Mental Health Trust Land Office", "agency": "Alaska Mental Health Trust Land Office",

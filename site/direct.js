@@ -167,10 +167,10 @@
 
       // Init map
       if (window.L) {
-        var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS Imagery" });
-        var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" });
-        var fema = L.tileLayer.wms("https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer", { layers: "28", format: "image/png", transparent: true, opacity: 0.48 });
-        var m = L.map("direct-map", { scrollWheelZoom: false, layers: [aerial] }).setView([item.lat, item.lon], 15);
+        var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 16, maxZoom: 20, attribution: "USGS Imagery" });
+        var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxNativeZoom: 19, maxZoom: 20, attribution: "&copy; OpenStreetMap" });
+        var fema = L.tileLayer.wms("https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer", { layers: "28", format: "image/png", transparent: true, opacity: 0.48, maxZoom: 20 });
+        var m = L.map("direct-map", { scrollWheelZoom: true, doubleClickZoom: true, touchZoom: true, maxZoom: 20, layers: [aerial] }).setView([item.lat, item.lon], 16);
         L.control.layers({ "USGS Aerial": aerial, "Streets": streets }, { "FEMA Flood Zones": fema }).addTo(m);
         L.circleMarker([item.lat, item.lon], { radius: 8, color: "#fff", weight: 2.5, fillColor: "#c8f189", fillOpacity: 1 }).addTo(m);
       }

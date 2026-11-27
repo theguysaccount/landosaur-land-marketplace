@@ -32,6 +32,10 @@ OFFICIAL = (
     "montgomeryal.gov", "cityofwaterlooiowa.com", "wycokck.org", "snco.gov",
     "wilmingtonde.gov", "hartfordct.gov", "cityofomaha.org", "bluefieldwv.gov",
     "memphistn.gov", "warwickri.gov", "boston.gov",
+    "albanycountywy.gov", "oklahoma.gov", "sos.ms.gov", "horrycountysc.gov",
+    "portland.gov", "mauicounty.gov", "lasvegasnevada.gov", "peterboroughnh.gov",
+    "cityofyankton.org", "burleigh.gov", "vcgi.vermont.gov", "dnrc.mt.gov",
+    "cityofboise.org", "auburnmaine.gov", "portlandmaine.gov",
 )
 
 

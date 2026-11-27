@@ -56,9 +56,9 @@
   var previewEl = document.getElementById("list-xray-preview");
   var pin = null, map = null;
   if (mapEl && window.L) {
-    var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS Imagery" });
-    var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" });
-    map = L.map(mapEl, { layers: [aerial] }).setView([38.5, -96.0], 4);
+    var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 16, maxZoom: 20, attribution: "USGS Imagery" });
+    var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxNativeZoom: 19, maxZoom: 20, attribution: "&copy; OpenStreetMap" });
+    map = L.map(mapEl, { scrollWheelZoom: true, doubleClickZoom: true, touchZoom: true, maxZoom: 20, layers: [aerial] }).setView([38.5, -96.0], 4);
     L.control.layers({ "USGS Satellite": aerial, "Streets": streets }).addTo(map);
     map.on("click", function (ev) {
       setPin(ev.latlng.lat, ev.latlng.lng, true);

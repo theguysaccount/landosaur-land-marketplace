@@ -3,6 +3,12 @@
   "buildCommand": "python3 -m lando.build dist",
   "outputDirectory": "dist",
   "trailingSlash": true,
+  "functions": {
+    "api/xray.js": {
+      "maxDuration": 30,
+      "includeFiles": "data/usda/land-index-counties.json"
+    }
+  },
   "redirects": [
     { "source": "/buying-help", "destination": "/research/buying-land/", "permanent": true },
     { "source": "/buying-help/", "destination": "/research/buying-land/", "permanent": true },

@@ -177,8 +177,14 @@
       if (r[1] != null) {
         var zBtn = el("button", "chip-btn", "Zoom");
         zBtn.type = "button";
-        zBtn.addEventListener("click", function () { map.setView([r[1], r[2]], 15); });
+        zBtn.addEventListener("click", function () {
+          map.flyTo([r[1], r[2]], 16, { duration: 0.65 });
+          L.popup({ maxWidth: 280 }).setLatLng([r[1], r[2]]).setContent(popup(r)).openOn(map);
+        });
         acts.appendChild(zBtn);
+        var xLink = el("a", "chip-btn chip-link", "X-Ray");
+        xLink.href = base + "/xray/#lat=" + r[1] + "&lon=" + r[2];
+        acts.appendChild(xLink);
       }
       li.appendChild(acts);
       ul.appendChild(li);
@@ -233,9 +239,11 @@
   }
 
   // Quick preset filter pills
-  Array.prototype.forEach.call(document.querySelectorAll("[data-preset]"), function (btn) {
+  var presetBtns = Array.prototype.slice.call(document.querySelectorAll("[data-preset]"));
+  presetBtns.forEach(function (btn) {
     btn.addEventListener("click", function () {
       var p = btn.getAttribute("data-preset");
+      presetBtns.forEach(function (b) { b.classList.toggle("active", b === btn); });
       form.kind.value = "";
       form.max.value = "";
       form.acres.value = "";

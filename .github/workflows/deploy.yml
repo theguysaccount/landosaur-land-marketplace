@@ -1,124 +1,39 @@
-# Build the site from data/ and publish it to GitHub Pages. Called by crawl.yml after each daily crawl, and run on
-# code pushes or by hand. Fails safe: a failed test, guard or browser check stops before deploying, and Pages keeps
-# the last good build.
-name: Build and deploy
+# Manual-only GitHub Pages mirror deploy (auto push trigger disabled — production runs on Vercel via ./scripts/publish.sh).
+name: GitHub Pages mirror (manual only)
 
 on:
-  push:
-    branches: [main]
-    paths: ["lando/**", "site/**", "scripts/**", ".github/workflows/deploy.yml"]
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 env:
-  # Fleet convention (~/code/DOMAIN_ROLLOUT.md): SITE_URL moves the site; SITE_INDEXABLE=true indexes only the pages
-  # the original does not serve. Unset, the whole copy stays out of search.
-  SITE_URL: ${{ vars.SITE_URL }}
-  SITE_INDEXABLE: ${{ vars.SITE_INDEXABLE }}
-  LANDO_BASE_URL: ${{ vars.SITE_URL || vars.LANDO_BASE_URL || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
-  LANDO_REPO: ${{ github.repository }}
-  LANDO_SUPPORT_URL: ${{ vars.LANDO_SUPPORT_URL }}
-  LANDO_REPORT_URL: ${{ vars.LANDO_REPORT_URL }}
-  LANDO_GOATCOUNTER: ${{ vars.LANDO_GOATCOUNTER }}
-  LANDO_INDEXNOW: ${{ vars.LANDO_INDEXNOW }}
+  LANDO_BASE_URL: ${{ format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+  SITE_INDEXABLE: "false"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: main   # after a crawl commit, build the newest main
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - name: Tests
-        run: python -m unittest discover -s tests -t .
-      - name: Build
-        run: python -m lando.build dist
-      - name: Guard
-        run: python scripts/check_dist.py dist
-      - name: Share images
-        run: CHROME="$(command -v google-chrome || command -v chromium-browser || true)" python scripts/og.py dist
-      - name: Browser test of the built site
-        env:
-          CI: "1"
-        run: |
-          prefix="$(python -c 'from lando import config; print(config.base_path())')"
-          mkdir -p root
-          if [ -n "$prefix" ]; then ln -s "$PWD/dist" "root$prefix"; else rmdir root; ln -s "$PWD/dist" root; fi
-          python -m http.server 8000 --bind 127.0.0.1 --directory root >/dev/null 2>&1 &
-          sleep 1
-          CHROME="$(command -v google-chrome)" node scripts/e2e.mjs "http://127.0.0.1:8000$prefix"
-      - name: Indexable pages that changed since the live build
-        run: |
-          python scripts/indexnow.py diff dist "$LANDO_BASE_URL" > changed.txt
-          cp dist/manifest.json built-manifest.json
+      - run: python -m unittest discover -s tests -t .
+      - run: python -m lando.build dist
+      - run: python scripts/check_dist.py dist
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
-      - uses: actions/upload-artifact@v7
-        with:
-          name: changed
-          path: |
-            changed.txt
-            built-manifest.json
-          retention-days: 7
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
-        continue-on-error: true
-      - name: Second attempt (Pages sometimes stalls while syncing files)
-        if: steps.deployment.outcome == 'failure'
-        uses: actions/deploy-pages@v5
-
-  live:
-    needs: deploy
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@v8
-        with:
-          name: changed
-      - name: Wait for the new build to be served
-        run: |
-          want="$(python3 -c 'import json; print(json.load(open("built-manifest.json"))["pages"]["/"])')"
-          for i in $(seq 1 40); do
-            got="$(curl -fsS "$LANDO_BASE_URL/manifest.json?t=$(date +%s)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pages"]["/"])' || true)"
-            [ "$got" = "$want" ] && echo "live after $i checks" && exit 0
-            sleep 15
-          done
-          echo "::warning::the live manifest did not match the new build within 10 minutes"
-      - name: Browser test of the live site
-        env:
-          CI: "1"
-        run: CHROME="$(command -v google-chrome)" node scripts/e2e.mjs "$LANDO_BASE_URL"
-      - name: Tell IndexNow about changed indexable pages
-        run: python3 scripts/indexnow.py submit changed.txt "$LANDO_BASE_URL"
+      - uses: actions/deploy-pages@v5

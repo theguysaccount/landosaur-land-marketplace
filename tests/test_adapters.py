@@ -149,6 +149,81 @@ class DetroitAndKcAndCaTest(unittest.TestCase):
         self.assertTrue(rows[0]["deadline"].startswith("2026-12-01"))
 
 
+class Phase2AdaptersTest(unittest.TestCase):
+    RING = [[[-85.76, 38.24], [-85.76, 38.2403], [-85.7595, 38.2403], [-85.7595, 38.24], [-85.76, 38.24]]]
+
+    def test_chicago_apply_and_offered(self):
+        raw = [
+            {"id": "70039", "pin": "13-35-311-049-0000", "address": "3745 W CORTLAND ST",
+             "property_status": "Owned by City", "sales_status": "Apply", "zoning_classification": "PD 1540",
+             "square_footage_city_estimate": "4356", "application_deadline": "2027-01-15T00:00:00.000",
+             "application_url": {"url": "https://www.chicago.gov/city/en/sites/block-builder/home/public-notice.html"},
+             "latitude": "41.915", "longitude": "-87.721", "land_value": "25000"},
+            {"id": "1", "pin": "99", "address": "1 CLOSED ST", "property_status": "Owned by City", "sales_status": "Application Closed"},
+        ]
+        rows = adapters.parse_chicago_rows(raw, NOW, lambda w: None)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["state"], rows[0]["status"], rows[0]["price"]), ("IL", "proposal_open", None))
+        self.assertTrue(rows[0]["deadline"].startswith("2027-01-16"))
+        self.assertAlmostEqual(rows[0]["acres"], 0.1, places=3)
+
+    def test_pittsburgh_vacant_public_sale_only(self):
+        raw = [
+            {"id": "176879", "pin": "0075B00072000000", "address": "3556 ELMHURST AVE", "parc_sq_ft": 32450,
+             "class": "Vacant Land", "zoned_as": "H", "inventory_type": "Public Sale", "current_status": "Available for Sale",
+             "latitude": 40.4807, "longitude": -80.044, "neighborhood_name": "Brighton Heights"},
+            {"id": "2", "pin": "0001", "address": "1 PARK AVE", "class": "Vacant Land", "inventory_type": "Park", "current_status": "Available for Sale"},
+        ]
+        rows = adapters.parse_pittsburgh_rows(raw, lambda w: None)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["state"], rows[0]["county"], rows[0]["price_kind"]), ("PA", "Allegheny", "none"))
+        self.assertTrue(rows[0]["url"].startswith("https://pghlandbank.org"))
+
+    def test_louisville_and_lucas_and_la_and_broward_and_udot(self):
+        lou = adapters.parse_louisville_features([{
+            "attributes": {"Parcel_No_": "040J00710000", "Street_Add": "2315 WOODLAND AVE", "Property_S": "Available",
+                           "Inventory_": "Lot", "Buildable_": "Yes", "Council_Di": 6},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual(len(lou), 1)
+        self.assertEqual((lou[0]["state"], lou[0]["county"]), ("KY", "Jefferson"))
+        self.assertIsNotNone(lou[0]["geometry"])
+
+        lucas = adapters.parse_lucas_features([{
+            "attributes": {"parid": "1543874", "property_address": "515 MULBERRY ST, TOLEDO OH 43604",
+                           "luc": "640", "zoning": "10-RD6", "acreage_calc": 0.095, "owner": "SECRET PERSON"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual(len(lucas), 1)
+        self.assertNotIn("SECRET", repr(lucas[0]))
+        self.assertEqual((lucas[0]["state"], lucas[0]["county"]), ("OH", "Lucas"))
+
+        la = adapters.parse_la_ttc_features([{
+            "attributes": {"APN": "3244-092-033", "TaxRateCit": "SANTA CLARITA", "UseType": "Irrigated Farm",
+                           "AUC_ITEM": 2768, "AUC_MINBID": 15896, "AUC_ADDR": "VACANT LOT", "Owner": "PRIVATE NAME"},
+            "geometry": {"rings": self.RING},
+        }], "2026B", lambda w: None)
+        self.assertEqual(len(la), 1)
+        self.assertNotIn("PRIVATE NAME", repr(la[0]))
+        self.assertEqual((la[0]["state"], la[0]["price"], la[0]["price_kind"]), ("CA", 15896.0, "min_bid"))
+
+        fl = adapters.parse_broward_features([{
+            "attributes": {"FOLIO": "504011010600", "LEGAL_LINE_1": "FLA FRUIT LANDS", "USE_CODE": "94"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual(len(fl), 1)
+        self.assertEqual((fl[0]["state"], fl[0]["county"]), ("FL", "Broward"))
+        self.assertIn("bcpa.net", fl[0]["url"])
+
+        ut = adapters.parse_udot_features([{
+            "attributes": {"parcel_number": "173:T", "tax_id": "09-085-0036", "county": "WEBER", "city": "ROY",
+                           "situs_address": "3029 West 5600 South", "sell_entry_number": None, "void_date": None, "acreage_epm": 11358},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual(len(ut), 1)
+        self.assertEqual((ut[0]["state"], ut[0]["county"]), ("UT", "Weber"))
+
+
 class GeometryTest(unittest.TestCase):
     def test_centroid_and_outline_link(self):
         r = {"id": "stl-1", "source": "st-louis-lra", "apn": "00209030000", "url": "https://x", "facts": [], "lat": None, "lon": None}

@@ -10,6 +10,8 @@ import csv
 import datetime
 import html
 import io
+import json
+import math
 import re
 import urllib.parse
 
@@ -64,6 +66,15 @@ NOTES = {  # long notes repeated on many listings are stored by key and expanded
     "kc_available": "Listed as Acquired in the Kansas City, Missouri Open Data Land Bank inventory (vacant land classes only). Confirm current availability and purchase terms with the Land Bank of Kansas City.",
     "kc_price": "The Land Bank of Kansas City reviews purchase applications and sets sale terms per parcel. Assessor market values are not asking prices and are not shown as list prices.",
     "ca_proposal": "Official California DGS development or surplus property proposal notice. Not an unconditional cash sale; confirm eligibility, lease/sale terms, and exact cutoff with California DGS.",
+    "chi_program": "Published in the City of Chicago City-Owned Land Inventory (ChiBlockBuilder). Confirm current eligibility, offer round rules, and pricing directly with the City of Chicago DPD.",
+    "chi_val": "City open-data land valuation figure, not an asking price or market appraisal.",
+    "pgh_avail": "Listed as Vacant Land / Available for Sale (Public Sale) in the City of Pittsburgh daily open-data inventory (WPRDC). Buying requires city/land-bank review and application.",
+    "lou_avail": "Listed as Available Lot in the Louisville Metro Landbank Authority GIS parcel inventory. Confirm program eligibility, pricing, and application deadlines with Louisville Metro.",
+    "lucas_avail": "Vacant land parcel held in the Lucas County Land Bank GIS inventory. Confirm current availability, program requirements, and pricing on lucascountylandbank.org.",
+    "la_ttc_bid": "Minimum bid published in the Los Angeles County Treasurer & Tax Collector auction GIS layer. Not a final sale price or appraisal; verify current auction schedule, redemption status, and terms on ttc.lacounty.gov.",
+    "broward_surplus": "County-owned surplus real property parcel published in Broward County GIS. Confirm current sale status, bidding method, and liens with Broward County and the Property Appraiser.",
+    "udot_surplus": "Unsold surplus right-of-way parcel published in Utah DOT GIS. Confirm availability, appraisal/auction process, and access restrictions with UDOT Right of Way.",
+    "gis_area": "Area computed from the agency's GIS parcel outline (not a legal survey).",
 }
 
 
@@ -100,7 +111,37 @@ def outline_url(listing):
                                                                               listing["apn"].replace("'", "''")))
     if listing["source"] == "alaska-trust-otc":
         return one_parcel_url(TRUST_GIS, "FILENUMBER='%s'" % listing["id"].split("-", 1)[1])
+    if listing["source"] == "louisville-landbank":
+        return one_parcel_url(LOU_GIS, "Parcel_No_='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "lucas-county-oh":
+        return one_parcel_url(LUCAS_GIS, "parid='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "la-county-ttc":
+        return one_parcel_url(LA_TTC_2026B if listing["id"].startswith("ca-la26b-") else LA_TTC_2026A,
+                              "APN='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "broward-surplus":
+        return one_parcel_url(BROWARD_GIS, "FOLIO='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "utah-udot":
+        return one_parcel_url(UDOT_GIS, "parcel_number='%s'" % listing["apn"].replace("'", "''"))
     return ""
+
+
+def rings_acres(rings):
+    """Approximate geodesic area in acres for WGS84 lon/lat polygon rings (outer minus holes)."""
+    if not rings:
+        return None
+    R = 6378137.0
+    total_m2 = 0.0
+    for idx, ring in enumerate(rings):
+        if len(ring) < 3:
+            continue
+        lat0 = math.radians(sum(p[1] for p in ring) / len(ring))
+        cos_lat = math.cos(lat0)
+        xs = [math.radians(p[0]) * R * cos_lat for p in ring]
+        ys = [math.radians(p[1]) * R for p in ring]
+        a = abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(zip(xs, ys), list(zip(xs, ys))[1:] + [(xs[0], ys[0])]))) / 2.0
+        total_m2 += a if idx == 0 else -a
+    ac = abs(total_m2) / 4046.8564224
+    return round(ac, 4) if ac > 0.001 else None
 
 
 def slug(text):
@@ -832,11 +873,614 @@ def california_dgs(fetch, now, warn):
     return parse_california_dgs(fetch.text(CA_DGS), now, warn), {"complete": True}
 
 
+# ------------------------------------------------------------------------------------------- Chicago City-Owned Land (IL)
+
+CHI_API = "https://data.cityofchicago.org/resource/aksk-kvfp.json"
+CHI_URL = "https://www.chicago.gov/city/en/sites/block-builder/home.html"
+CHI_DATASET = "https://data.cityofchicago.org/Community-Economic-Development/City-Owned-Land-Inventory/aksk-kvfp"
+
+
+def parse_chicago_rows(raw_rows, now, warn):
+    out, seen = [], set()
+    for r in raw_rows:
+        rid = clean(str(r.get("id") or ""))
+        pin = clean(str(r.get("pin") or ""))
+        addr = clean(str(r.get("address") or ""))
+        pstatus = clean(str(r.get("property_status") or ""))
+        sstatus = clean(str(r.get("sales_status") or ""))
+        if not addr or pstatus.lower() != "owned by city" or sstatus not in ("Apply", "Offered"):
+            continue
+        key = pin or rid
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        sqft = number(r.get("sq_ft")) or number(r.get("square_footage_city_estimate"))
+        acres = round(sqft / 43560.0, 4) if sqft else None
+        lat = lon = None
+        try:
+            if r.get("latitude") is not None and r.get("longitude") is not None:
+                la, lo = float(r["latitude"]), float(r["longitude"])
+                if 41.5 <= la <= 42.1 and -88.1 <= lo <= -87.4:
+                    lat, lon = round(la, 6), round(lo, 6)
+        except (TypeError, ValueError):
+            lat = lon = None
+        app_url_raw = r.get("application_url")
+        if isinstance(app_url_raw, dict):
+            app_url_raw = app_url_raw.get("url")
+        url = str(app_url_raw or "").strip()
+        if not (url.startswith("https://www.chicago.gov/") or url.startswith("https://chicago.gov/")):
+            url = CHI_URL
+        dl = None
+        if sstatus == "Apply" and r.get("application_deadline"):
+            dl_dt = central_time(str(r["application_deadline"])[:10] + "T23:59:59")
+            if dl_dt:
+                dl = dl_dt
+        if sstatus == "Apply":
+            status = "auction_closed" if (dl and now > dl) else "proposal_open"
+            offering = "proposal"
+        else:
+            status = "listed"
+            offering = "sale"
+        facts = [
+            fact("sale_program", "ChiBlockBuilder — %s%s" % (
+                sstatus, (" (%s)" % clean(r.get("offer_round"))) if clean(r.get("offer_round")) else ""), "@chi_dataset", "chi_program"),
+            fact("parcel_number", pin or rid, "@chi_dataset"),
+            fact("price", "Set by city program / application review (no asking price published)", url, "chi_program"),
+        ]
+        if sqft:
+            facts.append(fact("lot_area", "%s square feet" % "{:,}".format(int(round(sqft))), "@chi_dataset", "stl_area"))
+        if clean(r.get("zoning_classification")):
+            facts.append(fact("zoning", clean(r["zoning_classification"]), "@chi_dataset"))
+        if clean(r.get("community_area_name")):
+            facts.append(fact("neighborhood", clean(r["community_area_name"]).title(), "@chi_dataset"))
+        if clean(r.get("ward")):
+            facts.append(fact("ward", clean(r["ward"]), "@chi_dataset"))
+        val = number(r.get("land_value"))
+        if val:
+            facts.append(fact("city_valuation", "$%s" % "{:,.0f}".format(val), "@chi_dataset", "chi_val"))
+        if dl:
+            facts.append(fact("proposal_deadline", dl.strftime("%B %d, %Y"), url))
+        acq = str(r.get("date_of_acquisition") or "")[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", acq):
+            facts.append(fact("acquired_date", acq, "@chi_dataset"))
+        tags = ["city-owned vacant lot", "application required"]
+        if sstatus == "Apply":
+            tags.append("open application round")
+        if clean(r.get("zoning_classification")):
+            tags.append("zoned %s" % clean(r["zoning_classification"]))
+        out.append({
+            "id": "il-chi-%s" % slug(rid or pin), "source": "chicago-dpd",
+            "title": "%s, Chicago (city-owned lot)" % addr.title(),
+            "state": "IL", "county": "Cook", "locality": "Chicago", "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": offering,
+            "status": status, "deadline": dl.strftime("%Y-%m-%dT%H:%M:%SZ") if dl else None,
+            "url": url, "address": addr.title(), "lat": lat, "lon": lon, "geometry": None,
+            "facts": facts, "tags": tags,
+        })
+    return out
+
+
+def chicago_dpd(fetch, now, warn):
+    where = "property_status='Owned by City' AND sales_status IN ('Apply','Offered')"
+    all_raw, offset, limit = [], 0, 1000
+    complete = True
+    for _ in range(10):
+        q = urllib.parse.urlencode({"$where": where, "$limit": str(limit), "$offset": str(offset), "$order": "id"})
+        batch = fetch.json(CHI_API + "?" + q)
+        if not isinstance(batch, list):
+            raise StructureError("Chicago City-Owned Land API structure changed")
+        all_raw.extend(batch)
+        if len(batch) < limit:
+            break
+        offset += len(batch)
+    else:
+        complete = False
+        warn("Chicago pagination reached safety limit")
+    rows = parse_chicago_rows(all_raw, now, warn)
+    if len(rows) < 50:
+        raise StructureError("only %d Chicago lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": complete, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Pittsburgh Vacant Land (PA)
+
+PGH_API = "https://data.wprdc.org/api/3/action/datastore_search"
+PGH_RES = "e1dcee82-9179-4306-8167-5891915b62a7"
+PGH_URL = "https://pghlandbank.org/"
+PGH_DATASET = "https://data.wprdc.org/datastore/dump/" + PGH_RES
+
+
+def parse_pittsburgh_rows(records, warn):
+    out, seen = [], set()
+    for r in records:
+        pin = clean(str(r.get("pin") or ""))
+        rid = clean(str(r.get("id") or ""))
+        addr = clean(str(r.get("address") or ""))
+        cls = clean(str(r.get("class") or ""))
+        cur = clean(str(r.get("current_status") or ""))
+        inv = clean(str(r.get("inventory_type") or ""))
+        if not pin or not addr:
+            continue
+        if cls.lower() != "vacant land" or cur.lower() != "available for sale" or inv.lower() != "public sale":
+            continue
+        if pin in seen:
+            continue
+        seen.add(pin)
+        sqft = number(r.get("parc_sq_ft"))
+        acres = round(sqft / 43560.0, 4) if sqft else None
+        lat = lon = None
+        try:
+            if r.get("latitude") is not None and r.get("longitude") is not None:
+                la, lo = float(r["latitude"]), float(r["longitude"])
+                if 40.2 <= la <= 40.7 and -80.3 <= lo <= -79.7:
+                    lat, lon = round(la, 6), round(lo, 6)
+        except (TypeError, ValueError):
+            lat = lon = None
+        facts = [
+            fact("availability", "Available for Sale (Public Sale)", "@pgh_dataset", "pgh_avail"),
+            fact("parcel_number", pin, "@pgh_dataset"),
+            fact("price", "Application / sale review (no asking price published)", PGH_URL, "pgh_avail"),
+        ]
+        if sqft:
+            facts.append(fact("lot_area", "%s square feet" % "{:,}".format(int(round(sqft))), "@pgh_dataset", "stl_area"))
+        if clean(str(r.get("zoned_as") or "")):
+            facts.append(fact("zoning", clean(str(r["zoned_as"])), "@pgh_dataset"))
+        if clean(str(r.get("neighborhood_name") or "")):
+            facts.append(fact("neighborhood", clean(str(r["neighborhood_name"])), "@pgh_dataset"))
+        if clean(str(r.get("ward") or "")):
+            facts.append(fact("ward", clean(str(r["ward"])), "@pgh_dataset"))
+        if clean(str(r.get("council_district") or "")):
+            facts.append(fact("council_district", "District %s" % clean(str(r["council_district"])), "@pgh_dataset"))
+        if clean(str(r.get("acquisition_method") or "")):
+            facts.append(fact("how_the_city_acquired_it", clean(str(r["acquisition_method"])), "@pgh_dataset"))
+        acq = str(r.get("acquisition_date") or "")[:10]
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", acq):
+            facts.append(fact("acquired_date", acq, "@pgh_dataset"))
+        out.append({
+            "id": "pa-pgh-%s" % slug(rid or pin), "source": "pittsburgh-vacant",
+            "title": "%s, Pittsburgh (vacant land)" % addr.title(),
+            "state": "PA", "county": "Allegheny", "locality": "Pittsburgh", "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": PGH_URL, "address": addr.title(),
+            "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+            "tags": ["city-owned vacant lot", "public sale inventory", "application required"],
+        })
+    return out
+
+
+def pittsburgh_vacant(fetch, now, warn):
+    filt = json.dumps({"class": "Vacant Land", "current_status": "Available for Sale", "inventory_type": "Public Sale"})
+    all_raw, offset, limit = [], 0, 1000
+    complete, total = True, None
+    for _ in range(10):
+        q = urllib.parse.urlencode({"resource_id": PGH_RES, "filters": filt, "limit": str(limit), "offset": str(offset)})
+        data = fetch.json(PGH_API + "?" + q)
+        if not isinstance(data, dict) or not data.get("success") or not isinstance((data.get("result") or {}).get("records"), list):
+            raise StructureError("Pittsburgh WPRDC datastore API changed")
+        res = data["result"]
+        if total is None:
+            total = res.get("total")
+        batch = res["records"]
+        all_raw.extend(batch)
+        if len(batch) < limit or (total is not None and len(all_raw) >= total):
+            break
+        offset += len(batch)
+    else:
+        complete = False
+        warn("Pittsburgh pagination reached safety limit")
+    rows = parse_pittsburgh_rows(all_raw, warn)
+    if len(rows) < 100:
+        raise StructureError("only %d Pittsburgh vacant parcels: feed looks incomplete" % len(rows))
+    return rows, {"complete": complete, "upstream_total": total or len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Louisville Metro Landbank (KY)
+
+LOU_GIS = "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/LandbankInventoryParcels/FeatureServer/0/query"
+LOU_URL = "https://data.louisvilleky.gov/"
+
+
+def parse_louisville_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("Parcel_No_") or ""))
+        addr = clean(str(a.get("Street_Add") or ""))
+        pstatus = clean(str(a.get("Property_S") or ""))
+        itype = clean(str(a.get("Inventory_") or ""))
+        if not pid or not addr or pstatus.lower() != "available" or itype.lower() != "lot":
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings)
+        buildable = clean(str(a.get("Buildable_") or ""))
+        facts = [
+            fact("availability", "Available — Landbank Lot", "@lou_gis", "lou_avail"),
+            fact("parcel_number", pid, "@lou_gis"),
+            fact("price", "Program-specific pricing via Louisville Metro Landbank", LOU_URL, "lou_avail"),
+        ]
+        if buildable:
+            facts.append(fact("buildable_lot", buildable, "@lou_gis"))
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, "@lou_gis", "gis_area"))
+        if clean(str(a.get("Category") or "")):
+            facts.append(fact("sale_program", clean(str(a["Category"])), "@lou_gis"))
+        if a.get("Council_Di") is not None and str(a.get("Council_Di")).strip():
+            facts.append(fact("council_district", "District %s" % clean(str(a["Council_Di"])), "@lou_gis"))
+        row = {
+            "id": "ky-lou-%s" % slug(pid), "source": "louisville-landbank",
+            "title": "%s, Louisville (landbank lot)" % addr.title(),
+            "state": "KY", "county": "Jefferson", "locality": "Louisville", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": LOU_URL, "address": addr.title(),
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["land bank vacant lot", "application required"] + (["buildable lot"] if buildable.lower() == "yes" else []),
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(LOU_GIS, "Parcel_No_='%s'" % pid.replace("'", "''")), "Louisville Metro / LOJIC")
+        out.append(row)
+    return out
+
+
+def louisville_landbank(fetch, now, warn):
+    where = "Property_S='Available' AND Inventory_='Lot'"
+    fields = "Parcel_No_,Street_Add,Postal_Cod,Property_S,Inventory_,Council_Di,Buildable_,Category"
+    all_feats, offset, page_size = [], 0, 500
+    complete = True
+    for _ in range(10):
+        q = urllib.parse.urlencode({
+            "f": "json", "where": where, "outFields": fields, "outSR": "4326",
+            "returnGeometry": "true", "geometryPrecision": "6",
+            "resultRecordCount": str(page_size), "resultOffset": str(offset),
+        })
+        data = fetch.json(LOU_GIS + "?" + q)
+        if not isinstance(data, dict) or "features" not in data:
+            raise StructureError("Louisville Landbank ArcGIS response changed")
+        feats = data["features"]
+        all_feats.extend(feats)
+        if not data.get("exceededTransferLimit") or len(feats) < page_size:
+            break
+        offset += len(feats)
+    else:
+        complete = False
+        warn("Louisville pagination reached safety limit")
+    rows = parse_louisville_features(all_feats, warn)
+    if len(rows) < 50:
+        raise StructureError("only %d Louisville landbank lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": complete, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Lucas County Land Bank (OH)
+
+LUCAS_GIS = "https://services3.arcgis.com/T8dczfwPixv79EgZ/arcgis/rest/services/Land_Bank/FeatureServer/0/query"
+LUCAS_URL = "https://lucascountylandbank.org/"
+LUCAS_VACANT_LUCS = ("500", "501", "400", "401", "640")
+
+
+def parse_lucas_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("parid") or a.get("assessor_num") or ""))
+        addr_raw = clean(str(a.get("property_address") or ""))
+        luc = clean(str(a.get("luc") or ""))
+        if not pid or not addr_raw or luc not in LUCAS_VACANT_LUCS:
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        street = addr_raw.split(",")[0].strip()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = number(a.get("acreage_calc")) or number(a.get("acreage")) or rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        zoning = clean(str(a.get("zoning") or ""))
+        legal = clean(str(a.get("legal_description") or ""))
+        facts = [
+            fact("availability", "Lucas County Land Bank vacant land inventory", "@lucas_gis", "lucas_avail"),
+            fact("parcel_number", pid, "@lucas_gis"),
+            fact("price", "Application / program pricing via Lucas County Land Bank", LUCAS_URL, "lucas_avail"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, "@lucas_gis"))
+        if zoning:
+            facts.append(fact("zoning", zoning, "@lucas_gis"))
+        if legal:
+            facts.append(fact("legal_description", legal[:200], "@lucas_gis"))
+        if a.get("taxyr"):
+            facts.append(fact("tax_year", str(a["taxyr"]), "@lucas_gis"))
+        row = {
+            "id": "oh-lucas-%s" % slug(pid), "source": "lucas-county-oh",
+            "title": "%s, Toledo (Lucas County Land Bank lot)" % street.title(),
+            "state": "OH", "county": "Lucas", "locality": "Toledo", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": LUCAS_URL, "address": street.title(),
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["land bank vacant lot", "application required"] + (["zoned %s" % zoning] if zoning else []),
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(LUCAS_GIS, "parid='%s'" % pid.replace("'", "''")), "Lucas County GIS")
+        out.append(row)
+    return out
+
+
+def lucas_county_oh(fetch, now, warn):
+    where = "luc IN (%s)" % quote_list(LUCAS_VACANT_LUCS)
+    fields = "parid,assessor_num,property_address,zoning,acreage,acreage_calc,legal_description,luc,taxyr"
+    all_feats, offset, page_size = [], 0, 500
+    complete = True
+    for _ in range(10):
+        q = urllib.parse.urlencode({
+            "f": "json", "where": where, "outFields": fields, "outSR": "4326",
+            "returnGeometry": "true", "geometryPrecision": "6",
+            "resultRecordCount": str(page_size), "resultOffset": str(offset),
+        })
+        data = fetch.json(LUCAS_GIS + "?" + q)
+        if not isinstance(data, dict) or "features" not in data:
+            raise StructureError("Lucas County Land Bank ArcGIS response changed")
+        feats = data["features"]
+        all_feats.extend(feats)
+        if not data.get("exceededTransferLimit") or len(feats) < page_size:
+            break
+        offset += len(feats)
+    else:
+        complete = False
+        warn("Lucas County pagination reached safety limit")
+    rows = parse_lucas_features(all_feats, warn)
+    if len(rows) < 50:
+        raise StructureError("only %d Lucas County vacant lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": complete, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- LA County TTC Tax Auctions (CA)
+
+LA_TTC_2026B = "https://services1.arcgis.com/yobXtsY8IPR6NpgV/arcgis/rest/services/TTC_Auction_2026B/FeatureServer/0/query"
+LA_TTC_2026A = "https://services1.arcgis.com/yobXtsY8IPR6NpgV/arcgis/rest/services/TTC_Auction_2026_A/FeatureServer/0/query"
+LA_TTC_URL = "https://ttc.lacounty.gov/auction-general-information/"
+
+
+def parse_la_ttc_features(features, series, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        apn = clean(str(a.get("APN") or a.get("AIN") or ""))
+        if not apn or apn in seen:
+            continue
+        if series == "2026B":
+            addr_tag = clean(str(a.get("AUC_ADDR") or ""))
+            if "vacant" not in addr_tag.lower():
+                continue
+            bid = number(a.get("AUC_MINBID"))
+            item = clean(str(a.get("AUC_ITEM") or ""))
+            city = clean(str(a.get("TaxRateCit") or a.get("SitusCity") or "")).title()
+            legal = clean(str(a.get("AUC_LEGAL") or ""))
+            zoning = clean(str(a.get("UseType") or ""))
+            acres = None
+            id_prefix = "ca-la26b-"
+        else:
+            if clean(str(a.get("LANDUSE") or "")).lower() != "vacant":
+                continue
+            bid = number(a.get("MIN_BID"))
+            item = clean(str(a.get("ITEM") or ""))
+            city = clean(str(a.get("SITE_CITY") or "")).title()
+            legal = clean(str(a.get("LEGAL_DESC") or a.get("LEGAL") or ""))
+            zoning = clean(str(a.get("ZONING") or a.get("ZONETYPE") or ""))
+            acres = number(a.get("ACRES")) or (round(number(a.get("SQFOOT")) / 43560.0, 4) if number(a.get("SQFOOT")) else None)
+            id_prefix = "ca-la26a-"
+        seen.add(apn)
+        rings = (f.get("geometry") or {}).get("rings") or []
+        if not acres and rings:
+            acres = rings_acres(rings)
+        if acres:
+            acres = round(acres, 4)
+        facts = [
+            fact("sale_program", "Los Angeles County TTC Tax-Defaulted Auction %s" % series, LA_TTC_URL, "la_ttc_bid"),
+            fact("minimum_bid", "$%s" % "{:,.0f}".format(bid) if bid else "not stated", LA_TTC_URL, "la_ttc_bid"),
+            fact("parcel_number", apn, LA_TTC_URL),
+        ]
+        if item:
+            facts.append(fact("auction_item", "Item #%s" % item, LA_TTC_URL))
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, LA_TTC_URL))
+        if zoning:
+            facts.append(fact("zoning", zoning, LA_TTC_URL))
+        if legal:
+            facts.append(fact("legal_description", legal[:200], LA_TTC_URL))
+        loc_title = ("%s, Los Angeles County" % city) if city else "Los Angeles County"
+        row = {
+            "id": "%s%s" % (id_prefix, slug(apn)), "source": "la-county-ttc",
+            "title": "%s parcel %s (LA County tax auction %s)" % (loc_title, apn, series),
+            "state": "CA", "county": "Los Angeles", "locality": city, "apn": apn,
+            "acres": acres, "price": bid, "price_kind": "min_bid" if bid else "none",
+            "offering": "auction", "status": "auction_terms", "deadline": None,
+            "url": LA_TTC_URL, "address": "", "lat": None, "lon": None, "geometry": None,
+            "facts": facts, "tags": ["tax-defaulted parcel", "auction terms apply", "los angeles county"],
+        }
+        if rings:
+            ep = LA_TTC_2026B if series == "2026B" else LA_TTC_2026A
+            apply_geometry(row, rings, one_parcel_url(ep, "APN='%s'" % apn.replace("'", "''")), "Los Angeles County GIS")
+        out.append(row)
+    return out
+
+
+def la_county_ttc(fetch, now, warn):
+    out = []
+    # Query only non-personal parcel fields (never request Owner)
+    q_b = urllib.parse.urlencode({
+        "f": "json", "where": "AUC_ADDR LIKE '%VACANT%'",
+        "outFields": "APN,AIN,TaxRateCit,SitusCity,UseType,AUC_ITEM,AUC_MINBID,AUC_LEGAL,AUC_ADDR",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data_b = fetch.json(LA_TTC_2026B + "?" + q_b)
+    if not isinstance(data_b, dict) or "features" not in data_b:
+        raise StructureError("LA County TTC 2026B ArcGIS response changed")
+    out.extend(parse_la_ttc_features(data_b["features"], "2026B", warn))
+
+    q_a = urllib.parse.urlencode({
+        "f": "json", "where": "LANDUSE='Vacant'",
+        "outFields": "APN,AIN,SITE_CITY,ZONING,ZONETYPE,ACRES,SQFOOT,LEGAL_DESC,ITEM,MIN_BID,LANDUSE",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data_a = fetch.json(LA_TTC_2026A + "?" + q_a)
+    if not isinstance(data_a, dict) or "features" not in data_a:
+        raise StructureError("LA County TTC 2026A ArcGIS response changed")
+    out.extend(parse_la_ttc_features(data_a["features"], "2026A", warn))
+    if not out:
+        raise StructureError("LA County TTC returned 0 vacant auction parcels")
+    return out, {"complete": True, "upstream_total": len(out)}
+
+
+# ------------------------------------------------------------------------------------------- Broward County Surplus (FL)
+
+BROWARD_GIS = "https://services2.arcgis.com/siQBicXvlHb2Oz23/arcgis/rest/services/County_Surplus_Property/FeatureServer/0/query"
+BROWARD_FOLIO_URL = "https://bcpa.net/RecInfo.asp?URL_Folio=%s"
+
+
+def parse_broward_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        folio = clean(str(a.get("FOLIO") or a.get("FOLIO_NUMBER") or ""))
+        if not folio or folio in seen:
+            continue
+        seen.add(folio)
+        situs_parts = [clean(str(a.get(k) or "")) for k in ("SITUS_STREET_NUMBER", "SITUS_STREET_DIRECTION", "SITUS_STREET_NAME", "SITUS_STREET_TYPE")]
+        addr = " ".join(p for p in situs_parts if p).title()
+        legal = " ".join(clean(str(a.get("LEGAL_LINE_%d" % i) or "")) for i in (1, 2, 3, 4)).strip()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings)
+        url = BROWARD_FOLIO_URL % urllib.parse.quote(folio, safe="")
+        facts = [
+            fact("sale_program", "Broward County Surplus Real Property", url, "broward_surplus"),
+            fact("parcel_number", folio, url),
+            fact("price", "See Broward County surplus property bidding/sale terms", url, "broward_surplus"),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, url, "gis_area"))
+        if legal:
+            facts.append(fact("legal_description", legal[:220], url))
+        if clean(str(a.get("USE_CODE") or "")):
+            facts.append(fact("use_code", clean(str(a["USE_CODE"])), url))
+        title_loc = addr if addr else ("Folio %s" % folio)
+        row = {
+            "id": "fl-broward-%s" % slug(folio), "source": "broward-surplus",
+            "title": "%s, Broward County (surplus parcel)" % title_loc,
+            "state": "FL", "county": "Broward", "locality": "", "apn": folio,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": url, "address": addr,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["county surplus parcel", "florida"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(BROWARD_GIS, "FOLIO='%s'" % folio.replace("'", "''")), "Broward County GIS")
+        out.append(row)
+    return out
+
+
+def broward_surplus(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "1=1",
+        "outFields": "FOLIO,FOLIO_NUMBER,LEGAL_LINE_1,LEGAL_LINE_2,LEGAL_LINE_3,LEGAL_LINE_4,USE_CODE,SITUS_STREET_NUMBER,SITUS_STREET_DIRECTION,SITUS_STREET_NAME,SITUS_STREET_TYPE,SITUS_CITY,SITUS_ZIP_CODE",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(BROWARD_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Broward County Surplus ArcGIS response changed")
+    rows = parse_broward_features(data["features"], warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Broward surplus parcels: feed looks incomplete" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Utah DOT Surplus Property (UT)
+
+UDOT_GIS = "https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/UDOT_Right_of_Way_Surplus_Parcels/FeatureServer/0/query"
+UDOT_URL = "https://connect.udot.utah.gov/business/surplus-property/"
+
+
+def parse_udot_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        if a.get("sell_entry_number") or a.get("void_date"):
+            continue
+        pnum = clean(str(a.get("parcel_number") or a.get("parcel_id") or ""))
+        tax_id = clean(str(a.get("tax_id") or ""))
+        key = tax_id or pnum
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        county = clean(str(a.get("county") or "")).title()
+        city = clean(str(a.get("city") or "")).title()
+        addr = clean(str(a.get("situs_address") or "")).title()
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings)
+        if not acres:
+            epm = number(a.get("acreage_epm"))
+            if epm:
+                # UDOT stores sq ft in acreage_epm when > 100, or acres when small
+                acres = round(epm / 43560.0, 4) if epm > 200 else round(epm, 4)
+        facts = [
+            fact("sale_program", "UDOT Surplus Right-of-Way Property", UDOT_URL, "udot_surplus"),
+            fact("parcel_number", pnum or tax_id, UDOT_URL),
+            fact("price", "Appraisal / auction pricing set by UDOT Right of Way", UDOT_URL, "udot_surplus"),
+        ]
+        if tax_id:
+            facts.append(fact("tax_parcel_id", tax_id, UDOT_URL))
+        if acres:
+            facts.append(fact("acreage", "%g acres" % acres, UDOT_URL, "gis_area"))
+        if a.get("section") or a.get("township") or a.get("range_"):
+            facts.append(fact("section_township_range", "S%s %s %s" % (
+                clean(str(a.get("section") or "")), clean(str(a.get("township") or "")), clean(str(a.get("range_") or ""))), UDOT_URL))
+        if clean(str(a.get("pin_description") or "")):
+            facts.append(fact("agency_description_excerpt", clean(str(a["pin_description"]))[:220], UDOT_URL))
+        loc = addr or (city if city else (county + " County" if county else "Utah"))
+        row = {
+            "id": "ut-udot-%s" % slug(key), "source": "utah-udot",
+            "title": "%s, %s (UDOT surplus parcel %s)" % (loc, county + " County" if county else "Utah", pnum or key),
+            "state": "UT", "county": county, "locality": city, "apn": pnum or tax_id,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": UDOT_URL, "address": addr,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["state surplus parcel", "utah dot"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(UDOT_GIS, "parcel_number='%s'" % (pnum or key).replace("'", "''")), "Utah DOT GIS")
+        elif a.get("latitude") and a.get("longitude"):
+            try:
+                la, lo = float(a["latitude"]), float(a["longitude"])
+                if 36.5 <= la <= 42.5 and -114.5 <= lo <= -108.5:
+                    row["lat"], row["lon"] = round(la, 6), round(lo, 6)
+            except (TypeError, ValueError):
+                pass
+        out.append(row)
+    return out
+
+
+def utah_udot(fetch, now, warn):
+    q = urllib.parse.urlencode({
+        "f": "json", "where": "sell_entry_number IS NULL AND void_date IS NULL",
+        "outFields": "parcel_number,parcel_id,tax_id,pin_description,township,range_,section,latitude,longitude,acreage_epm,county,city,situs_address,sell_entry_number,void_date",
+        "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6", "resultRecordCount": "500",
+    })
+    data = fetch.json(UDOT_GIS + "?" + q)
+    if not isinstance(data, dict) or "features" not in data:
+        raise StructureError("Utah DOT Surplus ArcGIS response changed")
+    rows = parse_udot_features(data["features"], warn)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
     "dlba_gis": "https://data.detroitmi.gov/datasets/dlba-owned-properties",
     "kc_dataset": KC_DATASET,
+    "chi_dataset": CHI_DATASET,
+    "pgh_dataset": PGH_DATASET,
+    "lou_gis": LOU_URL,
+    "lucas_gis": LUCAS_URL,
 })
 
 SOURCES = [
@@ -849,15 +1493,36 @@ SOURCES = [
     {"id": "arkansas-cosl", "name": "Arkansas Commissioner of State Lands", "agency": "Arkansas Commissioner of State Lands",
      "url": "https://auction.cosl.org/Auctions/ListingsView", "state": "AR", "run": arkansas,
      "about": "Tax-forfeited parcels offered after the county tax-sale auctions. Prices are minimum bids; terms and redemption rules apply."},
+    {"id": "pittsburgh-vacant", "name": "City of Pittsburgh available vacant land", "agency": "City of Pittsburgh / Pittsburgh Land Bank",
+     "url": PGH_URL, "state": "PA", "run": pittsburgh_vacant,
+     "about": "Vacant city-owned parcels marked Available for Sale (Public Sale) in Pittsburgh's daily open-data inventory, with zoning, square footage, and coordinates."},
+    {"id": "lucas-county-oh", "name": "Lucas County Land Bank vacant land (Toledo)", "agency": "Lucas County Land Bank",
+     "url": LUCAS_URL, "state": "OH", "run": lucas_county_oh,
+     "about": "Vacant land bank parcels in Toledo & Lucas County with GIS polygon boundaries, zoning codes, acreage, and legal descriptions."},
     {"id": "detroit-dlba", "name": "Detroit Land Bank Authority marketed vacant lots", "agency": "Detroit Land Bank Authority",
      "url": DLBA_URL, "state": "MI", "run": detroit_dlba,
      "about": "Actively marketed vacant land programs (Marketed, Oversized, Auction, Own It Now, Create-a-Project lots) from Detroit's official open-data GIS."},
+    {"id": "chicago-dpd", "name": "City of Chicago City-Owned Land Inventory (ChiBlockBuilder)", "agency": "City of Chicago Dept. of Planning & Development",
+     "url": CHI_URL, "state": "IL", "run": chicago_dpd,
+     "about": "Actively offered and open-application Chicago city-owned vacant lots with zoning classifications, lot square footage, and Q4/2027 application deadlines."},
+    {"id": "louisville-landbank", "name": "Louisville Metro Landbank Authority available lots", "agency": "Louisville Metro Landbank Authority",
+     "url": LOU_URL, "state": "KY", "run": louisville_landbank,
+     "about": "Available vacant landbank lots in Louisville/Jefferson County with GIS polygon boundaries and official buildability flags."},
+    {"id": "la-county-ttc", "name": "Los Angeles County Tax-Defaulted Land Auctions", "agency": "Los Angeles County Treasurer & Tax Collector",
+     "url": LA_TTC_URL, "state": "CA", "run": la_county_ttc,
+     "about": "Tax-defaulted vacant land auction parcels in Los Angeles County with published minimum bids, zoning, acreage, and GIS parcel outlines."},
+    {"id": "broward-surplus", "name": "Broward County Surplus Real Property", "agency": "Broward County Board of County Commissioners",
+     "url": "https://web.bcpa.net/BcpaClient/#/Record-Search", "state": "FL", "run": broward_surplus,
+     "about": "County-owned surplus real property parcels in Broward County with GIS polygon outlines and direct Property Appraiser folio records."},
     {"id": "wisconsin-bcpl", "name": "Wisconsin Board of Commissioners of Public Lands", "agency": "Wisconsin BCPL",
      "url": WI, "state": "WI", "run": wisconsin, "about": "Surplus state trust land sold by sealed-bid auction or private sale."},
     {"id": "alaska-trust-otc", "name": "Alaska Mental Health Trust Land Office", "agency": "Alaska Mental Health Trust Land Office",
      "url": TRUST, "state": "AK", "run": alaska_trust, "about": "Trust land offered over the counter at fixed prices."},
     {"id": "alaska-dnr", "name": "Alaska Department of Natural Resources land sales", "agency": "Alaska DNR Division of Mining, Land and Water",
      "url": DNR, "state": "AK", "run": alaska_dnr, "about": "State land sold over the counter and by sealed-bid auction."},
+    {"id": "utah-udot", "name": "Utah DOT Surplus Real Property", "agency": "Utah Department of Transportation",
+     "url": UDOT_URL, "state": "UT", "run": utah_udot,
+     "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data."},
     {"id": "california-dgs", "name": "California DGS State Commercial Opportunities", "agency": "California Department of General Services",
      "url": CA_DGS, "state": "CA", "run": california_dgs, "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines."},
 ]
@@ -865,7 +1530,7 @@ NOT_CARRIED = [
     ("GSA RealEstateSales.gov (federal surplus)", "https://realestatesales.gov/",
      "Not crawled: its robots.txt disallows automated access. Browse it directly."),
     ("BLM public land sales", "https://www.blm.gov/programs/lands-and-realty/land-tenure/land-sales",
-     "Sale notices are published irregularly as press announcements; planned for Phase 2 ingestion."),
-    ("Utah SITLA & Arizona ASLD Trust Land Auctions", "https://trustlands.utah.gov/",
-     "Public ArcGIS transaction layers verified; planned next with auction-notice date joins so closed contracts stay separate from open sales."),
+     "Sale notices are published irregularly as press announcements; planned for future ingestion."),
+    ("Utah SITLA & Washington DNR Trust Land GIS", "https://trustlands.utah.gov/",
+     "Transaction ArcGIS folders currently require authentication tokens; browse agency auction calendars directly."),
 ]

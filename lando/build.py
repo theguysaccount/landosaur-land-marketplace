@@ -23,7 +23,7 @@ from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "map.js", "listing.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "map.js", "listing.js", "xray.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 
 
 class Writer(object):
@@ -116,6 +116,7 @@ def build_llms_txt(cat, site, updated):
         "## Primary Hub URLs",
         "",
         "- [Interactive Land Map](%s/)" % base,
+        "- [Free U.S. Parcel X-Ray (All 50 States — Elevation, Flood, Wetlands, Soil, Solar)](%s/xray/)" % base,
         "- [Land for Sale by State (50-State Directory)](%s/land-for-sale/)" % base,
         "- [50-State Land Price Observatory](%s/land-prices/)" % base,
         "- [50-State Land Price Rankings](%s/land-prices/states/)" % base,
@@ -177,6 +178,7 @@ def build(dist, data_dir=None, now=None, log=print):
 
     # Core hubs
     w.page("/", site.home(), indexable=True, group="core")
+    w.page("/xray/", site.xray_page(), indexable=True, group="core")
     w.page("/land-for-sale/", site.land_for_sale_index(), indexable=True, group="core")
     w.page("/analyze/", site.analyze_page(), indexable=True, group="core")
     w.page("/research/", site.research(), indexable=True, group="core")

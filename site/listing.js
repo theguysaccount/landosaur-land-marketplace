@@ -1,7 +1,14 @@
-/* Listing page: GIS parcel map (Aerial/Topo/Streets + FEMA Flood overlay + distance measure), save/compare, and cost worksheet. */
+/* Listing dossier: GIS parcel map (Aerial/Topo/Streets + FEMA overlay + distance measure),
+   Live Federal Parcel X-Ray + Land Potential Screening, Print Field Packet, save/compare, and cost worksheet. */
 (function () {
   "use strict";
   function money(v) { return "$" + Math.round(v).toLocaleString("en-US"); }
+
+  // Print / Save Field Visit PDF
+  var printBtn = document.getElementById("print-dossier");
+  if (printBtn) {
+    printBtn.addEventListener("click", function () { window.print(); });
+  }
 
   // Local shortlist / compare sync
   function loadList(k) { try { return JSON.parse(localStorage.getItem(k) || "[]"); } catch (e) { return []; } }
@@ -12,7 +19,7 @@
     var pid = saveBtn.getAttribute("data-id");
     function syncSave() {
       var on = loadList("landosaur_saved").indexOf(pid) >= 0;
-      saveBtn.textContent = on ? "Saved to shortlist ★" : "Save parcel ☆";
+      saveBtn.textContent = on ? "Saved ★" : "Save ☆";
       saveBtn.classList.toggle("on", on);
     }
     saveBtn.addEventListener("click", function () {
@@ -27,7 +34,7 @@
     var cid = cmpBtn.getAttribute("data-id");
     function syncCmp() {
       var arr = loadList("landosaur_compare"), on = arr.indexOf(cid) >= 0;
-      cmpBtn.textContent = on ? "In compare list ✓" : "Add to compare";
+      cmpBtn.textContent = on ? "Comparing ✓" : "Compare";
       cmpBtn.classList.toggle("on", on);
     }
     cmpBtn.addEventListener("click", function () {
@@ -41,8 +48,10 @@
 
   var data = document.getElementById("parcel");
   var box = document.getElementById("parcel-map");
-  if (data && box && window.L) {
-    var p = JSON.parse(data.textContent);
+  var parcelObj = data ? JSON.parse(data.textContent) : null;
+
+  if (parcelObj && box && window.L) {
+    var p = parcelObj;
     var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
     var topo = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map" });
     var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map: imagery" });
@@ -54,10 +63,10 @@
     L.control.layers({ "USGS Aerial": aerial, "Streets": streets, "USGS Topo": topo }, { "FEMA Flood Zones": fema }).addTo(map);
     if (hasPoly) {
       var shape = L.polygon(p.geometry.map(function (ring) { return ring.map(function (pt) { return [pt[1], pt[0]]; }); }),
-        { color: "#c5ed8b", weight: 3, fillColor: "#236b43", fillOpacity: 0.25 }).addTo(map);
+        { color: "#c8f189", weight: 3, fillColor: "#166534", fillOpacity: 0.25 }).addTo(map);
       map.fitBounds(shape.getBounds(), { padding: [30, 30], maxZoom: 18 });
     }
-    L.circleMarker([p.lat, p.lon], { radius: 6, color: "#fff", weight: 2, fillColor: "#236b43", fillOpacity: 1 }).addTo(map);
+    L.circleMarker([p.lat, p.lon], { radius: 6, color: "#fff", weight: 2, fillColor: "#166534", fillOpacity: 1 }).addTo(map);
 
     // Interactive distance ruler (for measuring distance from road or power line)
     var measBtn = document.getElementById("measure-toggle");
@@ -82,7 +91,7 @@
       map.on("click", function (ev) {
         if (!measuring) return;
         pts.push(ev.latlng);
-        dots.push(L.circleMarker(ev.latlng, { radius: 4, color: "#193c2c", fillColor: "#c5ed8b", fillOpacity: 1, weight: 2 }).addTo(map));
+        dots.push(L.circleMarker(ev.latlng, { radius: 4, color: "#102a1d", fillColor: "#c8f189", fillOpacity: 1, weight: 2 }).addTo(map));
         if (line) map.removeLayer(line);
         if (pts.length >= 2) {
           line = L.polyline(pts, { color: "#e59a6e", weight: 3, dashArray: "6 4" }).addTo(map);
@@ -94,6 +103,12 @@
         }
       });
     }
+  }
+
+  // Trigger Live Federal Parcel X-Ray when coordinates exist
+  var xrayBox = document.getElementById("parcel-xray-body");
+  if (parcelObj && parcelObj.lat != null && parcelObj.lon != null && xrayBox && window.LandosaurXray) {
+    window.LandosaurXray.loadXray(xrayBox, parcelObj.lat, parcelObj.lon, parcelObj);
   }
 
   var form = document.getElementById("worksheet");
@@ -129,7 +144,7 @@
     Array.prototype.forEach.call(form.elements, function (e) { if (e.name && e.value !== "") parts.push(e.name + ":" + e.value); });
     var url = location.href.split("#")[0] + "#w=" + encodeURIComponent(parts.join(","));
     history.replaceState(null, "", url);
-    if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { copy.textContent = "Link copied"; });
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { copy.textContent = "Link copied ✓"; });
     else copy.textContent = "Link is in the address bar";
   });
 })();

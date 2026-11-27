@@ -240,9 +240,8 @@ def build_llms_txt(cat, site, updated):
         "",
     ]
     for src in adapters.SOURCES:
-        s = cat.status.get("sources", {}).get(src["id"], {})
-        count = s.get("count") or 0
-        lines.append("- **%s** (%s) — %s (%s %s)" % (
+        count = cat.active_by_source.get(src["id"], 0)
+        lines.append("- **%s** (%s) — %s (%s active %s)" % (
             src["agency"], STATE_NAMES.get(src["state"], src["state"]), src["about"],
             "{:,}".format(count), "listing" if count == 1 else "listings"))
     lines.extend([
@@ -576,6 +575,9 @@ def build(dist, data_dir=None, now=None, log=print):
     for row in cur:
         state_counts[row["state"]] = state_counts.get(row["state"], 0) + 1
     status = dict(cat.status)
+    status["sources"] = {source: dict(info, active_count=cat.active_by_source.get(source, 0),
+                                      archived=bool(cat.sources.get(source, {}).get("historical_only")))
+                         for source, info in cat.status.get("sources", {}).items()}
     status["site"] = {
         "base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cur),
         "new": len(new), "closing_soon": len(cat.closing()), "guides": len(site.guides),

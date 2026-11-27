@@ -32,8 +32,11 @@ try {
   });
   await step("state filter narrows results and links to parcel dossiers", async () => {
     const before = await page.eval("parseInt(document.getElementById('map-count').textContent.replace(/,/g, ''))");
-    const code = await page.eval("[...document.querySelector('#filters select[name=state]').options].map(o => o.value).filter(Boolean).pop()");
-    await page.eval(`(() => { const s = document.querySelector('#filters select[name=state]'); s.value = '${code}'; s.dispatchEvent(new Event('change', {bubbles: true})); })()`);
+    await page.eval(`(() => {
+      const select = document.querySelector('#filters select[name=state]');
+      select.value = 'KS';
+      select.dispatchEvent(new Event('change', {bubbles: true}));
+    })()`);
     await new Promise((r) => setTimeout(r, 500));
     const after = await page.eval("parseInt(document.getElementById('map-count').textContent.replace(/,/g, ''))");
     assert(after > 0 && after < before, `count ${before} -> ${after}`);
@@ -64,6 +67,14 @@ try {
         .then((r) => r.json()).then((d) => d.results?.[0]?.price_kind === "application" && d.results[0].deal_mode === "offer")`);
       assert(eligible, "search API omitted program-priced land-bank supply");
     }
+  });
+  await step("source totals distinguish active listings from archived records", async () => {
+    await page.goto(base + "/sources/");
+    const good = await page.eval(`fetch("/data/sources.json").then((r) => r.json()).then(({ site, sources }) =>
+      sources["delaware-in"].archived && sources["delaware-in"].active_count === 0 &&
+      Object.values(sources).reduce((sum, s) => sum + s.active_count, 0) === site.current &&
+      document.querySelector("main").textContent.includes("archived source"))`);
+    assert(good, "source directory counted archived records as current");
   });
   await step("50-state land prices observatory renders Georgia chart and counties", async () => {
     await page.goto(base + "/land-prices/georgia/");

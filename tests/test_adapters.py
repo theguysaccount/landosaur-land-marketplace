@@ -33,6 +33,70 @@ class StLouisTest(unittest.TestCase):
         with self.assertRaises(adapters.StructureError):
             adapters.parse_st_louis("A,B\n1,2\n", INVENTORY, lambda w: None)
 
+    def test_side_lot_price_requires_county_eligibility_and_lot_area(self):
+        available = AVAILABLE.replace("Yes,,4465", "Yes,,3999")
+        rows = {r["apn"]: r for r in adapters.parse_st_louis(available, INVENTORY, lambda w: None, 100)}
+        self.assertIsNone(rows["00209030000"]["price"])
+        self.assertEqual((rows["44419170000"]["price"], rows["44419170000"]["price_kind"]), (100, "application"))
+        self.assertIsNone(adapters.parse_st_louis(AVAILABLE, INVENTORY, lambda w: None, 100)[1]["price"])
+
+
+class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_south_suburban_uses_available_lots_only(self):
+        def tr(pid, address, kind, status):
+            return ("<tr><td><a>%s</a></td><td>%s</td><td>Joliet</td>"
+                    "<td>%s</td><td>%s</td><td></td></tr>") % (pid, address, kind, status)
+        page = (
+            '<table id="parcel-list-table"><thead><tr><th>Parcel Number</th><th>Property Type</th></tr></thead>'
+            + tr("30-07-15-221-004-0000", "100 Test Ave", "Residential Lot", "Available")
+            + tr("30-07-15-221-005-0000", "101 Test Ave", "Residential Lot", "Pending")
+            + tr("30-07-15-221-006-0000", "102 Test Ave", "House", "Available")
+            + tr("30-07-15-221-007-0000", "103 Test Ave Apt 4", "Residential Lot", "Available")
+            + '</table><script>var markersOnMap = [{"ppn":"30-07-15-221-004-0000","LatLng":{"lat":41.5,"lng":-88.1}}];</script>'
+        )
+        rows = adapters.parse_south_suburban(page)
+        self.assertEqual([(x["apn"], x["price"], x["lat"], x["status"]) for x in rows],
+                         [("30-07-15-221-004-0000", None, 41.5, "listed")])
+
+    def test_newburgh_is_scoped_to_the_current_sale_section(self):
+        rows = adapters.parse_newburgh_sale(
+            '<h2>Currently Available for Sale:</h2><p><a>10-2-29</a> | 302 Test St (vacant lot)</p>'
+            '<p>10-2-28 | 303 Test St (house)</p><h2>Not for sale at this time</h2>'
+            '<p>10-2-30 | 304 Test St (vacant lot)</p>'
+        )
+        self.assertEqual([(x["apn"], x["price"], x["status"]) for x in rows], [("10-2-29", None, "listed")])
+
+    def test_salt_lake_joins_notice_to_only_unimproved_parcels(self):
+        page = (
+            '<h2 id="stack">Available Parcels</h2>'
+            '<div class="accordion-item rack" id="s-123"><button>1 Main St, Holladay, UT</button>'
+            '<li><strong>Parcel #</strong>: 22-02-157-014-0000</li>'
+            '<li><strong>Total Acreage</strong>: 0.29</li>'
+            '<li><strong>Minimum Price</strong>: $385,000<br><strong style="font-size: 1rem;">'
+            'Offer Close Date</strong>: April 30, 2027</li>'
+        )
+        notices = list(adapters.parse_salt_lake_notices(page))
+        assessor = {"parcel_id": "22021570140000", "full_mkt_total_bldg": 0, "adjusted_total_bldg": 0,
+                    "total_sq_ft": 0, "num_housing_units": 0}
+        rows = adapters.parse_salt_lake_sales(notices, [{"attributes": assessor}])
+        self.assertEqual([(x["apn"], x["price"], x["offer_close_date"], x["locality"]) for x in rows],
+                         [("22-02-157-014-0000", 385000, "2027-04-30", "Holladay")])
+        for attributes in ({}, dict(assessor, total_sq_ft=120), dict(assessor, full_mkt_total_bldg=15000)):
+            self.assertEqual(adapters.parse_salt_lake_sales(notices, [{"attributes": attributes}]), [])
+
+    def test_muncie_requires_a_listed_vacant_lot_with_an_open_auction(self):
+        page = (
+            '<title>1 Test St - Muncie Land Bank</title>'
+            '<script>{"name":"Vacant Lot","@id":"https://muncielandbank.org/product-category/vacant-lot/"}</script>'
+            '<p>The minimum bid is $500.</p><div id="yith-wcact-form-bid"></div>'
+            '<label id="dateend">December 31, 2026 12:00 AM</label><label>EST</label>'
+        )
+        url = "https://muncielandbank.org/product/1-test-st/"
+        row = adapters.parse_muncie_lot(page, url, NOW)
+        self.assertEqual((row["price"], row["status"], row["deadline"]), (500, "auction_open", "2026-12-31T05:00:00Z"))
+        self.assertIsNone(adapters.parse_muncie_lot(page, url, NOW + datetime.timedelta(days=45)))
+        self.assertIsNone(adapters.parse_muncie_lot(page.replace("Vacant Lot", "House"), url, NOW))
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,

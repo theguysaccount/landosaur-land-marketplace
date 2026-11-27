@@ -285,9 +285,10 @@ def quote_list(values):
 STL = "https://static.stlouis-mo.gov/open-data/SLDC/REAL-ESTATE/"
 STL_GIS = "https://maps8.stlouis-mo.gov/arcgis/rest/services/SLDC/SLDC_Real_Estate/MapServer/0/query"
 STL_DETAIL = "https://www.stlouis-mo.gov/government/property/city-owned-property-search.cfm?action=detail&parcelId=%s"
+STL_SIDE_LOT_POLICY = "https://www.lrastl.org/s/Side-Lot-Program-323.pdf"
 
 
-def parse_st_louis(available_csv, inventory_csv, warn):
+def parse_st_louis(available_csv, inventory_csv, warn, side_lot_price=None):
     available = list(csv.DictReader(io.StringIO(available_csv)))
     inventory = list(csv.DictReader(io.StringIO(inventory_csv)))
     if not available or not inventory or "Parcel_Status" not in inventory[0] or "ParcelId" not in available[0]:
@@ -316,12 +317,16 @@ def parse_st_louis(available_csv, inventory_csv, warn):
             continue
         sqft = number(r.get("SQFT"))
         url = STL_DETAIL % pid
+        eligible = clean(r.get("Side lot Eligible?")).lower() == "yes" and sqft and sqft < 4000
+        price = side_lot_price if eligible else None
         facts = [
             fact("availability", "Available", "@stl_inventory",
                  "stl_available"),
             fact("lot_area", "%s square feet" % ("{:,}".format(int(sqft)) if sqft else "not listed"),
                  "@stl_available", "stl_area"),
-            fact("price", "No asking price in the city's export", "@stl_available", "stl_price"),
+            (fact("price", "$%s through the Side Lot Program" % "{:,.0f}".format(price), STL_SIDE_LOT_POLICY,
+                  "Eligible adjacent purchasers only. Application and recording fees are separate.")
+             if price else fact("price", "No asking price in the city's export", "@stl_available", "stl_price")),
         ]
         if clean(r.get("NeighborhoodName")):
             facts.append(fact("neighborhood", clean(r["NeighborhoodName"]), "="))
@@ -336,7 +341,7 @@ def parse_st_louis(available_csv, inventory_csv, warn):
         out.append({
             "id": "stl-%s" % pid, "source": "st-louis-lra", "title": "%s, St. Louis (vacant lot)" % clean(r["Address"]).title(),
             "state": "MO", "county": "St. Louis city", "locality": "St. Louis", "apn": pid,
-            "acres": round(sqft / 43560.0, 4) if sqft else None, "price": None, "price_kind": "none", "offering": "sale",
+            "acres": round(sqft / 43560.0, 4) if sqft else None, "price": price, "price_kind": "application" if price else "none", "offering": "sale",
             "status": "listed", "deadline": None, "url": url, "address": clean(r["Address"]).title(),
             "lat": None, "lon": None, "geometry": None, "facts": facts,
             "tags": ["city-owned vacant lot", "application required"],
@@ -345,7 +350,19 @@ def parse_st_louis(available_csv, inventory_csv, warn):
 
 
 def st_louis(fetch, now, warn):
-    rows = parse_st_louis(fetch.text(STL + "LRA_INVENTORY_AVAILABLE.csv"), fetch.text(STL + "LRA_INVENTORY.csv"), warn)
+    side_lot_price = None
+    try:
+        policy = pdf_text(fetch, STL_SIDE_LOT_POLICY, extraction_mode="plain")
+        m = re.search(r"Property Purchase Price\s+\$([\d,]+(?:\.\d{2})?)", policy)
+        if "SIDE LOT PROGRAM" in policy and m:
+            side_lot_price = number(m[1])
+        else:
+            warn("St. Louis's Side Lot price was not stated in the expected policy format")
+    except (FetchError, StructureError) as error:
+        warn("St. Louis Side Lot prices unavailable (%s)" % error)
+    rows = parse_st_louis(fetch.text(STL + "LRA_INVENTORY_AVAILABLE.csv"),
+                         fetch.text(STL + "LRA_INVENTORY.csv"), warn, side_lot_price)
+
     if len(rows) < 100:
         raise StructureError("only %d St. Louis vacant lots: the export looks incomplete" % len(rows))
     by_apn = {r["apn"]: r for r in rows}
@@ -1181,9 +1198,11 @@ def pittsburgh_vacant(fetch, now, warn):
 
 LOU_GIS = "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/LandbankInventoryParcels/FeatureServer/0/query"
 LOU_URL = "https://data.louisvilleky.gov/"
+LOU_DISPOSITION = ("https://louisvilleky.gov/sites/default/files/2025-08/"
+                   "Landbank%20Disposition%20Program%20Policies%20%E2%80%93%20Updated%20June%202025.pdf")
 
 
-def parse_louisville_features(features, warn):
+def parse_louisville_features(features, warn, side_yard_price=None):
     out, seen = [], set()
     for f in features:
         a = f.get("attributes") or {}
@@ -1199,24 +1218,30 @@ def parse_louisville_features(features, warn):
         rings = (f.get("geometry") or {}).get("rings") or []
         acres = rings_acres(rings)
         buildable = clean(str(a.get("Buildable_") or ""))
+        category = clean(str(a.get("Category") or ""))
+        side_yard = (category.lower() == "available - unbuildable lot" and buildable.lower() == "no"
+                     and acres and acres * 43560 <= 4000)
+        price = side_yard_price if side_yard else None
         facts = [
             fact("availability", "Available — Landbank Lot", "@lou_gis", "lou_avail"),
             fact("parcel_number", pid, "@lou_gis"),
-            fact("price", "Program-specific pricing via Louisville Metro Landbank", LOU_URL, "lou_avail"),
+            (fact("price", "$%s through My New Side Yard" % "{:,.0f}".format(price), LOU_DISPOSITION,
+                  "Available to eligible applicants with a qualifying adjacent structure. Confirm terms with the Landbank.")
+             if price else fact("price", "Program-specific pricing via Louisville Metro Landbank", LOU_URL, "lou_avail")),
         ]
         if buildable:
             facts.append(fact("buildable_lot", buildable, "@lou_gis"))
         if acres:
             facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, "@lou_gis", "gis_area"))
-        if clean(str(a.get("Category") or "")):
-            facts.append(fact("sale_program", clean(str(a["Category"])), "@lou_gis"))
+        if category:
+            facts.append(fact("sale_program", category, "@lou_gis"))
         if a.get("Council_Di") is not None and str(a.get("Council_Di")).strip():
             facts.append(fact("council_district", "District %s" % clean(str(a["Council_Di"])), "@lou_gis"))
         row = {
             "id": "ky-lou-%s" % slug(pid), "source": "louisville-landbank",
             "title": "%s, Louisville (landbank lot)" % addr.title(),
             "state": "KY", "county": "Jefferson", "locality": "Louisville", "apn": pid,
-            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "acres": acres, "price": price, "price_kind": "application" if price else "none", "offering": "sale",
             "status": "listed", "deadline": None, "url": LOU_URL, "address": addr.title(),
             "lat": None, "lon": None, "geometry": None, "facts": facts,
             "tags": ["land bank vacant lot", "application required"] + (["buildable lot"] if buildable.lower() == "yes" else []),
@@ -1249,7 +1274,18 @@ def louisville_landbank(fetch, now, warn):
     else:
         complete = False
         warn("Louisville pagination reached safety limit")
-    rows = parse_louisville_features(all_feats, warn)
+    side_yard_price = None
+    try:
+        policy = pdf_text(fetch, LOU_DISPOSITION)
+        yard = re.search(r"Program Name\s+My New Side Yard(.*?)(?:B\.\s+Lot On My Block|$)", policy, re.S)
+        m = re.search(r"(?m)^\s*Cost\s+\$([\d,]+\.\d{2})", yard[1]) if yard else None
+        if m and "Vacant lots up to 4,000 square feet" in yard[1]:
+            side_yard_price = number(m[1])
+        else:
+            warn("Louisville's Side Yard price or parcel eligibility changed")
+    except (FetchError, StructureError) as error:
+        warn("Louisville Side Yard prices unavailable (%s)" % error)
+    rows = parse_louisville_features(all_feats, warn, side_yard_price)
     if len(rows) < 50:
         raise StructureError("only %d Louisville landbank lots: feed looks incomplete" % len(rows))
     return rows, {"complete": complete, "upstream_total": len(rows)}
@@ -4625,13 +4661,13 @@ def wsdot_surplus(fetch, now, warn):
 ITASCA_URL = "https://www.itascacountymn.gov/304/Real-Estate"
 
 
-def pdf_text(fetch, url):
+def pdf_text(fetch, url, *, extraction_mode="layout"):
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(fetch.bytes(url)))
     if not 1 <= len(reader.pages) <= 60:
         raise StructureError("Unexpected page count for county sale PDF")
-    return "\n".join(page.extract_text(extraction_mode="layout") for page in reader.pages)
+    return "\n".join(page.extract_text(extraction_mode=extraction_mode) for page in reader.pages)
 
 
 def find_itasca_report(page):
@@ -4886,10 +4922,206 @@ URLS.update({
     "lucas_gis": LUCAS_URL,
 })
 
+SSLBDA_URL = "https://www.southsuburbanlandbank.org/property-listings-land"
+SSLBDA_LIST = "https://sslbda.pps.land/sslbda-vacant-land/"
+
+
+def parse_south_suburban(page):
+    table = re.search(r'<table\b[^>]*\bid="parcel-list-table"[^>]*>(.*?)</table>', page, re.S)
+    if not table or "Parcel Number" not in table[1] or "Property Type" not in table[1]:
+        raise StructureError("South Suburban Land Bank sale table changed")
+    marker_json = re.search(r"var markersOnMap\s*=\s*(\[.*?\]);", page, re.S)
+    markers = {m["ppn"]: m["LatLng"] for m in json.loads(marker_json[1])} if marker_json else {}
+    rows, seen = [], set()
+    for entry in re.findall(r"<tr\b[^>]*>(.*?)</tr>", table[1], re.S):
+        cells = re.findall(r"<td\b[^>]*>(.*?)</td>", entry, re.S)
+        if len(cells) != 6:
+            continue
+        pid, address, city, kind, status, _ = map(clean, cells)
+        if status != "Available" or kind not in ("Residential Lot", "Commercial Lot"):
+            continue
+        if not re.fullmatch(r"\d{2}-\d{2}(?:-\d{2})?-\d{3}-\d{3}-\d{4}", pid) or pid in seen or not city:
+            continue
+        if re.search(r"\b(?:apt|unit|suite)\.?\s+\w", address, re.I):
+            continue
+        seen.add(pid)
+        record = urllib.parse.urljoin(SSLBDA_LIST, "/sslbda-property-detail/?parcel_id=" + pid)
+        point = markers.get(pid, {})
+        lat, lon = point.get("lat"), point.get("lng")
+        if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+                and 37 < lat < 43 and -92 < lon < -87):
+            lat = lon = None
+        city = city.title()
+        rows.append({
+            "id": "il-sslbda-" + slug(pid), "source": "south-suburban-landbank",
+            "title": "%s, %s (%s)" % (address or "Parcel " + pid, city, kind.lower()),
+            "state": "IL", "county": "", "locality": city, "apn": pid,
+            "acres": None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": SSLBDA_URL, "address": address,
+            "lat": lat, "lon": lon, "geometry": None,
+            "facts": [fact("availability", "Available through the Land Bank", record),
+                      fact("property_class", kind, record), fact("parcel_number", pid, record)],
+            "tags": ["land bank vacant lot", "application required"],
+        })
+    return rows
+
+
+def south_suburban_landbank(fetch, now, warn):
+    index = fetch.text(SSLBDA_URL)
+    if not re.search(r'<iframe\b[^>]*\bsrc=["\']' + re.escape(SSLBDA_LIST) + r'["\']', index, re.I):
+        raise StructureError("South Suburban Land Bank no longer links to the sale table")
+    rows = parse_south_suburban(fetch.text(SSLBDA_LIST))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+NEWBURGH_URL = "https://www.newburghcommunitylandbank.org/properties"
+
+
+def parse_newburgh_sale(page):
+    section = re.search(
+        r"<h2\b[^>]*>\s*currently available for sale\s*:?\s*</h2>(.*?)<h2\b[^>]*>\s*not for sale at this time",
+        page, re.I | re.S,
+    )
+    if not section:
+        raise StructureError("Newburgh's available property section changed")
+    rows, seen = [], set()
+    for item in re.findall(r"<p\b[^>]*>(.*?)</p>", section[1], re.I | re.S):
+        match = re.fullmatch(r"(\d+(?:-\d+(?:\.\d+)?){2})\s*\|\s*([^|]+?)\s*\(vacant lot\)", clean(item), re.I)
+        if not match or match[1] in seen:
+            continue
+        pid, address = match.groups()
+        seen.add(pid)
+        rows.append({
+            "id": "ny-newburgh-" + slug(pid), "source": "newburgh-landbank",
+            "title": "%s, Newburgh (vacant lot)" % address,
+            "state": "NY", "county": "Orange", "locality": "Newburgh", "apn": pid,
+            "acres": None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": NEWBURGH_URL, "address": address,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Currently available for sale", "="),
+                      fact("parcel_number", pid, "=")],
+            "tags": ["land bank vacant lot", "application required"],
+        })
+    return rows
+
+
+def newburgh_landbank(fetch, now, warn):
+    rows = parse_newburgh_sale(fetch.text(NEWBURGH_URL))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+SLCO_SALE = "https://www.saltlakecounty.gov/real-estate/public-sale/"
+SLCO_ASSESSOR = "https://apps.saltlakecounty.gov/slcogis/rest/services/Assessor/Parcel_Viewer_external/MapServer/5/query"
+
+
+def parse_salt_lake_notices(page):
+    if not re.search(r"<h2\b[^>]*>\s*Available Parcels\s*</h2>", page, re.I):
+        raise StructureError("Salt Lake County's available parcels section changed")
+    blocks = re.split(r'<div class="accordion-item rack" id="(s-\d+)"', page)[1:]
+    for anchor, block in zip(blocks[::2], blocks[1::2]):
+        button = re.search(r"<button\b[^>]*>(.*?)</button>", block, re.S)
+        fields = {}
+        for label, value in re.findall(r"<strong\b[^>]*>([^<]+)</strong>\s*:?\s*([^<]*)", block):
+            fields[clean(label).rstrip(":")] = clean(value).lstrip(":").strip()
+        pid = fields.get("Parcel #", "")
+        if not re.fullmatch(r"\d{2}-\d{2}-\d{3}-\d{3}-\d{4}", pid) or not button:
+            raise StructureError("Salt Lake County sale listing is missing a parcel number or address")
+        close = datetime.datetime.strptime(fields.get("Offer Close Date", ""), "%B %d, %Y").date()
+        yield anchor, pid, clean(button[1]), number(fields.get("Total Acreage")), number(fields.get("Minimum Price")), close
+
+
+def parse_salt_lake_sales(notices, features):
+    parcels = {(f.get("attributes") or {}).get("parcel_id"): f for f in features}
+    rows = []
+    for anchor, pid, address, acres, price, close in notices:
+        feature = parcels.get(pid.replace("-", ""), {})
+        attr = feature.get("attributes") or {}
+        if attr.get("full_mkt_total_bldg") != 0 or attr.get("adjusted_total_bldg") != 0:
+            continue
+        if any(number(attr.get(key)) for key in ("total_sq_ft", "num_housing_units")):
+            continue
+        if not acres or not price:
+            continue
+        url = SLCO_SALE + "#" + anchor
+        city = address.split(",")[1].strip() if len(address.split(",")) > 2 else ""
+        row = {
+            "id": "ut-slco-" + slug(pid), "source": "salt-lake-county-surplus",
+            "title": "%s (Salt Lake County surplus land)" % address,
+            "state": "UT", "county": "Salt Lake", "locality": city, "apn": pid,
+            "acres": acres, "price": price, "price_kind": "min_bid", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "offer_close_date": close.isoformat(),
+            "url": url, "address": address, "lat": None, "lon": None, "geometry": None,
+            "facts": [
+                fact("availability", "Available for public offers", url),
+                fact("parcel_number", pid, url),
+                fact("price", "$%s minimum offer" % "{:,.2f}".format(price), url,
+                     "Appraisal, filing and administrative fees are separate."),
+                fact("deadline", "%s (county local date)" % close.strftime("%B %d, %Y"), url),
+            ],
+            "tags": ["county surplus land", "sealed offer"],
+        }
+        if rings := (feature.get("geometry") or {}).get("rings"):
+            parcel_url = one_parcel_url(SLCO_ASSESSOR, "parcel_id='%s'" % pid.replace("-", ""))
+            apply_geometry(row, rings, parcel_url, "Salt Lake County Assessor")
+        rows.append(row)
+    return rows
+
+
+def salt_lake_county_surplus(fetch, now, warn):
+    notices = list(parse_salt_lake_notices(fetch.text(SLCO_SALE)))
+    features = []
+    if notices:
+        ids = quote_list(pid.replace("-", "") for _, pid, *_ in notices)
+        _, features = arcgis_query(fetch, SLCO_ASSESSOR, "parcel_id IN (%s)" % ids,
+                                   "parcel_id,full_mkt_total_bldg,adjusted_total_bldg,total_sq_ft,num_housing_units")
+    rows = parse_salt_lake_sales(notices, features)
+    return rows, {"complete": True, "upstream_total": len(notices)}
+
+
+MUNCIE_VACANT = "https://muncielandbank.org/vacant-lot-auction/"
+
+
+def parse_muncie_lot(page, url, now):
+    from zoneinfo import ZoneInfo
+
+    if not re.search(r'"name":"Vacant Lot","@id":"https://muncielandbank\.org/product-category/vacant-lot/"', page):
+        return None
+    title = re.search(r"<title>([^<]+?)\s*-\s*Muncie Land Bank</title>", page)
+    minimum = re.search(r"The minimum bid is \$([\d,]+(?:\.\d{2})?)\b", clean(page), re.I)
+    deadline = re.search(r'<label\b[^>]*\bid="dateend"[^>]*>([^<]+)</label>\s*<label>E[SD]T</label>', page)
+    if not title or not minimum or not deadline or 'id="yith-wcact-form-bid"' not in page:
+        return None
+    land_name = clean(title[1])
+    price = number(minimum[1])
+    cutoff = datetime.datetime.strptime(clean(deadline[1]), "%B %d, %Y %I:%M %p").replace(
+        tzinfo=ZoneInfo("America/Indiana/Indianapolis")).astimezone(datetime.timezone.utc)
+    if not land_name or not price or cutoff <= now:
+        return None
+    return {
+        "id": "in-muncie-" + url.rstrip("/").rsplit("/", 1)[1], "source": "muncie-landbank",
+        "title": "%s, Muncie (land bank auction)" % land_name, "state": "IN", "county": "Delaware",
+        "locality": "Muncie", "apn": "", "acres": None, "price": price, "price_kind": "min_bid",
+        "offering": "auction", "status": "auction_open", "deadline": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": url, "address": land_name, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "Open Muncie Land Bank vacant-lot auction", "="),
+                  fact("price", "$%s minimum bid" % "{:,.2f}".format(price), "=")],
+        "tags": ["land bank vacant lot", "auction terms apply"],
+    }
+
+
+def muncie_landbank(fetch, now, warn):
+    page = fetch.text(MUNCIE_VACANT)
+    if "Vacant Lot Auction" not in page:
+        raise StructureError("Muncie's vacant lot auction directory changed")
+    urls = set(re.findall(r'href="(https://muncielandbank\.org/product/[a-z0-9-]+/)"', page))
+    rows = [parse_muncie_lot(fetch.text(url), url, now) for url in sorted(urls)]
+    return [r for r in rows if r], {"complete": True, "upstream_total": len(urls)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
-     "about": "City-owned vacant lots marked available in the city's open-data exports. No prices are published; buying goes through the city's application."},
+     "about": "City-owned vacant lots marked available in the city's open-data exports. Eligible Side Lot Program properties have an official application price."},
     {"id": "kansas-city-landbank", "name": "Land Bank of Kansas City vacant-lot inventory", "agency": "Land Bank of Kansas City, Missouri",
      "url": KC_PORTAL, "state": "MO", "run": kansas_city_landbank,
      "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context."},
@@ -4910,7 +5142,7 @@ SOURCES = [
      "about": "Actively offered and open-application Chicago city-owned vacant lots with zoning classifications, lot square footage, and Q4/2027 application deadlines."},
     {"id": "louisville-landbank", "name": "Louisville Metro Landbank Authority available lots", "agency": "Louisville Metro Landbank Authority",
      "url": LOU_URL, "state": "KY", "run": louisville_landbank,
-     "about": "Available vacant landbank lots in Louisville/Jefferson County with GIS polygon boundaries and official buildability flags."},
+     "about": "Available vacant landbank lots with official buildability flags. Eligible My New Side Yard lots carry the published conditional price."},
     {"id": "la-county-ttc", "name": "Los Angeles County Tax-Defaulted Land Auctions", "agency": "Los Angeles County Treasurer & Tax Collector",
      "url": LA_TTC_URL, "state": "CA", "run": la_county_ttc,
      "about": "Tax-defaulted vacant land auction parcels in Los Angeles County with published minimum bids, zoning, acreage, and GIS parcel outlines."},
@@ -4921,29 +5153,29 @@ SOURCES = [
      "url": ORANGE_FL_URL, "state": "FL", "run": orange_county_fl,
      "about": "Active scheduled tax deed auction parcels in Orange County, Florida with posted upcoming auction dates and coordinates."},
     {"id": "albany-landbank", "name": "Albany County Land Bank vacant land", "agency": "Albany County Land Bank Corporation",
-     "url": ALBANY_URL, "state": "NY", "run": albany_landbank,
-     "about": "Vacant residential and commercial land bank parcels across Albany County, New York with GIS outlines, zoning, and acreage."},
+     "url": ALBANY_URL, "state": "NY", "run": albany_landbank, "historical_only": True,
+     "about": "Albany County's sale list governs current availability. The legacy GIS inventory contains held parcels outside that list."},
     {"id": "big-spring-tx", "name": "City of Big Spring city-owned vacant lots", "agency": "City of Big Spring, Texas",
-     "url": BIGSPRING_URL, "state": "TX", "run": big_spring_tx,
-     "about": "City-owned vacant land parcels in Howard County, Texas with GIS parcel outlines, acreage, and legal descriptions."},
+     "url": BIGSPRING_URL, "state": "TX", "run": big_spring_tx, "historical_only": True,
+     "about": "This city ownership map needs a match to a current sale or proposal notice."},
     {"id": "las-cruces-nm", "name": "City of Las Cruces city-owned vacant land", "agency": "City of Las Cruces, New Mexico",
-     "url": LASCRUCES_URL, "state": "NM", "run": las_cruces_nm,
-     "about": "City-owned vacant land parcels in Doña Ana County, New Mexico with GIS outlines and acreage."},
+     "url": LASCRUCES_URL, "state": "NM", "run": las_cruces_nm, "historical_only": True,
+     "about": "This city ownership map needs a match to a current sale or proposal notice."},
     {"id": "baltimore-vacant", "name": "Baltimore City-Owned Vacant Properties (DMA)", "agency": "Baltimore City Dept. of Housing & Community Development",
-     "url": BALTIMORE_URL, "state": "MD", "run": baltimore_vacant,
-     "about": "City-owned vacant parcels in Baltimore with GIS outlines, zoning codes, and lot dimensions."},
+     "url": BALTIMORE_URL, "state": "MD", "run": baltimore_vacant, "historical_only": True,
+     "about": "This city ownership map needs a match to Baltimore's current public sale portal."},
     {"id": "king-county-wa", "name": "King County Tax-Title Vacant Land", "agency": "King County Real Estate Services",
-     "url": KING_WA_URL, "state": "WA", "run": king_county_wa,
-     "about": "Tax-foreclosed vacant land held by King County, Washington with GIS parcel outlines and acreage."},
+     "url": KING_WA_URL, "state": "WA", "run": king_county_wa, "historical_only": True,
+     "about": "The tax-title holdings layer needs a match to the county's current auction or direct-sale notices."},
     {"id": "charlotte-nc", "name": "City of Charlotte Undeveloped City-Owned Land", "agency": "City of Charlotte, North Carolina",
-     "url": CHARLOTTE_URL, "state": "NC", "run": charlotte_nc,
-     "about": "Undeveloped city-owned land parcels across Mecklenburg County with GIS outlines and acreage."},
+     "url": CHARLOTTE_URL, "state": "NC", "run": charlotte_nc, "historical_only": True,
+     "about": "This city ownership map needs a match to a current sale or proposal notice."},
     {"id": "canton-ga", "name": "City of Canton City-Owned Land", "agency": "City of Canton, Georgia",
-     "url": CANTON_GA_URL, "state": "GA", "run": canton_ga,
-     "about": "City-owned parcels in Cherokee County, Georgia with GIS outlines, acreage, and zoning."},
+     "url": CANTON_GA_URL, "state": "GA", "run": canton_ga, "historical_only": True,
+     "about": "This city ownership map needs a match to a current sale or proposal notice."},
     {"id": "san-miguel-co", "name": "San Miguel County Public Land Inventory", "agency": "San Miguel County, Colorado",
-     "url": SANMIGUEL_CO_URL, "state": "CO", "run": san_miguel_co,
-     "about": "County-owned mountain land parcels in Telluride & Placerville, Colorado with GIS outlines."},
+     "url": SANMIGUEL_CO_URL, "state": "CO", "run": san_miguel_co, "historical_only": True,
+     "about": "This county ownership map needs a match to a current sale or proposal notice."},
     {"id": "navajo-county-az", "name": "Navajo County Back-Tax Auction Properties", "agency": "Navajo County, Arizona",
      "url": NAVAJO_AZ_URL, "state": "AZ", "run": navajo_county_az,
      "about": "Rural Arizona back-tax auction parcels with GIS outlines and direct official auction links."},
@@ -4951,14 +5183,14 @@ SOURCES = [
      "url": EBR_LA_URL, "state": "LA", "run": baton_rouge_la,
      "about": "Adjudicated tax-sale vacant parcels published by East Baton Rouge Parish Open Data."},
     {"id": "cherry-hill-nj", "name": "Cherry Hill Township Vacant Lots", "agency": "Cherry Hill Township, New Jersey",
-     "url": CHERRYHILL_NJ_URL, "state": "NJ", "run": cherry_hill_nj,
-     "about": "Township-owned vacant lots in Camden County, New Jersey with GIS outlines and block/lot IDs."},
+     "url": CHERRYHILL_NJ_URL, "state": "NJ", "run": cherry_hill_nj, "historical_only": True,
+     "about": "This township ownership map needs a match to a current sale notice."},
     {"id": "orlando-vacant-fl", "name": "City of Orlando Vacant Lots Inventory", "agency": "City of Orlando, Florida",
-     "url": ORLANDO_FL_URL, "state": "FL", "run": orlando_vacant_fl,
-     "about": "City-owned vacant lots in Orlando with zoning, lot dimensions, and conforming buildability flags."},
+     "url": ORLANDO_FL_URL, "state": "FL", "run": orlando_vacant_fl, "historical_only": True,
+     "about": "The city's vacant-lot inventory needs a match to a current sale notice."},
     {"id": "delaware-in", "name": "Delaware County / Muncie Tax Sale Vacant Land", "agency": "Delaware County, Indiana",
-     "url": DELAWARE_IN_URL, "state": "IN", "run": delaware_in,
-     "about": "Fall 2026 Delaware County / Muncie tax-sale vacant land parcels with published minimum bids and GIS parcel outlines."},
+     "url": DELAWARE_IN_URL, "state": "IN", "run": delaware_in, "historical_only": True,
+     "about": "The October 2026 sale of tax certificates has ended."},
     {"id": "mille-lacs-mn", "name": "Mille Lacs County Tax-Forfeited Saleable Land", "agency": "Mille Lacs County, Minnesota",
      "url": MILLELACS_MN_URL, "state": "MN", "run": mille_lacs_mn,
      "about": "Saleable vacant tax-forfeited parcels in Mille Lacs County with GIS outlines, zoning, and waterfront indicators."},
@@ -4984,11 +5216,11 @@ SOURCES = [
      "url": WILMINGTON_DE_URL, "state": "DE", "run": wilmington_de,
      "about": "Land Bank side-lot parcels in Wilmington, Delaware with GIS outlines and acreage."},
     {"id": "hartford-ct", "name": "City of Hartford City-Owned Vacant Lots", "agency": "City of Hartford, Connecticut",
-     "url": HARTFORD_CT_URL, "state": "CT", "run": hartford_ct,
-     "about": "City-owned vacant lots in Hartford, Connecticut with GIS outlines, zoning, and square footage."},
+     "url": HARTFORD_CT_URL, "state": "CT", "run": hartford_ct, "historical_only": True,
+     "about": "This city ownership map needs a match to a current sale notice."},
     {"id": "omaha-ne", "name": "City of Omaha City-Owned Vacant Land", "agency": "City of Omaha, Nebraska",
-     "url": OMAHA_NE_URL, "state": "NE", "run": omaha_ne,
-     "about": "City-owned unimproved vacant land parcels in Omaha / Douglas County, Nebraska with GIS outlines and acreage."},
+     "url": OMAHA_NE_URL, "state": "NE", "run": omaha_ne, "historical_only": True,
+     "about": "This city ownership map needs a match to a current sale or proposal notice."},
     {"id": "bluefield-wv", "name": "City of Bluefield Municipal Land Bank", "agency": "City of Bluefield, West Virginia",
      "url": BLUEFIELD_WV_URL, "state": "WV", "run": bluefield_wv,
      "about": "Municipal Land Bank parcels in Bluefield, West Virginia with GIS outlines, zoning, and acreage."},
@@ -4996,14 +5228,14 @@ SOURCES = [
      "url": MEMPHIS_TN_URL, "state": "TN", "run": memphis_tn,
      "about": "Surplus vacant city properties in Memphis / Shelby County, Tennessee with GIS outlines and zoning."},
     {"id": "warwick-ri", "name": "City of Warwick Tax-Title Vacant Land", "agency": "City of Warwick, Rhode Island",
-     "url": WARWICK_RI_URL, "state": "RI", "run": warwick_ri,
-     "about": "Tax-title vacant residential and developable land parcels in Warwick, Rhode Island with GIS outlines and acreage."},
+     "url": WARWICK_RI_URL, "state": "RI", "run": warwick_ri, "historical_only": True,
+     "about": "This land-use layer lacks a current parcel-specific sale or auction notice."},
     {"id": "boston-ma", "name": "City of Boston MOH City-Owned Land", "agency": "City of Boston Mayor's Office of Housing",
-     "url": BOSTON_MA_URL, "state": "MA", "run": boston_ma,
-     "about": "City-owned parcels held by Boston's Mayor's Office of Housing (MOH) with GIS outlines and lot area."},
+     "url": BOSTON_MA_URL, "state": "MA", "run": boston_ma, "historical_only": True,
+     "about": "The city custody inventory needs a match to an open land sale or proposal."},
     {"id": "albany-wy", "name": "Albany County 2026 Tax Sale Vacant Land", "agency": "Albany County, Wyoming",
-     "url": ALBANY_WY_URL, "state": "WY", "run": albany_wy,
-     "about": "Unimproved vacant land parcels on the Albany County, Wyoming 2026 tax-sale roll with GIS outlines and acreage."},
+     "url": ALBANY_WY_URL, "state": "WY", "run": albany_wy, "historical_only": True,
+     "about": "The 2026 source was a tax lien roll. The county announces its next certificate sale for August 2027."},
     {"id": "odot-ok", "name": "Oklahoma DOT Statewide Surplus Property", "agency": "Oklahoma Department of Transportation",
      "url": ODOT_OK_URL, "state": "OK", "run": odot_ok,
      "about": "Statewide surplus highway right-of-way parcels across Oklahoma counties with GIS outlines, acreage, and PLSS descriptions."},
@@ -5011,41 +5243,41 @@ SOURCES = [
      "url": MS_SURPLUS_URL, "state": "MS", "run": ms_surplus,
      "about": "Unimproved surplus parcels from the State of Mississippi GIS inventory with parcel outlines and acreage."},
     {"id": "horry-sc", "name": "Horry County Delinquent Tax Sale Land", "agency": "Horry County, South Carolina",
-     "url": HORRY_SC_URL, "state": "SC", "run": horry_sc,
-     "about": "Delinquent tax-sale land parcels in Horry County, South Carolina with published opening bid amounts and GIS outlines."},
+     "url": HORRY_SC_URL, "state": "SC", "run": horry_sc, "historical_only": True,
+     "about": "The GIS feed comes from the county's 2025 delinquent tax sale. That event has ended."},
     {"id": "portland-or", "name": "City of Portland Vacant City-Owned Land", "agency": "City of Portland, Oregon",
-     "url": PORTLAND_OR_URL, "state": "OR", "run": portland_or,
-     "about": "Vacant city-owned parcels in Portland / Multnomah County from PortlandMaps Open Data with GIS outlines."},
+     "url": PORTLAND_OR_URL, "state": "OR", "run": portland_or, "historical_only": True,
+     "about": "The city ownership map requires a match to a council-approved active sale."},
     {"id": "maui-hi", "name": "West Maui Vacant Government-Owned Parcels", "agency": "County of Maui / Hawaii Public Lands",
-     "url": MAUI_HI_URL, "state": "HI", "run": maui_hi,
-     "about": "Vacant government-owned parcels in West Maui with Tax Map Key (TMK) IDs, acreage, and GIS outlines."},
+     "url": MAUI_HI_URL, "state": "HI", "run": maui_hi, "historical_only": True,
+     "about": "The West Maui government ownership layer needs a match to a current land sale notice."},
     {"id": "lasvegas-nv", "name": "City of Las Vegas Vacant Real Estate Assets", "agency": "City of Las Vegas, Nevada",
-     "url": LASVEGAS_NV_URL, "state": "NV", "run": lasvegas_nv,
-     "about": "Vacant city-owned real estate parcels in Las Vegas / Clark County Open Data with coordinates and parcel numbers."},
+     "url": LASVEGAS_NV_URL, "state": "NV", "run": lasvegas_nv, "historical_only": True,
+     "about": "The city's real-estate asset layer needs a match to a current land sale notice."},
     {"id": "peterborough-nh", "name": "Town of Peterborough Tax-Deeded Lands", "agency": "Town of Peterborough, New Hampshire",
-     "url": PETERBOROUGH_NH_URL, "state": "NH", "run": peterborough_nh,
-     "about": "Tax-deeded municipal land parcels in Peterborough, New Hampshire with GIS outlines, acreage, and zoning."},
+     "url": PETERBOROUGH_NH_URL, "state": "NH", "run": peterborough_nh, "historical_only": True,
+     "about": "The town's tax-deeded holdings need a match to a current sale notice."},
     {"id": "yankton-sd", "name": "City of Yankton Vacant Municipal Lots", "agency": "City of Yankton, South Dakota",
-     "url": YANKTON_SD_URL, "state": "SD", "run": yankton_sd,
-     "about": "Vacant city-owned parcels in Yankton, South Dakota with GIS outlines and legal descriptions."},
+     "url": YANKTON_SD_URL, "state": "SD", "run": yankton_sd, "historical_only": True,
+     "about": "The city ownership map needs a match to a current sale notice."},
     {"id": "burleigh-nd", "name": "Burleigh County / Bismarck Vacant Public Land", "agency": "Burleigh County / City of Bismarck, North Dakota",
-     "url": BURLEIGH_ND_URL, "state": "ND", "run": burleigh_nd,
-     "about": "Unimproved county- and city-owned vacant parcels in Burleigh County / Bismarck, North Dakota with GIS outlines and acreage."},
+     "url": BURLEIGH_ND_URL, "state": "ND", "run": burleigh_nd, "historical_only": True,
+     "about": "The county and city ownership map needs a match to a current sale notice."},
     {"id": "vcgi-vt", "name": "Vermont Statewide Municipal Vacant Land", "agency": "Vermont Center for Geographic Information (VCGI)",
-     "url": VCGI_VT_URL, "state": "VT", "run": vcgi_vt,
-     "about": "Unimproved town- and city-owned parcels across Vermont from VCGI Statewide Standardized Parcel Data with SPAN IDs and GIS outlines."},
+     "url": VCGI_VT_URL, "state": "VT", "run": vcgi_vt, "historical_only": True,
+     "about": "The statewide ownership layer needs a match to individual municipal sale notices."},
     {"id": "montana-cad", "name": "Montana Statewide County & City Vacant Land", "agency": "Montana State Library / County Treasurers",
-     "url": MT_CAD_URL, "state": "MT", "run": montana_cad,
-     "about": "County- and city-owned vacant land tracts across Montana from the Montana Statewide Cadastral Framework with GIS outlines and acreage."},
+     "url": MT_CAD_URL, "state": "MT", "run": montana_cad, "historical_only": True,
+     "about": "The statewide ownership layer needs a match to current local sale notices."},
     {"id": "boise-id", "name": "City of Boise Housing & Community Development Land", "agency": "City of Boise, Idaho",
-     "url": BOISE_ID_URL, "state": "ID", "run": boise_id,
-     "about": "City of Boise Community Development (COMDEV) land parcels in Ada County, Idaho with GIS outlines and acreage."},
+     "url": BOISE_ID_URL, "state": "ID", "run": boise_id, "historical_only": True,
+     "about": "The community development inventory needs a match to a current sale notice."},
     {"id": "auburn-me", "name": "City of Auburn Unimproved Municipal Land", "agency": "City of Auburn, Maine",
-     "url": AUBURN_ME_URL, "state": "ME", "run": auburn_me,
-     "about": "Unimproved undeveloped, commercial, and industrial municipal parcels in Auburn, Maine with GIS outlines and acreage."},
+     "url": AUBURN_ME_URL, "state": "ME", "run": auburn_me, "historical_only": True,
+     "about": "The city ownership map needs a match to a current sale notice."},
     {"id": "portland-me", "name": "City of Portland Municipal Land Bank", "agency": "City of Portland, Maine",
-     "url": PORTLAND_ME_URL, "state": "ME", "run": portland_me,
-     "about": "Municipal land bank and vacant land parcels in Portland, Maine with GIS outlines."},
+     "url": PORTLAND_ME_URL, "state": "ME", "run": portland_me, "historical_only": True,
+     "about": "The city ownership layer needs a match to a current sale notice."},
     {"id": "wisconsin-bcpl", "name": "Wisconsin Board of Commissioners of Public Lands", "agency": "Wisconsin BCPL",
      "url": WI, "state": "WI", "run": wisconsin, "about": "Surplus state trust land sold by sealed-bid auction or private sale."},
     {"id": "alaska-trust-otc", "name": "Alaska Mental Health Trust Land Office", "agency": "Alaska Mental Health Trust Land Office",
@@ -5053,8 +5285,8 @@ SOURCES = [
     {"id": "alaska-dnr", "name": "Alaska Department of Natural Resources land sales", "agency": "Alaska DNR Division of Mining, Land and Water",
      "url": DNR, "state": "AK", "run": alaska_dnr, "about": "State land sold over the counter and by sealed-bid auction."},
     {"id": "utah-udot", "name": "Utah DOT Surplus Real Property", "agency": "Utah Department of Transportation",
-     "url": UDOT_URL, "state": "UT", "run": utah_udot,
-     "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data."},
+     "url": UDOT_URL, "state": "UT", "run": utah_udot, "historical_only": True,
+     "about": "The unsold right-of-way inventory needs a match to a current UDOT auction notice."},
     {"id": "california-dgs", "name": "California DGS State Commercial Opportunities", "agency": "California Department of General Services",
      "url": CA_DGS, "state": "CA", "run": california_dgs, "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines."},
     {"id": "philly-landbank", "name": "Philadelphia Land Bank vacant lots", "agency": "Philadelphia Land Bank / PHDC",
@@ -5096,8 +5328,28 @@ SOURCES = [
     {"id": "fnsb-chatanika-otc", "name": "Fairbanks North Star Borough West Chatanika over-the-counter lots",
      "agency": "Fairbanks North Star Borough Natural Resources Development", "url": FNSB_SALE, "state": "AK",
      "run": fnsb_chatanika, "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases."},
+    {"id": "south-suburban-landbank", "name": "South Suburban Land Bank available vacant land",
+     "agency": "South Suburban Land Bank and Development Authority", "url": SSLBDA_URL, "state": "IL",
+     "run": south_suburban_landbank, "requires_sale_match": True,
+     "about": "Available residential and commercial lots from the public Land Bank's vacant-land sale directory."},
+    {"id": "newburgh-landbank", "name": "Newburgh Community Land Bank available vacant land",
+     "agency": "Newburgh Community Land Bank", "url": NEWBURGH_URL, "state": "NY",
+     "run": newburgh_landbank, "requires_sale_match": True,
+     "about": "Vacant lots in the Land Bank's current sale section. Properties held for other uses or previously sold are excluded."},
+    {"id": "salt-lake-county-surplus", "name": "Salt Lake County public surplus land offers",
+     "agency": "Salt Lake County Real Estate Division", "url": SLCO_SALE, "state": "UT",
+     "run": salt_lake_county_surplus, "requires_sale_match": True, "timezone": "America/Denver",
+     "about": "Active county surplus offers matched to assessor parcels with zero recorded building value."},
+    {"id": "muncie-landbank", "name": "Muncie Land Bank vacant lot auctions",
+     "agency": "Muncie Land Bank", "url": MUNCIE_VACANT, "state": "IN",
+     "run": muncie_landbank, "requires_sale_match": True,
+     "about": "Active vacant land auctions with an open bid form, a future deadline, and a published minimum bid."},
 ]
 NOT_CARRIED = [
+    ("BuyIntoBmore and Dallas Land Bank public portals", "https://buyintobmore.baltimorecity.gov/",
+     "Automated reads skipped because both listing portals returned HTML instead of crawler rules at their robots.txt endpoints."),
+    ("Greater Syracuse Land Bank property search", "https://syracuselandbank.org/properties/",
+     "The linked listing portal could not serve its robots.txt over HTTPS. Browse the published property search directly."),
     ("Kenai Peninsula Borough land sales", "https://www.kpb.us/landmgt/landsales",
      "Automated reads are skipped because the official robots.txt endpoint returned HTML instead of crawler rules."),
     ("Arizona DOT and Arizona State Land Department sales", "https://azdot.gov/business/right-way-properties/vacant-land-and-commercial-properties-sale",

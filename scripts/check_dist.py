@@ -40,6 +40,7 @@ OFFICIAL = {
     "cityofyankton.org", "burleigh.gov", "vcgi.vermont.gov", "dnrc.mt.gov",
     "cityofboise.org", "auburnmaine.gov", "portlandmaine.gov",
     "phdcphila.org", "atlas.phila.gov", "clevelandohio.gov", "dallascityhall.com",
+    "southsuburbanlandbank.org", "newburghcommunitylandbank.org", "saltlakecounty.gov", "muncielandbank.org",
     "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us", "hokecounty.net", "wsdot.wa.gov", "itascacountymn.gov", "valencia.nm.us", "tax.newmexico.gov", "stlouiscountymn.gov", "fnsb.gov",
 }
 

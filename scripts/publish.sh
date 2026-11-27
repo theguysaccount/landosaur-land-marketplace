@@ -2,7 +2,7 @@
 # Landosaur's local refresh, build, verification, and production release. GitHub Actions stay manual.
 #
 #   ./scripts/publish.sh                       # Verify, push, and deploy the current main commit
-#   ./scripts/publish.sh --refresh             # Refresh 64+ official agencies across 50 states and verify
+#   ./scripts/publish.sh --refresh             # Refresh the official sale feeds and verify
 #   ./scripts/publish.sh --refresh-only a,b    # Refresh specific agency IDs and verify
 #   ./scripts/publish.sh --refresh-only a,b --crawl-only  # Refresh data for review
 #   ./scripts/publish.sh --refresh-intelligence --crawl-only  # Refresh EIA-861 and CPI-U
@@ -69,7 +69,7 @@ refresh_data() {
   local -a python_run=(python3)
   if ! python3 -c 'import pypdf, openpyxl' 2>/dev/null && command -v uv >/dev/null; then
     export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/work/uv-cache}"
-    python_run=(uv run --with-requirements "$ROOT/requirements-refresh.txt" python)
+    python_run=(uv run --python "${UV_PYTHON:-$(command -v python3)}" --with-requirements "$ROOT/requirements-refresh.txt" python)
   fi
   if [ "$REFRESH" -eq 1 ]; then
     if [ -n "$REFRESH_ONLY" ]; then

@@ -79,6 +79,25 @@ class RefreshAndBuildTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
+    def test_unverified_offers_and_elapsed_local_close_dates_are_inactive(self):
+        archived = listing(1, source="delaware-in", price=500, price_kind="min_bid",
+                           status="auction_terms", deadline="2026-12-05T00:00:00Z")
+        dated = listing(2, source="salt-lake-county-surplus", status="auction_terms",
+                        offer_close_date="2026-11-26")
+        proposal = listing(3, source="california-dgs", status="proposal_open",
+                           deadline="2026-11-27T00:00:00Z")
+        for row in (archived, dated, proposal):
+            store.save_listings(row["source"], [row], self.data)
+        store.save_status({"sources": {r["source"]: {"last_success": "2026-11-26T12:00:00Z"}
+                                       for r in (archived, dated, proposal)}}, self.data)
+        still_open = datetime.datetime(2026, 11, 27, 4, tzinfo=datetime.timezone.utc)
+        catalog = Catalog(self.data, now=still_open)
+        self.assertEqual([r["id"] for r in catalog.current()], [dated["id"]])
+        self.assertEqual(catalog.by_id[archived["id"]]["status"], "availability_unverified")
+        self.assertIsNone(catalog.by_id[archived["id"]]["price"])
+        self.assertEqual(catalog.by_id[archived["id"]]["facts"], [])
+        self.assertEqual(Catalog(self.data, now=still_open + datetime.timedelta(hours=8)).current(), [])
+
     def test_failing_source_keeps_last_good_data_and_site_builds_with_sitemap_index(self):
         good = {"id": "st-louis-lra", "name": "STL", "agency": "City", "url": "https://x", "state": "MO", "about": "a",
                 "run": lambda fetch, now, warn: ([listing(1), listing(2, status="auction_open", price=500.0, price_kind="min_bid",

@@ -2524,9 +2524,9 @@ class Site(object):
             )
 
         eligibility = ""
-        if r["source"] == "detroit-dlba" and r["price_kind"] == "application":
-            eligibility = ('<p class="small"><strong>Detroit Neighborhood Lot eligibility applies.</strong> '
-                           'Check the Land Bank requirements for nearby homeowners before starting an acquisition.</p>')
+        if r["price_kind"] == "application":
+            eligibility = ('<p class="small"><strong>Program eligibility applies.</strong> '
+                           'Confirm the listed terms with the agency before starting an acquisition.</p>')
         agent_box = (
             '<div class="agent-checkout-card">'
             '<div class="eyebrow">Landosaur Land Agent · Full Acquisition &amp; Deed Transfer</div>'
@@ -2538,6 +2538,13 @@ class Site(object):
             '<a data-official-source="1" href="%s" rel="noopener">%s</a></p>'
             '</div>'
         ) % (agent_head, eligibility, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
+        if not r["available"]:
+            agent_box = (
+                '<section class="callout"><h2>%s</h2><p>%s</p>'
+                '<a data-official-source="1" href="%s" rel="noopener">Check the official agency source ↗</a></section>'
+            ) % (esc(r["status_label"] if r["fresh"] else "Current availability unconfirmed"),
+                 esc(src["about"] if src.get("historical_only") else "Contact the agency for the current status."),
+                 esc(r["url"]))
 
         mobile_agent = ""
         if r["available"]:
@@ -2803,23 +2810,25 @@ class Site(object):
         rows = []
         for src in adapters.SOURCES:
             s = cat.status.get("sources", {}).get(src["id"], {})
-            state = "read successfully" if s.get("ok") else ("failed: kept last good data" if s else "not read yet")
+            state = "archived source" if src.get("historical_only") else (
+                "read successfully" if s.get("ok") else ("failed: kept last good data" if s else "not read yet"))
             rows.append(
                 '<tr><th scope="row"><a href="%s" rel="noopener">%s</a><span class="sub">%s</span></th><td>%s</td><td class="n">%s</td>'
                 '<td>%s</td><td>%s</td></tr>' % (
                     esc(src["url"]), esc(src["name"]), esc(src["about"]), esc(STATE_NAMES.get(src["state"])),
-                    "{:,}".format(s.get("count") or 0), esc((s.get("last_success") or "")[:16].replace("T", " ")), esc(state))
+                    "{:,}".format(cat.active_by_source.get(src["id"], 0)),
+                    esc((s.get("last_success") or "")[:16].replace("T", " ")), esc(state))
             )
         missing = "".join('<li><a href="%s" rel="noopener">%s</a>: %s</li>' % (esc(u), esc(n), esc(why)) for n, u, why in adapters.NOT_CARRIED)
         body = [
             crumbs, "<h1>Official Government Land Data Sources</h1>",
-            '<p class="lede">Every listing on Landosaur comes from a public agency\'s own inventory or open-data GIS feed. Each source is read daily with honest identification, robots.txt compliance, and polite pauses between requests.</p>',
+            '<p class="lede">Landosaur checks public-agency sale notices and property feeds, follows each site\'s robots.txt rules, and publishes the last successful read below.</p>',
             '<div class="scroll"><table class="data"><thead><tr><th scope="col">Source</th><th scope="col">State</th>'
             '<th scope="col" class="n">Current listings</th><th scope="col">Last read (UTC)</th><th scope="col">Status</th></tr></thead>'
             '<tbody>%s</tbody></table></div>' % "".join(rows),
             '<section><h2>Verification &amp; withdrawal rules</h2><ul class="notes">'
             '<li>A source that fails is retried, then kept on its last good snapshot; failures appear visibly above.</li>'
-            '<li>A listing leaves the active catalog only after two consecutive complete reads omit it. Partial reads never wipe inventory.</li>'
+            '<li>Passed deadlines, confirmed withdrawals, and archived sources are excluded from current inventory.</li>'
             '<li>A source unchecked for %d days is marked stale and removed from active map defaults.</li>'
             '<li>Kept: parcel facts, zoning, GIS boundaries, deadlines, and agency links. Not kept: previous-owner personal names or scraped broker marketing copy.</li>'
             '</ul></section>' % config.CURRENT_DAYS,

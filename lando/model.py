@@ -5,6 +5,7 @@ import json
 import os
 import re
 import unicodedata
+from zoneinfo import ZoneInfo
 
 from . import adapters, config, store
 
@@ -53,6 +54,7 @@ class Catalog(object):
         self.sources = {s["id"]: s for s in adapters.SOURCES}
         self.listings = []
         for src in adapters.SOURCES:
+            sale_zone = ZoneInfo(src["timezone"]) if src.get("timezone") else None
             st = self.status.get("sources", {}).get(src["id"], {})
             last = parse_time(st.get("last_success"))
             fresh = bool(last and (self.now - last).days < config.CURRENT_DAYS)
@@ -64,10 +66,16 @@ class Catalog(object):
                 r["fresh"] = fresh
                 if src.get("historical_only"):
                     r["status"] = "availability_unverified"
+                    r["price"], r["price_kind"], r["deadline"] = None, "none", None
+                    r["facts"] = [f for f in r["facts"] if f["topic"] not in
+                                  ("availability", "price", "sale_program", "deadline")]
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
-                if r["status"] == "auction_open" and r.get("deadline"):
+                if r["status"] in ("auction_open", "proposal_open") and r.get("deadline"):
                     dl = parse_time(r["deadline"])
                     if dl and dl < self.now:      # the deadline passed since the last read
+                        r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]
+                if available and sale_zone and r.get("offer_close_date"):
+                    if self.now.astimezone(sale_zone).date().isoformat() > r["offer_close_date"]:
                         r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]
                 r["status_label"], r["available"] = label, available and fresh
                 self.listings.append(r)
@@ -139,6 +147,14 @@ class Catalog(object):
     # ------------------------------------------------------------------ selections
     def current(self):
         return [r for r in self.listings if r["available"]]
+
+    @cached_property
+    def active_by_source(self):
+        counts = {}
+        for r in self.current():
+            source = r["source"]
+            counts[source] = counts.get(source, 0) + 1
+        return counts
 
     def new(self):
         cutoff = (self.now - datetime.timedelta(days=config.NEW_DAYS)).strftime("%Y-%m-%d")

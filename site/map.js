@@ -148,6 +148,7 @@
       q: form.q.value.trim().toLowerCase(),
       sort: form.sort ? form.sort.value : "default",
       closed: form.closed.checked,
+      belowBench: form.belowBench ? form.belowBench.checked : false,
       inview: form.inview ? form.inview.checked : false,
       savedOnly: form.savedOnly ? form.savedOnly.checked : false,
     };
@@ -161,6 +162,7 @@
     if (f.q) parts.push("q=" + encodeURIComponent(f.q));
     if (f.sort && f.sort !== "default") parts.push("sort=" + f.sort);
     if (f.closed) parts.push("closed=1");
+    if (f.belowBench) parts.push("deals=1");
     if (f.inview) parts.push("inview=1");
     if (f.savedOnly) parts.push("saved=1");
     history.replaceState(null, "", parts.length ? "#" + parts.join("&") : location.pathname + location.search);
@@ -172,6 +174,7 @@
     if (r[4] != null) bits.push((KIND[r[5]] || "Price") + " " + money(r[4]));
     if (r[6]) bits.push(acres(r[6]));
     if (r[4] != null && r[6] > 0) bits.push(money(r[4] / r[6]) + "/ac");
+    if (r[14] != null && r[14] <= -5) bits.push(Math.abs(r[14]) + "% below county avg");
     if (r[12]) bits.push("closes " + r[12]);
     d.appendChild(el("p", null, bits.join(" · ")));
     return d;
@@ -179,6 +182,10 @@
 
   function sortRows(list, mode) {
     list.sort(function (a, b) {
+      if (mode === "discount_desc") {
+        var da = a[14] == null ? 999999 : a[14], db = b[14] == null ? 999999 : b[14];
+        return da - db || (a[4] == null ? 1e15 : a[4]) - (b[4] == null ? 1e15 : b[4]);
+      }
       if (mode === "price_asc") {
         var pa = a[4] == null ? 1e15 : a[4], pb = b[4] == null ? 1e15 : b[4];
         return pa - pb || (a[9] < b[9] ? -1 : 1);
@@ -225,6 +232,9 @@
         badgeText = isAuc ? "Auction · See terms" : (STATUS[r[7]] || r[7]);
       }
       top.appendChild(el("span", "badge " + badgeCls, badgeText));
+      if (r[14] != null && r[14] <= -5) {
+        top.appendChild(el("span", "badge ok", Math.abs(r[14]) + "% below county avg"));
+      }
       if (r[6]) {
         var metric = acres(r[6]);
         if (r[4] != null && r[6] > 0) metric += " · " + money(r[4] / r[6]) + "/ac";
@@ -319,6 +329,7 @@
       if (!f.closed && !r[8]) continue;
       if (!isNaN(f.max) && (r[4] == null || r[4] > f.max)) continue;
       if (!isNaN(f.acres) && (!r[6] || r[6] < f.acres)) continue;
+      if (f.belowBench && (r[14] == null || r[14] >= 0)) continue;
       if (f.savedOnly && savedIds.indexOf(r[0]) < 0) continue;
       if (f.q && (r[9] + " " + r[10] + " " + r[11] + " " + r[3]).toLowerCase().indexOf(f.q) < 0) continue;
       if (mapBounds) {
@@ -382,8 +393,12 @@
       form.max.value = "";
       form.acres.value = "";
       if (form.sort) form.sort.value = "default";
+      if (form.belowBench) form.belowBench.checked = false;
       if (form.savedOnly) form.savedOnly.checked = false;
-      if (p === "cash") form.kind.value = "cash";
+      if (p === "deals") {
+        if (form.belowBench) form.belowBench.checked = true;
+        if (form.sort) form.sort.value = "discount_desc";
+      } else if (p === "cash") form.kind.value = "cash";
       else if (p === "min_bid") form.kind.value = "min_bid";
       else if (p === "direct") form.kind.value = "direct";
       else if (p === "acres5") { form.acres.value = "5"; if (form.sort) form.sort.value = "acres_desc"; }
@@ -467,6 +482,87 @@
     if (xBtn) xBtn.addEventListener("click", function () { cmpModal.hidden = true; });
   }
 
+  // Save Search & Instant Land Alerts modal (POST /api/alerts/)
+  var alertBtn = document.getElementById("open-alert-modal");
+  var alertModal = document.getElementById("alert-modal");
+  var alertForm = document.getElementById("alert-create-form");
+  var alertSummary = document.getElementById("alert-filter-summary");
+  var alertOut = document.getElementById("alert-modal-result");
+  var alertSubmit = document.getElementById("alert-submit-btn");
+  function escHtml(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function describeActiveFilter(f) {
+    var parts = [];
+    parts.push(f.state ? ("State: " + f.state) : "All 50 States");
+    if (f.kind && MODE_LABELS[f.kind]) parts.push(MODE_LABELS[f.kind]);
+    if (f.belowBench) parts.push("Below county USDA avg");
+    if (!isNaN(f.max)) parts.push("Max " + money(f.max));
+    if (!isNaN(f.acres)) parts.push(f.acres + "+ acres");
+    if (f.q) parts.push('Keyword "' + f.q + '"');
+    return parts.join(" · ");
+  }
+  if (alertBtn && alertModal) {
+    alertBtn.addEventListener("click", function () {
+      var f = readForm();
+      if (alertSummary) {
+        alertSummary.innerHTML =
+          "<strong>Active Filter:</strong> " + escHtml(describeActiveFilter(f)) +
+          "<br><span class='small'>Currently matching <strong>" + lastShown.length.toLocaleString("en-US") + "</strong> parcels.</span>";
+      }
+      if (alertOut) { alertOut.hidden = true; alertOut.textContent = ""; }
+      alertModal.hidden = false;
+    });
+    var closeAlert = alertModal.querySelector("[data-close-alert]");
+    if (closeAlert) closeAlert.addEventListener("click", function () { alertModal.hidden = true; });
+  }
+  if (alertForm && alertOut) {
+    alertForm.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var f = readForm();
+      alertSubmit.disabled = true;
+      alertSubmit.textContent = "Creating alert & live feed…";
+      alertOut.hidden = false;
+      alertOut.textContent = "Saving filter to Landosaur Alert Desk…";
+      fetch(base + "/api/alerts/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state: f.state || "",
+          mode: f.kind || "",
+          max_price: isNaN(f.max) ? null : f.max,
+          min_acres: isNaN(f.acres) ? null : f.acres,
+          below_benchmark: Boolean(f.belowBench),
+          q: f.q || "",
+          label: alertForm.label.value.trim(),
+          buyer_email: alertForm.buyer_email.value.trim(),
+          website_hp: alertForm.website_hp ? alertForm.website_hp.value : "",
+        }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.d || !res.d.ok) {
+            alertOut.innerHTML = "<strong>Could not create alert:</strong> " + escHtml((res.d && res.d.error) || "Please try again.");
+            return;
+          }
+          var d = res.d;
+          alertOut.innerHTML =
+            "<h3 style='margin:0 0 6px'>Saved Search Active · <code>" + escHtml(d.alert_id) + "</code></h3>" +
+            "<p class='small' style='margin:0 0 10px'>" + escHtml(d.message) + "</p>" +
+            "<p style='margin:6px 0'><strong>Live Atom/RSS Feed:</strong><br><a href='" + escHtml(d.atom_feed_url) + "' target='_blank' rel='noopener'><code>" + escHtml(d.atom_feed_url) + "</code></a></p>" +
+            "<p style='margin:6px 0'><strong>Live JSON Feed:</strong><br><a href='" + escHtml(d.json_feed_url) + "' target='_blank' rel='noopener'><code>" + escHtml(d.json_feed_url) + "</code></a></p>" +
+            "<p style='margin-top:12px'><a class='button sm' href='" + escHtml(d.land_agent_url) + "' data-vital-event='offer_clicked'>Or Hire Land Agent ($20) to Hunt Off-Market Matches →</a></p>";
+        })
+        .catch(function () {
+          alertOut.textContent = "Network error creating saved alert. Please try again.";
+        })
+        .finally(function () {
+          alertSubmit.disabled = false;
+          alertSubmit.textContent = "Create Live Alert & Custom Feed →";
+        });
+    });
+  }
+
   map.on("moveend", function () {
     if (form.inview && form.inview.checked) apply(true);
   });
@@ -480,6 +576,7 @@
   if (h.q) form.q.value = h.q;
   if (h.sort && form.sort) form.sort.value = h.sort;
   if (h.closed) form.closed.checked = true;
+  if (h.deals && form.belowBench) form.belowBench.checked = true;
   if (h.inview && form.inview) form.inview.checked = true;
   if (h.saved && form.savedOnly) form.savedOnly.checked = true;
 

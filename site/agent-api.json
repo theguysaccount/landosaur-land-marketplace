@@ -2,7 +2,7 @@
   "name": "Landosaur Agent-First Land Marketplace API",
   "version": "1.1.0",
   "base_url": "https://landosaur.com",
-  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search 25,000+ official + direct land parcels across all 50 U.S. states, publish Buy It Now or Auction land listings in all 50 states, run 9-agency Federal Parcel X-Rays, and record live auction bids or Buy It Now reservations.",
+  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search 30,000+ official + direct land parcels across all 50 U.S. states, create custom saved-search Atom/JSON alerts, publish Buy It Now or Auction land listings in all 50 states, run 9-agency Federal Parcel X-Rays, hire Landosaur Land Agent ($20 + 10%), and record live auction bids or Buy It Now reservations.",
   "endpoints": {
     "search_land": {
       "method": "GET",
@@ -96,10 +96,27 @@
         "notes": "Desired terms, closing speed, or sourcing criteria"
       }
     },
+    "saved_search_alerts": {
+      "method": "POST",
+      "url": "https://landosaur.com/api/alerts/",
+      "description": "Save a custom search filter (state, mode, max_price, min_acres, below_benchmark, q, buyer_email) and immediately receive personalized live Atom/RSS (?id=ALR-...&format=atom) and JSON (?id=ALR-...) alert feed URLs.",
+      "body": {
+        "state": "TX",
+        "mode": "buy_now",
+        "max_price": 15000,
+        "min_acres": 1,
+        "below_benchmark": true,
+        "buyer_email": "optional@example.com"
+      }
+    },
     "land_data_atlas": {
       "method": "GET",
       "url": "https://landosaur.com/data/atlas.json",
       "description": "Complete 50-state USDA 2010-2026 historical land value series, 3,115 county benchmarks, and live 50-state public inventory analytics."
+    },
+    "deals_and_tax_sales": {
+      "below_market_deals_url": "https://landosaur.com/deals/",
+      "tax_sale_50_state_atlas_url": "https://landosaur.com/tax-sales/"
     },
     "feeds": {
       "buy_now_atom": "https://landosaur.com/feeds/buy-now.xml",

@@ -21,6 +21,9 @@
     "api/concierge.js": {
       "maxDuration": 30,
       "includeFiles": "data/usda/land-index-counties.json"
+    },
+    "api/alerts.js": {
+      "maxDuration": 15
     }
   },
   "redirects": [

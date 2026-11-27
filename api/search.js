@@ -10,7 +10,7 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-const PREFIX = "direct-listings/";
+const PREFIX = "direct/listings/";
 let cachedOfficial = { at: 0, rows: [] };
 const CACHE_TTL_MS = 5 * 60 * 1000;
 

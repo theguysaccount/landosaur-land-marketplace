@@ -9,7 +9,7 @@ import json
 import os
 import urllib.parse
 
-from . import adapters, config, guides as guides_mod, market as market_mod, research
+from . import adapters, config, guides as guides_mod, market as market_mod, research, tax_sales as tax_sales_mod
 from .model import STATE_NAMES
 
 NOTICE = ("Landosaur lists land that government agencies offer and links to each agency's own page. It is not an offer "
@@ -133,9 +133,10 @@ class Site(object):
             ("/services/", "Land Agent", True, "offer_clicked"),
             ("/xray/", "Parcel X-Ray", True, "tool_used"),
             ("/list/", "List Land", True, "tool_used"),
-            ("/land-atlas/", "Land Atlas", False, ""),
-            ("/land-for-sale/", "Land for Sale", False, ""),
-            ("/land-prices/", "Land Prices", False, ""),
+            ("/deals/", "Deals", False, "tool_used"),
+            ("/tax-sales/", "Tax Sales", False, ""),
+            ("/land-atlas/", "Atlas", False, ""),
+            ("/land-prices/", "Prices", False, ""),
             ("/analyze/", "Analyzer", False, "tool_used"),
             ("/research/", "Research", False, ""),
         )
@@ -156,15 +157,16 @@ class Site(object):
             '<footer><div class="wrap"><p class="notice">%s</p>'
             '<p>Official agencies tracked (%d): %s. <a href="%s">How sources are read</a>.</p>'
             '<p>County land values across 3,115 U.S. counties: <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
+            '<a href="%s">Below-Market Land Deals</a> · <a href="%s">50-State Tax-Sale Atlas</a> · '
             '<a href="%s">50-State Land Data Atlas &amp; Charts</a> · <a href="%s">Land Agent Services ($20)</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
-            '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
+            '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Deals Scanner</a> · <a href="%s">50-State Tax Sales</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
             '<a href="%s">Research &amp; Guides</a> · <a href="%s">Closing Soon</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
             '<a href="%s">About</a> · <a href="%s" rel="noopener">Source Code</a> · '
             '<a href="%s" rel="noopener">Report a Problem</a>%s</p></div></footer>'
         ) % (
             esc(NOTICE), len(adapters.SOURCES), ", ".join(esc(s["agency"]) for s in adapters.SOURCES), self.u("/sources/"),
-            esc(config.LAND_INDEX_URL), self.u("/land-atlas/"), self.u("/services/"), self.u("/xray/"),
-            self.u("/services/"), self.u("/land-atlas/"), self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
+            esc(config.LAND_INDEX_URL), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/services/"), self.u("/xray/"),
+            self.u("/services/"), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
             self.u("/research/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
@@ -264,7 +266,8 @@ class Site(object):
             '<button type="button" class="mode-btn" data-deal-mode="min_bid" data-vital-event="tool_used">Auction / Bid (%s)</button>'
             '<button type="button" class="mode-btn" data-deal-mode="none" data-vital-event="tool_used">Land Bank / Offer (%s)</button>'
             '<button type="button" class="mode-btn" data-deal-mode="direct" data-vital-event="tool_used">Direct Owner / Agent (0)</button>'
-            '<a class="mode-btn" href="%s" data-vital-event="tool_used" style="margin-left:auto;border-color:var(--forest);color:var(--forest)">+ List Land Free</a>'
+            '<button type="button" class="mode-btn" id="open-alert-modal" data-vital-event="tool_used" style="margin-left:auto;border-color:var(--forest);color:var(--forest)">Save Search &amp; Alerts</button>'
+            '<a class="mode-btn" href="%s" data-vital-event="tool_used" style="border-color:var(--forest);color:var(--forest)">+ List Land Free</a>'
             '</div>'
             '<form class="filters" id="filters" onsubmit="return false">'
             '<label>State<select name="state"><option value="">All tracked states</option>%s</select></label>'
@@ -272,12 +275,13 @@ class Site(object):
             '<option value="min_bid">Auction / min bid</option><option value="none">Land bank / offer</option><option value="direct">Direct Owner / Agent</option></select></label>'
             '<label>Max price<input name="max" type="number" min="0" step="100" inputmode="numeric" placeholder="Any"></label>'
             '<label>Min acres<input name="acres" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Any"></label>'
-            '<label>Sort<select name="sort"><option value="default">Recommended</option><option value="deadline">Closing soonest</option>'
+            '<label>Sort<select name="sort"><option value="default">Recommended</option><option value="discount_desc">Biggest discount vs. county avg</option><option value="deadline">Closing soonest</option>'
             '<option value="ppa_asc">Lowest $/acre</option><option value="price_asc">Price: low to high</option>'
             '<option value="price_desc">Price: high to low</option><option value="acres_desc">Largest acreage</option></select></label>'
             '<label class="grow">Search<input name="q" type="search" placeholder="County, city, address, parcel ID"></label>'
             '<div class="preset-bar" aria-label="Quick filters" style="flex-basis:100%%;margin:4px -16px -14px;border-top:1px solid var(--line);border-bottom:0">'
             '<button type="button" class="pill-btn" data-preset="all" data-vital-event="tool_used">All active</button>'
+            '<button type="button" class="pill-btn" data-preset="deals" data-vital-event="tool_used">Below county avg</button>'
             '<button type="button" class="pill-btn" data-preset="cash" data-vital-event="tool_used">Buy It Now</button>'
             '<button type="button" class="pill-btn" data-preset="min_bid" data-vital-event="tool_used">Auction / Bid</button>'
             '<button type="button" class="pill-btn" data-preset="direct" data-vital-event="tool_used">Direct Owner / Agent</button>'
@@ -286,6 +290,7 @@ class Site(object):
             '<button type="button" class="pill-btn" data-preset="ppa" data-vital-event="tool_used">Lowest $/acre</button>'
             '<button type="button" class="pill-btn" data-preset="saved" data-vital-event="tool_used">Saved shortlist ★</button>'
             '<div class="filter-toggles">'
+            '<label><input name="belowBench" type="checkbox"> Below county avg</label>'
             '<label><input name="inview" type="checkbox"> Search map area</label>'
             '<label><input name="savedOnly" type="checkbox"> Saved only</label>'
             '<label><input name="closed" type="checkbox"> Include closed</label>'
@@ -312,6 +317,19 @@ class Site(object):
             '<div class="compare-panel"><div class="compare-head"><h2>Parcel comparison</h2>'
             '<button type="button" class="button ghost sm" data-close-compare>Close</button></div>'
             '<div data-cmp-body></div></div></div>'
+            '<div id="alert-modal" class="compare-modal" hidden role="dialog" aria-modal="true" aria-label="Save search and instant land alerts">'
+            '<div class="compare-panel" style="max-width:620px"><div class="compare-head"><h2>Save Search &amp; Instant Land Alerts</h2>'
+            '<button type="button" class="button ghost sm" data-close-alert>Close</button></div>'
+            '<p class="small" style="margin:0 0 12px">Lock in your active map filter to generate a personalized live Atom/RSS &amp; JSON feed (works with Slack, Feedly, Zapier, and AI agents) plus alert tracking.</p>'
+            '<div id="alert-filter-summary" class="callout" style="margin:0 0 14px;padding:12px 14px"></div>'
+            '<form id="alert-create-form" class="worksheet" style="grid-template-columns:1fr">'
+            '<label>Alert name (optional)<input name="label" type="text" placeholder="e.g. Texas Buy It Now under $15k"></label>'
+            '<label>Email address (optional — leave blank for RSS/JSON feed only)<input name="buyer_email" type="email" placeholder="you@example.com"></label>'
+            '<input type="text" name="website_hp" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;width:1px;height:1px" aria-hidden="true">'
+            '<div><button type="submit" id="alert-submit-btn" class="button">Create Live Alert &amp; Custom Feed →</button></div>'
+            '</form>'
+            '<div id="alert-modal-result" class="callout" hidden style="margin-top:14px"></div>'
+            '</div></div>'
             '</section>'
         ) % (
             esc(title),
@@ -377,9 +395,9 @@ class Site(object):
             '<li><strong>Official public sources + direct listings.</strong> City, county, state trust, and tax-sale feeds across %d states plus 50-state direct owner, real estate agent, and AI-agent listings. Zero scraped broker spam.</li>'
             '<li><strong>9-agency GIS Parcel X-Ray.</strong> Instant USGS 3DEP terrain profile, FEMA flood &amp; disaster risk, USFWS wetlands, USDA soil/septic depth, Census roads, USGS public-land adjacency, NASA solar/hardiness, and USDA/FHFA county benchmarks.</li>'
             '<li><strong>Clear Buy It Now vs. Auction bidding.</strong> Filter fixed-price Buy It Now parcels separately from auctions; bid or reserve direct listings on-site and link directly to official portals for government parcels.</li>'
-            '<li><strong>Two-sided Agent-native API &amp; Analyzer.</strong> Search 23,500+ parcels via <code>/api/search/</code>, publish any U.S. parcel in 60 seconds via <a href="%s">/list/</a> or a single AI agent API call, and model full all-in deal economics in the <a href="%s">Land Analyzer</a>.</li>'
-            '</ul><p><a href="%s">About our rules</a> · <a href="%s">All official sources</a> · <a href="%s">50-State Land Prices</a> · <a href="%s">Open Data &amp; RSS Feeds</a></p></section>'
-        ) % (len(self.cat.states), self.u("/list/"), self.u("/analyze/"), self.u("/about/"), self.u("/sources/"), self.u("/land-prices/"), self.u("/data/"))
+            '<li><strong>Two-sided Agent-native API &amp; Analyzer.</strong> Search %s+ parcels via <code>/api/search/</code>, save custom RSS/JSON alerts via <code>/api/alerts/</code>, publish any U.S. parcel in 60 seconds via <a href="%s">/list/</a> or a single AI agent API call, and model full all-in deal economics in the <a href="%s">Land Analyzer</a>.</li>'
+            '</ul><p><a href="%s">Below-Market Deals</a> · <a href="%s">50-State Tax-Sale Atlas</a> · <a href="%s">All official sources</a> · <a href="%s">50-State Land Prices</a> · <a href="%s">Open Data &amp; RSS Feeds</a></p></section>'
+        ) % (len(self.cat.states), "{:,}".format(len(self.cat.current())), self.u("/list/"), self.u("/analyze/"), self.u("/deals/"), self.u("/tax-sales/"), self.u("/sources/"), self.u("/land-prices/"), self.u("/data/"))
 
     # ------------------------------------------------------------------ home (map)
     def home(self):
@@ -966,6 +984,240 @@ class Site(object):
             "U.S. Land Data Atlas — 50-State Charts, 3,115 County Prices & Live Supply | Landosaur",
             desc, "/land-atlas/", "".join(body), indexable=True, jsonld=[crumb_ld],
             scripts=["atlas.js"], wide=True,
+        )
+
+    # ------------------------------------------------------------------ /deals/ Live Below-Market Land Bargain Scanner
+    def deals_page(self):
+        cat = self.cat
+        m = self.market
+        cur = cat.current()
+        state_fre = {code: (m.latest_values(code) or {}).get("farm_real_estate") for code in STATE_NAMES}
+
+        priced_all = []
+        below_bench = []
+        rural_deals = []
+        under10k_cash = []
+        auctions_priced = []
+
+        for r in cur:
+            p = r.get("price")
+            ac = r.get("acres")
+            if p is None or p <= 0:
+                continue
+            priced_all.append(r)
+            cv = cat.county_value(r)
+            bench = (cv.get("value") if cv else None) or state_fre.get(r["state"])
+            bench_src = "County USDA/FHFA" if (cv and cv.get("value")) else "State USDA Avg"
+            ppa = (p / ac) if (ac and ac > 0) else None
+            vs_pct = int(round(((ppa - bench) / bench) * 100.0)) if (ppa and bench and bench > 0) else None
+            rec = (r, ppa, bench, bench_src, vs_pct)
+            if ac and ac >= 0.2 and vs_pct is not None and vs_pct <= -15:
+                below_bench.append(rec)
+            if ac and ac >= 1.0 and ppa is not None:
+                rural_deals.append(rec)
+            if r["price_kind"] == "cash" and p <= 10000:
+                under10k_cash.append(rec)
+            if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms"):
+                auctions_priced.append(rec)
+
+        below_bench.sort(key=lambda x: (x[4], x[1] or 1e12, x[0]["id"]))
+        rural_deals.sort(key=lambda x: (x[1] or 1e12, -(x[0]["acres"] or 0), x[0]["id"]))
+        under10k_cash.sort(key=lambda x: (x[0]["price"], x[1] or 1e12, x[0]["id"]))
+        auctions_priced.sort(key=lambda x: (x[0].get("deadline") or "9999", x[0]["price"], x[0]["id"]))
+
+        lowest_ppa = min([x[1] for x in rural_deals if x[1] and x[1] > 0] or [None])
+
+        def agent_href(r):
+            is_auc = r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms")
+            q = {
+                "parcel": r["id"], "title": r["title"],
+                "county": r["county_label"], "state": r["state"],
+                "mode": "auction" if is_auc else ("buy_now" if r["price_kind"] == "cash" else "landbank"),
+            }
+            if r.get("price"):
+                q["price"] = str(r["price"])
+            if r.get("acres"):
+                q["acres"] = str(r["acres"])
+            if r.get("apn"):
+                q["apn"] = r["apn"]
+            if r.get("lat") is not None and r.get("lon") is not None:
+                q["lat"] = str(r["lat"])
+                q["lon"] = str(r["lon"])
+            return self.u("/services/?" + urllib.parse.urlencode(q))
+
+        def deal_table(items, cap=60):
+            if not items:
+                return '<p class="small">No active parcels currently qualify in this bucket.</p>'
+            trs = []
+            for r, ppa, bench, bench_src, vs_pct in items[:cap]:
+                turnkey = round(r["price"] * 1.10, 2)
+                vs_html = (
+                    '<span class="badge ok">%d%% below avg</span>' % abs(vs_pct)
+                    if (vs_pct is not None and vs_pct < 0)
+                    else (("+%d%%" % vs_pct) if vs_pct is not None else "–")
+                )
+                trs.append(
+                    '<tr><th scope="row"><a href="%s">%s</a><span class="sub">%s, %s · %s</span></th>'
+                    '<td class="n" data-label="Official Price" data-v="%.2f">%s<span class="sub">Turnkey (+10%%): %s</span></td>'
+                    '<td class="n" data-label="Acres" data-v="%s">%s</td>'
+                    '<td class="n" data-label="$/acre" data-v="%s">%s</td>'
+                    '<td class="n" data-label="Benchmark" data-v="%s">%s<span class="sub">%s</span></td>'
+                    '<td data-label="vs. Benchmark">%s</td>'
+                    '<td data-label="Acquire"><a class="chip-btn chip-link" href="%s" data-vital-event="offer_clicked">Land Agent ($20)</a></td></tr>' % (
+                        self.u(cat.listing_path(r)), esc(r["title"]), esc(r["county_label"]), esc(r["state"]),
+                        esc(r["status_label"]),
+                        r["price"], esc(money(r["price"])), esc(money(turnkey)),
+                        r["acres"] or "", esc(acres_text(r["acres"])) if r.get("acres") else "–",
+                        "%.2f" % ppa if ppa else "", (esc(money(ppa)) + "/ac") if ppa else "–",
+                        "%.2f" % bench if bench else "", (esc(money(bench)) + "/ac") if bench else "–", esc(bench_src),
+                        vs_html, agent_href(r),
+                    )
+                )
+            return (
+                '<div class="scroll"><table class="data sortable"><thead><tr>'
+                '<th scope="col">Parcel</th><th scope="col" class="n">Official Price / Turnkey</th>'
+                '<th scope="col" class="n">Acres</th><th scope="col" class="n">$/acre</th>'
+                '<th scope="col" class="n">County Benchmark</th><th scope="col">vs. Benchmark</th>'
+                '<th scope="col">Hands-Free</th></tr></thead><tbody>%s</tbody></table></div>' % "".join(trs)
+            )
+
+        crumbs, crumb_ld = self.crumbs([("Below-Market Land Deals", "/deals/")])
+        body = [
+            crumbs,
+            '<div class="eyebrow">Live Algorithmic Deal Scanner · Official Agency Prices vs. 3,115 County USDA/FHFA Benchmarks</div>',
+            '<h1>Below-Market Land Deals &amp; Rural Bargain Scanner</h1>',
+            '<p class="lede">Every active priced public-agency parcel across our <strong>%s-parcel, 50-state database</strong> ranked strictly against official USDA/FHFA county land values—zero inflated estimates, zero broker markup. Click <strong>Land Agent ($20)</strong> on any parcel to have our desk verify title/liens and handle the full transfer (+10%% only on close).</p>' % "{:,}".format(len(cur)),
+
+            '<div class="kpi-grid">'
+            '<div class="kpi-card"><span>Below County Benchmark</span><strong>%s</strong><small>Active parcels ≥0.2 ac priced ≥15%% under avg</small></div>'
+            '<div class="kpi-card"><span>Rural Acreage Deals (1+ ac)</span><strong>%s</strong><small>Priced active tracts of 1+ acres</small></div>'
+            '<div class="kpi-card"><span>Buy It Now Under $10k</span><strong>%s</strong><small>Fixed-price official tracts ready now</small></div>'
+            '<div class="kpi-card"><span>Lowest Rural $/Acre Live</span><strong>%s</strong><small>Among active priced 1+ acre tracts</small></div>'
+            '</div>' % (
+                "{:,}".format(len(below_bench)),
+                "{:,}".format(len(rural_deals)),
+                "{:,}".format(len(under10k_cash)),
+                (esc(money(lowest_ppa)) + "/ac") if lowest_ppa else "–",
+            ),
+
+            '<p class="notice" style="margin:14px 0 22px"><strong>Verify before buying:</strong> Deep discounts on public-agency, tax-sale, and surplus land often reflect minimum opening bids, redemption windows, missing utilities, wetlands, or access limits. Run our free <a href="%s">9-agency Parcel X-Ray</a> on any tract—or pay $20 for our <a href="%s">Land Agent desk</a> to audit liens, access, and deed transfer before you commit.</p>' % (self.u("/xray/"), self.u("/services/")),
+
+            '<section id="below-benchmark"><h2>Biggest Discounts vs. County USDA/FHFA Benchmark (Top %d)</h2>'
+            '<p class="small">Active parcels of at least 0.2 acres with published official prices or minimum bids at least 15%% below their county (or state) USDA/FHFA benchmark per acre. <a href="%s">Filter all on interactive map →</a></p>%s</section>' % (
+                min(60, len(below_bench)), self.u("/#deals=1&sort=discount_desc"), deal_table(below_bench, 60)),
+
+            '<section id="rural-acreage" style="margin-top:28px"><h2>Cheapest Rural Acreage Deals (1+ Acres, Sorted by $/Acre)</h2>'
+            '<p class="small">Active priced tracts of 1 acre or larger across official state trust, tax-forfeited, and county auctions.</p>%s</section>' % deal_table(rural_deals, 50),
+
+            '<section id="buy-now-under-10k" style="margin-top:28px"><h2>Fixed-Price Buy It Now Land Under $10,000</h2>'
+            '<p class="small">Over-the-counter and fixed-price official offerings—no competitive auction required.</p>%s</section>' % deal_table(under10k_cash, 50),
+
+            '<section id="priced-auctions" style="margin-top:28px"><h2>Active Auctions &amp; Tax Sales With Posted Minimum Bids</h2>'
+            '<p class="small">Sorted by soonest closing deadline and lowest opening bid. Review <a href="%s">all 50 states\' tax-sale &amp; redemption laws →</a></p>%s</section>' % (
+                self.u("/tax-sales/"), deal_table(auctions_priced, 50)),
+        ]
+        desc = "Live U.S. below-market land deals scanner: %s active official parcels priced below county USDA/FHFA benchmarks, rural 1+ acre bargains, Buy It Now lots under $10k, and tax-sale auctions." % "{:,}".format(len(below_bench))
+        return self.layout(
+            "Below-Market Land Deals & Rural Bargain Scanner (50 States) | Landosaur",
+            desc, "/deals/", "".join(body), indexable=True, jsonld=[crumb_ld],
+            scripts=["tables.js"], wide=True,
+        )
+
+    # ------------------------------------------------------------------ /tax-sales/ 50-State U.S. Tax-Sale, Deed & Redemption Atlas
+    def tax_sales_page(self):
+        cat = self.cat
+        cur_by_state = {}
+        for r in cat.current():
+            cur_by_state[r["state"]] = cur_by_state.get(r["state"], 0) + 1
+
+        enriched = []
+        n_deed = n_lien = n_red = 0
+        for row in tax_sales_mod.TAX_SALE_STATES:
+            code = row["code"]
+            st_obj = cat.states.get(code)
+            name = STATE_NAMES.get(code, code)
+            slug = st_obj["slug"] if st_obj else name.lower().replace(" ", "-")
+            if row["mode"] == "deed":
+                n_deed += 1
+            elif row["mode"] == "lien":
+                n_lien += 1
+            else:
+                n_red += 1
+            enriched.append({
+                "code": code,
+                "name": name,
+                "slug": slug,
+                "mode": row["mode"],
+                "mode_label": row["mode_label"],
+                "redemption": row["redemption"],
+                "interest": row["interest"],
+                "notes": row["notes"],
+                "live_count": cur_by_state.get(code, 0),
+                "state_path": cat.state_path(st_obj) if st_obj else "",
+            })
+
+        faqs = [
+            ("What is the difference between a Tax Deed state and a Tax Lien state?",
+             "In a Tax Deed state (such as California, Arkansas, Michigan, Washington, and Utah), the county or state auctions ownership of the property directly after statutory delinquency expires. In a Tax Lien state (such as Arizona, Colorado, Florida, Illinois, and New Jersey), investors buy a tax certificate earning statutory interest or penalty—and may foreclose for the deed only if the taxpayer fails to redeem within the statutory period."),
+            ("What is a Redeemable Tax Deed state?",
+             "In Redeemable Deed states like Texas, Georgia, Tennessee, Connecticut, and South Carolina, the winning auction bidder receives a tax deed immediately after the sale, but the delinquent taxpayer retains a post-sale statutory right to buy the property back within a set window (e.g., 180 days to 2 years in Texas) by paying the bid amount plus a steep statutory penalty (25%–50% in Texas, 20% in Georgia)."),
+            ("Can Landosaur handle county tax-sale registration, verification, and deed transfer for me?",
+             "Yes. Our Land Agent Concierge ($20 initiation + transparent 10% fee only upon closed acquisition) runs 9-agency GIS due diligence, verifies county tax/lien/redemption status, coordinates bidding or agency paperwork, and works with a licensed local title company or closing attorney wherever state law requires one."),
+            ("Are tax-sale deeds automatically free and clear of mortgages and liens?",
+             "Not always. While judicial tax foreclosures often wipe junior mortgages and private judgments, federal IRS tax liens (which carry a 120-day federal redemption right), municipal utility/demolition liens, HOA assessments, and unnotified parties can survive a tax sale—and many buyers need a quiet-title action or tax-title certification before title insurance will issue."),
+        ]
+
+        crumbs, crumb_ld = self.crumbs([("50-State Tax-Sale & Redemption Atlas", "/tax-sales/")])
+        faq_ld = self.faq_jsonld(faqs, "/tax-sales/#faq")
+        body = [
+            crumbs,
+            '<div id="tax-sales-app">',
+            '<div class="eyebrow">All 50 U.S. States · Statutory Tax-Deed, Tax-Lien &amp; Redemption Reference</div>',
+            '<h1>50-State U.S. Tax-Sale, Tax-Deed &amp; Redemption Law Atlas</h1>',
+            '<p class="lede">Every U.S. state\'s property tax-sale structure in one interactive map and filterable directory—paired directly with <strong>%s live public-agency parcels across all 50 states</strong> and our <a href="%s">$20 Tax-Sale &amp; Auction Concierge</a>.</p>' % (
+                "{:,}".format(len(cat.current())), self.u("/services/?service=auction_proxy")),
+
+            '<div class="kpi-grid">'
+            '<div class="kpi-card"><span>Tax Deed States</span><strong>%d</strong><small>Direct ownership deed sold at auction/OTC</small></div>'
+            '<div class="kpi-card"><span>Tax Lien States</span><strong>%d</strong><small>Lien certificates with statutory interest/foreclosure</small></div>'
+            '<div class="kpi-card"><span>Redeemable Deed / Hybrid</span><strong>%d</strong><small>Deed issued with post-sale statutory redemption</small></div>'
+            '<div class="kpi-card"><span>Live Official Parcels</span><strong>%s</strong><small>Active listings tracked across all 50/50 states</small></div>'
+            '</div>' % (n_deed, n_lien, n_red, "{:,}".format(len(cat.current()))),
+
+            '<section class="dossier-card" style="margin-top:20px">'
+            '<div class="eyebrow">Interactive 50-State Tax-Sale Cartogram</div>'
+            '<h2>Explore Tax-Deed vs. Tax-Lien States</h2>'
+            '<div class="atlas-controls">'
+            '<button type="button" class="mode-btn active" data-tax-mode="all">All 50 States (50)</button>'
+            '<button type="button" class="mode-btn" data-tax-mode="deed" style="border-color:#15803d">Tax Deed (%d)</button>'
+            '<button type="button" class="mode-btn" data-tax-mode="lien" style="border-color:#1d4ed8">Tax Lien (%d)</button>'
+            '<button type="button" class="mode-btn" data-tax-mode="redeemable_deed" style="border-color:#b45309">Redeemable / Hybrid (%d)</button>'
+            '<label style="margin-left:auto"><input id="tax-search" type="search" placeholder="Filter state, redemption, penalty…"></label>'
+            '</div>'
+            '<div id="tax-cartogram" class="us-cartogram" aria-label="Interactive 50-state U.S. tax sale map"></div>'
+            '<p id="tax-tip" class="small" style="margin-top:10px">Hover any state tile to inspect its statutory sale type, redemption period, interest/penalty rate, and live Landosaur parcel count. Click to jump to that state\'s row below.</p>'
+            '</section>' % (n_deed, n_lien, n_red),
+
+            '<section style="margin-top:24px">'
+            '<h2>Complete 50-State Tax-Sale Rules &amp; Live Inventory Directory</h2>'
+            '<p id="tax-count" class="small">Showing 50 of 50 U.S. states</p>'
+            '<div class="scroll"><table class="data"><thead><tr>'
+            '<th scope="col">State</th><th scope="col">Sale Type</th><th scope="col">Statutory Redemption</th>'
+            '<th scope="col">Rate / Penalty</th><th scope="col">Live Landosaur Parcels</th>'
+            '<th scope="col">Key Statutory Notes</th><th scope="col">Concierge</th>'
+            '</tr></thead><tbody id="tax-tbody"></tbody></table></div>'
+            '<p class="notice" style="margin-top:14px">Statutory summaries are for educational research only and are not legal or tax advice. County treasurers, sheriffs, and municipal charters may apply local procedures, recent post-<em>Tyler v. Hennepin</em> equity-auction reforms, and strict registration deadlines—always verify directly with the county or consult a licensed real-estate attorney.</p>'
+            '</section>',
+
+            self.faq_block(faqs, "Tax-sale & redemption frequently asked questions"),
+            '<script id="tax-sales-data" type="application/json">%s</script>' % json.dumps(enriched, separators=(",", ":")).replace("</", "<\\/"),
+            '</div>',
+        ]
+        desc = "Complete 50-state U.S. tax-sale, tax-deed, tax-lien, and statutory redemption law atlas with interactive 50-state map, penalty rates, and live official land inventory."
+        return self.layout(
+            "50-State U.S. Tax-Sale, Tax-Deed & Redemption Law Atlas | Landosaur",
+            desc, "/tax-sales/", "".join(body), indexable=True, jsonld=[crumb_ld, faq_ld],
+            scripts=["tax_sales.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /land-for-sale/ (national directory)
@@ -2182,9 +2434,28 @@ class Site(object):
                 "{:,}".format(len(cur)), src_text or "none right now",
                 self.u("/land-prices/%s/" % st["slug"]), esc(st["name"]), self.market.latest_year),
             self.map_block(st["code"], "Map of %s listings" % st["name"]),
-            '<section><h2>By county / jurisdiction</h2><div class="scroll"><table class="data sortable"><thead><tr><th scope="col">County</th>'
-            '<th scope="col" class="n">Current listings</th><th scope="col" class="n">Lowest price or bid</th></tr></thead><tbody>%s</tbody></table></div></section>' % rows,
         ]
+        ts = tax_sales_mod.BY_CODE.get(st["code"])
+        if ts:
+            body.append(
+                '<section class="dossier-card" style="margin:20px 0">'
+                '<div class="eyebrow">%s Statutory Tax-Sale Profile</div>'
+                '<h2>How Tax Sales &amp; Public Land Work in %s</h2>'
+                '<p><strong>Sale Type:</strong> %s · <strong>Redemption Window:</strong> %s · <strong>Statutory Rate / Penalty:</strong> %s</p>'
+                '<p class="small">%s</p>'
+                '<p style="margin-top:10px"><a class="button sm" href="%s" data-vital-event="offer_clicked">Hire %s Land Agent ($20) →</a> '
+                '<a class="button ghost sm" href="%s">Compare all 50 states on Tax-Sale Atlas →</a></p>'
+                '</section>' % (
+                    esc(st["name"]), esc(st["name"]), esc(ts["mode_label"]), esc(ts["redemption"]),
+                    esc(ts["interest"]), esc(ts["notes"]),
+                    self.u("/services/?service=auction_proxy&state=" + st["code"]), esc(st["name"]),
+                    self.u("/tax-sales/#state-" + st["code"]),
+                )
+            )
+        body.append(
+            '<section><h2>By county / jurisdiction</h2><div class="scroll"><table class="data sortable"><thead><tr><th scope="col">County</th>'
+            '<th scope="col" class="n">Current listings</th><th scope="col" class="n">Lowest price or bid</th></tr></thead><tbody>%s</tbody></table></div></section>' % rows
+        )
         closing = [r for r in cat.closing() if r["state"] == st["code"]][:20]
         if closing:
             body.append('<section><h2>Closing soon in %s</h2>%s</section>' % (esc(st["name"]), self.rows(closing, False, True)))

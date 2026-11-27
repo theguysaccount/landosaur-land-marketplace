@@ -117,6 +117,13 @@ NOTES = {  # long notes repeated on many listings are stored by key and expanded
     "boise_id": "City of Boise Housing & Community Development (COMDEV) parcel in City of Boise Open Data GIS. Confirm RFP/disposition status and zoning on cityofboise.org.",
     "auburn_me": "Unimproved municipal land parcel (undeveloped, commercial, industrial, or house-lot land) in City of Auburn GIS. Confirm tax-acquired or surplus sale status on auburnmaine.gov.",
     "portland_me": "Municipal land bank / vacant land parcel published in City of Portland, Maine GIS. Confirm surplus sale or redevelopment RFP availability on portlandmaine.gov.",
+    "philly_lb": "Vacant land parcel held by the Philadelphia Land Bank in official City of Philadelphia Open Data GIS (OPA / L&I Vacant Indicators). Confirm side-lot, competitive-sale, or development application terms on phdcphila.org.",
+    "cleveland_lb": "Vacant land bank parcel held by the City of Cleveland Land Bank in Cleveland Open Data GIS. Confirm side-yard, new-construction, or commercial disposition rules on clevelandohio.gov.",
+    "dallas_lb": "Unimproved vacant land parcel in the City of Dallas Land Bank GIS inventory (LAND ONLY class). Confirm current lot availability, housing/development covenants, and purchase process on dallascityhall.com.",
+    "milwaukee_vac": "Actively advertised City of Milwaukee Department of City Development vacant lot (Status: Acquired / Advertised / Dispose) in Milwaukee GIS. Confirm purchase price, side-lot discount, or proposal rules on city.milwaukee.gov.",
+    "detroit_comm": "Actively listed City of Detroit vacant land parcel with published asking price in Detroit Open Data GIS. Confirm deed covenants, zoning, and purchase terms on detroitmi.gov.",
+    "lucas_forf_2026": "Parcel on the Lucas County Auditor 2026 Forfeited Land Sale GIS roll with listed delinquent tax figure. Confirm opening bid, auction schedule, title/brownfield notes, and buyer registration on co.lucas.oh.us.",
+    "sauk_wi": "Tax-forfeited parcel open for Offer to Purchase in Sauk County, Wisconsin GIS. Confirm minimum bid, easements, and county board approval rules directly with Sauk County.",
     "gis_area": "Area computed from the agency's GIS parcel outline (not a legal survey).",
 }
 
@@ -4041,6 +4048,425 @@ def portland_me(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+# ------------------------------------------------------------------------------------------- Phase 8: 7 High-Volume Official Agencies (PA Philly, OH Cleveland, TX Dallas, WI Milwaukee, MI Detroit Priced, OH Lucas 2026 Auction, WI Sauk)
+
+def _arcgis_paged(fetch, gis_url, where, out_fields, max_total=1500, page_size=500, extra=None):
+    all_feats, offset = [], 0
+    while len(all_feats) < max_total:
+        need = min(page_size, max_total - len(all_feats))
+        ex = dict(extra or {})
+        ex["resultOffset"] = str(offset)
+        batch = _arcgis_query(fetch, gis_url, where, out_fields, need, extra=ex)
+        if not batch:
+            break
+        all_feats.extend(batch)
+        if len(batch) < need:
+            break
+        offset += len(batch)
+    return all_feats
+
+
+def _sf_to_acres(text):
+    s = clean(str(text or ""))
+    if not s:
+        return None
+    m_ac = re.search(r"([\d,]*\.?\d+)\s*(?:acres?|ac\b)", s, re.I)
+    if m_ac:
+        v = number(m_ac.group(1))
+        return round(v, 4) if v else None
+    m_sf = re.search(r"([\d,]*\.?\d+)\s*(?:sq\.?\s*ft\.?|sf\b)", s, re.I)
+    if m_sf:
+        v = number(m_sf.group(1))
+        return round(v / 43560.0, 4) if v else None
+    return None
+
+
+# --- Philadelphia Land Bank Vacant Land (PA) ---
+PHILLY_LB_GIS = "https://services.arcgis.com/fLeGjb7u4uXqeF9q/arcgis/rest/services/Vacant_Indicators_Land/FeatureServer/0/query"
+PHILLY_LB_URL = "https://phdcphila.org/land/"
+
+
+def parse_philly_lb_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        opa = clean(str(a.get("opa_id") or a.get("objectid") or ""))
+        if not opa or opa in seen:
+            continue
+        seen.add(opa)
+        addr = clean(str(a.get("address") or "")).title()
+        zoning = clean(str(a.get("zoningbasedistrict") or ""))
+        zipcode = clean(str(a.get("zipcode") or ""))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings) if rings else None
+        facts = [
+            fact("availability", "Philadelphia Land Bank vacant lot", PHILLY_LB_URL, "philly_lb"),
+            fact("parcel_number", opa, PHILLY_LB_URL),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, PHILLY_LB_URL, "gis_area"))
+        if zoning:
+            facts.append(fact("zoning", zoning, PHILLY_LB_URL))
+        if zipcode:
+            facts.append(fact("zip_code", zipcode, PHILLY_LB_URL))
+        title_loc = "%s (%s)" % (addr, opa) if addr else ("OPA " + opa)
+        atlas_url = ("https://atlas.phila.gov/" + urllib.parse.quote(addr)) if addr else PHILLY_LB_URL
+        row = {
+            "id": "pa-phl-%s" % slug(opa), "source": "philly-landbank",
+            "title": "%s, Philadelphia (Land Bank vacant lot)" % title_loc,
+            "state": "PA", "county": "Philadelphia", "locality": "Philadelphia", "apn": opa,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": atlas_url,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["land bank", "vacant lot", "pennsylvania"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(PHILLY_LB_GIS, "opa_id='%s'" % opa.replace("'", "''")), "City of Philadelphia GIS")
+        out.append(row)
+    return out
+
+
+def philly_landbank(fetch, now, warn):
+    feats = _arcgis_paged(fetch, PHILLY_LB_GIS, "owner1 LIKE '%LAND BANK%'",
+                          "objectid,address,opa_id,zoningbasedistrict,zipcode", max_total=2500, page_size=500,
+                          extra={"orderByFields": "Shape__Area DESC"})
+    rows = parse_philly_lb_features(feats, warn)
+    if len(rows) < 200:
+        raise StructureError("only %d Philadelphia Land Bank parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Cleveland Land Bank (OH) ---
+CLEVELAND_LB_GIS = "https://services3.arcgis.com/dty2kHktVXHrqO8i/arcgis/rest/services/City_Landbank/FeatureServer/0/query"
+CLEVELAND_LB_URL = "https://www.clevelandohio.gov/city-hall/departments/community-development/divisions/land-bank"
+
+
+def parse_cleveland_lb_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pin = clean(str(a.get("parcelpin") or a.get("OBJECTID") or ""))
+        if not pin or pin in seen:
+            continue
+        seen.add(pin)
+        raw_addr = clean(str(a.get("par_addr_all") or ""))
+        addr = raw_addr.split(",")[0].strip().title() if raw_addr else ""
+        if addr.startswith("0 "):
+            addr = addr[2:].strip()
+        lb_type = clean(str(a.get("cityLandBankType") or "Vacant Land"))
+        rings = (f.get("geometry") or {}).get("rings") or []
+        acres = rings_acres(rings) if rings else None
+        facts = [
+            fact("availability", "City of Cleveland Land Bank (%s)" % lb_type, CLEVELAND_LB_URL, "cleveland_lb"),
+            fact("parcel_number", pin, CLEVELAND_LB_URL),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, CLEVELAND_LB_URL, "gis_area"))
+        front = number(a.get("total_legal_front"))
+        if front:
+            facts.append(fact("frontage", "%g ft" % round(front, 1), CLEVELAND_LB_URL))
+        title_loc = "%s (%s)" % (addr, pin) if addr else ("PIN " + pin)
+        row = {
+            "id": "oh-cle-%s" % slug(pin), "source": "cleveland-landbank",
+            "title": "%s, Cleveland (Land Bank lot)" % title_loc,
+            "state": "OH", "county": "Cuyahoga", "locality": "Cleveland", "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CLEVELAND_LB_URL,
+            "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["land bank", "vacant lot", "ohio"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(CLEVELAND_LB_GIS, "parcelpin='%s'" % pin.replace("'", "''")), "City of Cleveland GIS")
+        out.append(row)
+    return out
+
+
+def cleveland_landbank(fetch, now, warn):
+    feats = _arcgis_paged(fetch, CLEVELAND_LB_GIS, "cityLandBankType IN ('Residential','Commercial','Industrial')",
+                          "OBJECTID,parcelpin,par_addr_all,total_legal_front,total_square_ft,cityLandBankType",
+                          max_total=1600, page_size=500, extra={"orderByFields": "total_square_ft DESC"})
+    rows = parse_cleveland_lb_features(feats, warn)
+    if len(rows) < 200:
+        raise StructureError("only %d Cleveland Land Bank parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Dallas Land Bank Vacant Lots (TX) ---
+DALLAS_LB_GIS = "https://services2.arcgis.com/rwnOSbfKSwyTBcwN/arcgis/rest/services/Land_Bank_Potential_Properties/FeatureServer/0/query"
+DALLAS_LB_URL = "https://dallascityhall.com/departments/housing-neighborhood-revitalization/Pages/land-bank.aspx"
+
+
+def parse_dallas_lb_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        acct = clean(str(a.get("AccountID") or a.get("OBJECTID") or ""))
+        if not acct or acct in seen:
+            continue
+        seen.add(acct)
+        num = clean(str(a.get("SiteAddrNu") or ""))
+        st = clean(str(a.get("SiteStreet") or ""))
+        addr = (" ".join(x for x in (num, st) if x)).title()
+        pclass = clean(str(a.get("PropClass") or "Vacant Land"))
+        rsa = clean(str(a.get("RSA_Name") or ""))
+        geom = f.get("geometry") or {}
+        lon = geom.get("x")
+        lat = geom.get("y")
+        facts = [
+            fact("availability", "City of Dallas Land Bank vacant lot", DALLAS_LB_URL, "dallas_lb"),
+            fact("parcel_number", acct, DALLAS_LB_URL),
+            fact("property_class", pclass, DALLAS_LB_URL),
+        ]
+        if rsa:
+            facts.append(fact("district", rsa, DALLAS_LB_URL))
+        title_loc = "%s (%s)" % (addr, acct) if addr else ("Account " + acct)
+        row = {
+            "id": "tx-dal-%s" % slug(acct), "source": "dallas-landbank",
+            "title": "%s, Dallas (Land Bank vacant lot)" % title_loc,
+            "state": "TX", "county": "Dallas", "locality": "Dallas", "apn": acct,
+            "acres": None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": DALLAS_LB_URL,
+            "address": addr,
+            "lat": round(float(lat), 6) if lat is not None else None,
+            "lon": round(float(lon), 6) if lon is not None else None,
+            "geometry": None, "facts": facts,
+            "tags": ["land bank", "vacant lot", "texas"],
+        }
+        out.append(row)
+    return out
+
+
+def dallas_landbank(fetch, now, warn):
+    feats = _arcgis_paged(fetch, DALLAS_LB_GIS, "BldgClass='LAND ONLY'",
+                          "OBJECTID,AccountID,SiteAddrNu,SiteStreet,PropClass,RSA_Name",
+                          max_total=1000, page_size=500)
+    rows = parse_dallas_lb_features(feats, warn)
+    if len(rows) < 100:
+        raise StructureError("only %d Dallas Land Bank parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Milwaukee DCD Advertised Vacant Lots (WI) ---
+MILWAUKEE_GIS = "https://milwaukeemaps.milwaukee.gov/arcgis/rest/services/StrongNeighborhood/StrongNeighborhood/MapServer/1/query"
+MILWAUKEE_URL = "https://city.milwaukee.gov/DCD/CityRealEstate"
+
+
+def parse_milwaukee_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        taxkey = clean(str(a.get("TAXKEY") or a.get("OBJECTID") or ""))
+        if not taxkey or taxkey in seen:
+            continue
+        seen.add(taxkey)
+        addr = clean(str(a.get("COMBINEDADDRESS") or "")).title()
+        zoning = clean(str(a.get("ZONING") or ""))
+        zipcode = clean(str(a.get("ZIPCODE") or ""))
+        geom = f.get("geometry") or {}
+        lon = geom.get("x")
+        lat = geom.get("y")
+        facts = [
+            fact("availability", "City of Milwaukee Advertised Vacant Lot For Sale", MILWAUKEE_URL, "milwaukee_vac"),
+            fact("parcel_number", taxkey, MILWAUKEE_URL),
+        ]
+        if zoning:
+            facts.append(fact("zoning", zoning, MILWAUKEE_URL))
+        if zipcode:
+            facts.append(fact("zip_code", zipcode, MILWAUKEE_URL))
+        title_loc = "%s (%s)" % (addr, taxkey) if addr else ("TaxKey " + taxkey)
+        row = {
+            "id": "wi-mke-%s" % slug(taxkey), "source": "milwaukee-vacant",
+            "title": "%s, Milwaukee (City vacant lot for sale)" % title_loc,
+            "state": "WI", "county": "Milwaukee", "locality": "Milwaukee", "apn": taxkey,
+            "acres": None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": MILWAUKEE_URL,
+            "address": addr,
+            "lat": round(float(lat), 6) if lat is not None else None,
+            "lon": round(float(lon), 6) if lon is not None else None,
+            "geometry": None, "facts": facts,
+            "tags": ["city surplus", "vacant lot", "wisconsin"],
+        }
+        out.append(row)
+    return out
+
+
+def milwaukee_vacant(fetch, now, warn):
+    feats = _arcgis_paged(fetch, MILWAUKEE_GIS,
+                          "ACTIVE=1 AND DISPOSITIONSTATUS='Advertised' AND DISPOSITIONSTRATEGY='Dispose' AND PROPERTYTYPE='Vacant Lot'",
+                          "OBJECTID,TAXKEY,COMBINEDADDRESS,ZONING,ZIPCODE",
+                          max_total=800, page_size=500)
+    rows = parse_milwaukee_features(feats, warn)
+    if len(rows) < 50:
+        raise StructureError("only %d Milwaukee advertised vacant lots" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- City of Detroit Priced Commercial & Vacant Land For Sale (MI) ---
+DETROIT_COMM_GIS = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/Commercial_Properties_for_Sale/FeatureServer/0/query"
+DETROIT_COMM_URL = "https://detroitmi.gov/departments/housing-and-revitalization-department/commercial-real-estate"
+
+
+def parse_detroit_comm_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        lid = clean(str(a.get("id") or a.get("ObjectId") or ""))
+        if not lid or lid in seen:
+            continue
+        seen.add(lid)
+        addr = clean(str(a.get("address") or "")).title()
+        title_raw = clean(str(a.get("title") or ""))
+        size_raw = clean(str(a.get("size") or ""))
+        price = number(a.get("price"))
+        acres = _sf_to_acres(size_raw)
+        geom = f.get("geometry") or {}
+        lon = geom.get("x")
+        lat = geom.get("y")
+        facts = [
+            fact("availability", "City of Detroit Vacant Land For Sale", DETROIT_COMM_URL, "detroit_comm"),
+            fact("listing_id", lid, DETROIT_COMM_URL),
+        ]
+        if price:
+            facts.append(fact("price", "Asking price $%s" % "{:,.0f}".format(price), DETROIT_COMM_URL, "detroit_comm"))
+        if size_raw:
+            facts.append(fact("lot_size", size_raw, DETROIT_COMM_URL))
+        title_loc = "%s — %s" % (addr, title_raw) if (addr and title_raw) else (addr or title_raw or ("Detroit Lot " + lid))
+        row = {
+            "id": "mi-detc-%s" % slug(lid), "source": "detroit-commercial-land",
+            "title": "%s, Detroit (Priced vacant land)" % title_loc[:90],
+            "state": "MI", "county": "Wayne", "locality": "Detroit", "apn": lid,
+            "acres": acres, "price": round(price, 2) if price else None,
+            "price_kind": "cash" if price else "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": DETROIT_COMM_URL,
+            "address": addr,
+            "lat": round(float(lat), 6) if lat is not None else None,
+            "lon": round(float(lon), 6) if lon is not None else None,
+            "geometry": None, "facts": facts,
+            "tags": ["buy it now", "vacant land", "michigan"],
+        }
+        out.append(row)
+    return out
+
+
+def detroit_commercial_land(fetch, now, warn):
+    feats = _arcgis_query(fetch, DETROIT_COMM_GIS, "property_type='Vacant Land'",
+                          "ObjectId,id,address,title,size,price,property_type", 200)
+    rows = parse_detroit_comm_features(feats, warn)
+    if len(rows) < 10:
+        raise StructureError("only %d Detroit priced vacant land parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Lucas County Auditor 2026 Forfeited Land Sale (OH) ---
+LUCAS_FORF_GIS = "https://services3.arcgis.com/T8dczfwPixv79EgZ/arcgis/rest/services/Forfeited_Land_Sale_2026/FeatureServer/0/query"
+LUCAS_FORF_URL = "https://co.lucas.oh.us/262/Forfeited-Land-Sale"
+
+
+def parse_lucas_forf_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        parid = clean(str(a.get("parid") or a.get("assessor_num") or a.get("objectid") or ""))
+        if not parid or parid in seen:
+            continue
+        seen.add(parid)
+        raw_addr = clean(str(a.get("property_address") or ""))
+        addr = raw_addr.split(",")[0].strip().title() if raw_addr else ""
+        taxes = number(a.get("taxesowed"))
+        zoning = clean(str(a.get("zoning") or ""))
+        desc = clean(str(a.get("description") or ""))
+        geom = f.get("geometry") or {}
+        lon = geom.get("x")
+        lat = geom.get("y")
+        facts = [
+            fact("availability", "Lucas County 2026 Forfeited Land Sale", LUCAS_FORF_URL, "lucas_forf_2026"),
+            fact("parcel_number", parid, LUCAS_FORF_URL),
+        ]
+        if taxes:
+            facts.append(fact("price", "Delinquent tax / opening bid $%s" % "{:,.2f}".format(taxes), LUCAS_FORF_URL, "lucas_forf_2026"))
+        if zoning:
+            facts.append(fact("zoning", zoning, LUCAS_FORF_URL))
+        if desc:
+            facts.append(fact("land_class", desc, LUCAS_FORF_URL))
+        title_loc = "%s (%s)" % (addr, parid) if addr else ("Parcel " + parid)
+        row = {
+            "id": "oh-lucf26-%s" % slug(parid), "source": "lucas-forfeited-2026",
+            "title": "%s, Toledo (2026 Forfeited Land Sale)" % title_loc,
+            "state": "OH", "county": "Lucas", "locality": "Toledo", "apn": parid,
+            "acres": None, "price": round(taxes, 2) if taxes else None,
+            "price_kind": "min_bid" if taxes else "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "url": LUCAS_FORF_URL,
+            "address": addr,
+            "lat": round(float(lat), 6) if lat is not None else None,
+            "lon": round(float(lon), 6) if lon is not None else None,
+            "geometry": None, "facts": facts,
+            "tags": ["tax sale", "forfeited land", "ohio"],
+        }
+        out.append(row)
+    return out
+
+
+def lucas_forfeited_2026(fetch, now, warn):
+    feats = _arcgis_query(fetch, LUCAS_FORF_GIS, "1=1",
+                          "objectid,parid,assessor_num,property_address,zoning,description,taxesowed", 200)
+    rows = parse_lucas_forf_features(feats, warn)
+    if len(rows) < 5:
+        raise StructureError("only %d Lucas 2026 forfeited parcels" % len(rows))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Sauk County Tax-Forfeited Parcels For Sale (WI) ---
+SAUK_WI_GIS = "https://gis.co.sauk.wi.us/arcgis/rest/services/Sauk/TaxParcelsForSale/MapServer/0/query"
+SAUK_WI_URL = "https://www.co.sauk.wi.us/treasurer/tax-deed-sales"
+
+
+def parse_sauk_wi_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("PARCELID") or a.get("OBJECTID") or ""))
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        addr = clean(str(a.get("SITEADDRESS") or a.get("PSTLADDRESS") or "")).title()
+        acres = number(a.get("TOTALACREAGE"))
+        url = clean(str(a.get("URL") or ""))
+        if not url.startswith("https://") or "co.sauk.wi.us" not in url:
+            url = SAUK_WI_URL
+        rings = (f.get("geometry") or {}).get("rings") or []
+        if not acres and rings:
+            acres = rings_acres(rings)
+        facts = [
+            fact("availability", "Sauk County Tax-Forfeited Land (Offer to Purchase)", url, "sauk_wi"),
+            fact("parcel_number", pid, url),
+        ]
+        if acres:
+            facts.append(fact("acreage", "%g acres" % round(acres, 3), url))
+        title_loc = "%s (%s)" % (addr, pid) if addr else ("Parcel " + pid)
+        row = {
+            "id": "wi-sauk-%s" % slug(pid), "source": "sauk-county-wi",
+            "title": "%s, Sauk County (Wisconsin tax-forfeited land)" % title_loc,
+            "state": "WI", "county": "Sauk", "locality": "Baraboo", "apn": pid,
+            "acres": round(acres, 4) if acres else None, "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": url,
+            "address": addr, "lat": 43.471, "lon": -89.744, "geometry": None, "facts": facts,
+            "tags": ["tax forfeited", "rural land", "wisconsin"],
+        }
+        if rings:
+            apply_geometry(row, rings, one_parcel_url(SAUK_WI_GIS, "PARCELID='%s'" % pid.replace("'", "''")), "Sauk County WI GIS")
+        out.append(row)
+    return out
+
+
+def sauk_county_wi(fetch, now, warn):
+    feats = _arcgis_paged(fetch, SAUK_WI_GIS, "1=1",
+                          "OBJECTID,PARCELID,SITEADDRESS,PSTLADDRESS,URL,TOTALACREAGE", max_total=500, page_size=200)
+    rows = parse_sauk_wi_features(feats, warn)
+    if not rows:
+        raise StructureError("no Sauk County WI parcels")
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
@@ -4223,6 +4649,24 @@ SOURCES = [
      "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data."},
     {"id": "california-dgs", "name": "California DGS State Commercial Opportunities", "agency": "California Department of General Services",
      "url": CA_DGS, "state": "CA", "run": california_dgs, "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines."},
+    {"id": "philly-landbank", "name": "Philadelphia Land Bank vacant lots", "agency": "Philadelphia Land Bank / PHDC",
+     "url": PHILLY_LB_URL, "state": "PA", "run": philly_landbank,
+     "about": "Vacant land bank parcels in Philadelphia with OPA IDs, zoning districts, and GIS parcel outlines."},
+    {"id": "cleveland-landbank", "name": "City of Cleveland Land Bank vacant land", "agency": "City of Cleveland Land Bank",
+     "url": CLEVELAND_LB_URL, "state": "OH", "run": cleveland_landbank,
+     "about": "Largest residential, commercial, and industrial vacant lots in the City of Cleveland Land Bank with GIS parcel outlines."},
+    {"id": "dallas-landbank", "name": "City of Dallas Land Bank vacant lots", "agency": "City of Dallas Land Bank",
+     "url": DALLAS_LB_URL, "state": "TX", "run": dallas_landbank,
+     "about": "Unimproved vacant residential land bank lots across Dallas County from City of Dallas Open Data GIS."},
+    {"id": "detroit-commercial-land", "name": "City of Detroit Priced Vacant Land For Sale", "agency": "City of Detroit Housing & Revitalization Dept.",
+     "url": DETROIT_COMM_URL, "state": "MI", "run": detroit_commercial_land,
+     "about": "Fixed-price City of Detroit vacant land parcels for sale with published asking prices and square footage."},
+    {"id": "lucas-forfeited-2026", "name": "Lucas County Auditor 2026 Forfeited Land Sale", "agency": "Lucas County Auditor, Ohio",
+     "url": LUCAS_FORF_URL, "state": "OH", "run": lucas_forfeited_2026,
+     "about": "2026 tax-forfeited land sale parcels in Toledo & Lucas County with delinquent tax opening bids and zoning."},
+    {"id": "sauk-county-wi", "name": "Sauk County Tax-Forfeited Land For Sale", "agency": "Sauk County Treasurer, Wisconsin",
+     "url": SAUK_WI_URL, "state": "WI", "run": sauk_county_wi,
+     "about": "Rural tax-forfeited land parcels open for Offer to Purchase in Sauk County, Wisconsin."},
 ]
 NOT_CARRIED = [
     ("GSA RealEstateSales.gov (federal surplus)", "https://realestatesales.gov/",
@@ -4231,4 +4675,6 @@ NOT_CARRIED = [
      "Sale notices are published irregularly as press announcements; planned for future ingestion."),
     ("Utah SITLA & Washington DNR Trust Land GIS", "https://trustlands.utah.gov/",
      "Transaction ArcGIS folders currently require authentication tokens; browse agency auction calendars directly."),
+    ("City of Milwaukee DCD Real Estate GIS", "https://city.milwaukee.gov/DCD/CityRealEstate",
+     "Not crawled: milwaukeemaps.milwaukee.gov robots.txt disallows automated access. Browse city.milwaukee.gov directly."),
 ]

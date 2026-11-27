@@ -24,7 +24,7 @@ from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "theme.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "theme.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 
 
 class Writer(object):
@@ -300,6 +300,8 @@ def build(dist, data_dir=None, now=None, log=print):
     # Core hubs
     w.page("/", site.home(), indexable=True, group="core")
     w.page("/services/", site.services_page(), indexable=True, group="core")
+    w.page("/deals/", site.deals_page(), indexable=True, group="core")
+    w.page("/tax-sales/", site.tax_sales_page(), indexable=True, group="core")
     w.page("/land-atlas/", site.land_atlas_page(), indexable=True, group="core")
     w.page("/xray/", site.xray_page(), indexable=True, group="core")
     w.page("/list/", site.list_page(), indexable=True, group="core")
@@ -345,14 +347,25 @@ def build(dist, data_dir=None, now=None, log=print):
     for r in cat.listings:
         w.page(cat.listing_path(r), site.listing(r), indexable=listing_is_indexable(r), group="listings")
 
-    # Map JSON & CSV downloads
+    # Map JSON & CSV downloads (includes deterministic % vs. USDA/FHFA county benchmark at col 14)
+    state_fre = {
+        code: (site.market.latest_values(code) or {}).get("farm_real_estate")
+        for code in STATE_NAMES
+    }
     rows = []
     for r in cat.listings:
+        vs_pct = None
+        if r.get("price") and r.get("acres") and r["price"] > 0 and r["acres"] > 0:
+            cv = cat.county_value(r)
+            bench = (cv.get("value") if cv else None) or state_fre.get(r["state"])
+            if bench and bench > 0:
+                ppa = r["price"] / r["acres"]
+                vs_pct = int(round(((ppa - bench) / bench) * 100.0))
         rows.append([r["id"], r.get("lat"), r.get("lon"), r["state"], r["price"], r["price_kind"], r["acres"],
                      r["status"], 1 if r["available"] else 0, r["title"], r["county_label"], r.get("apn") or "",
-                     (r.get("deadline") or "")[:10]])
+                     (r.get("deadline") or "")[:10], 0, vs_pct])
     w.write("data/map.json", json.dumps({"fields": ["id", "lat", "lon", "state", "price", "kind", "acres", "status", "available",
-                                                    "title", "county", "apn", "deadline"], "rows": rows}, separators=(",", ":")))
+                                                    "title", "county", "apn", "deadline", "direct", "vs_bench_pct"], "rows": rows}, separators=(",", ":")))
     out = io.StringIO()
     cw = csv.writer(out, lineterminator="\n")
     cw.writerow(["id", "source", "agency", "title", "state", "county", "locality", "address", "parcel", "acres", "price",
@@ -372,7 +385,8 @@ def build(dist, data_dir=None, now=None, log=print):
         ("/data/sources.json", "Source status: last successful read, counts, failures, and site stats"),
         ("/api/search/?limit=25", "Live JSON search API across official public parcels and direct owner/agent listings"),
         ("/api/concierge/", "Land Agent Acquisition Concierge API ($20 initiation + 10% transfer fee)"),
-        ("/.well-known/landosaur-agent.json", "Machine-readable AI Agent API schema (search, X-Ray, publish, bid/reserve, hire Land Agent)"),
+        ("/api/alerts/", "Saved-Search & Custom Instant Atom/RSS + JSON Land Alert API"),
+        ("/.well-known/landosaur-agent.json", "Machine-readable AI Agent API schema (search, X-Ray, publish, bid/reserve, alerts, hire Land Agent)"),
         ("/feeds/buy-now.xml", "Atom feed of fixed-price Buy It Now official land parcels"),
         ("/feeds/auctions.xml", "Atom feed of active public land auctions and tax sales"),
     ]), indexable=True, group="core")

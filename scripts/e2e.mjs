@@ -3,7 +3,7 @@
 import { launch } from "./cdp.mjs";
 
 const base = (process.argv[2] || "http://localhost:4651").replace(/\/$/, "");
-const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/(xray|listings|offers|concierge|search)/;
+const TILE_HOSTS = /tile\.openstreetmap\.org|basemap\.nationalmap\.gov|hazards\.fema\.gov|rsio\.org|fonts\.googleapis\.com|fonts\.gstatic\.com|\/api\/(xray|listings|offers|concierge|search|alerts)/;
 const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)/.test(base);
 const { page, close } = await launch();
 const results = [];
@@ -80,10 +80,21 @@ try {
       assert(concOk, "live /api/concierge/ metadata check failed");
     }
   });
+  await step("Below-Market /deals/, 50-State /tax-sales/ Atlas, and /api/alerts/ load cleanly", async () => {
+    await page.goto(base + "/deals/");
+    assert(await page.eval("document.querySelectorAll('#below-benchmark tbody tr').length >= 10 && document.body.innerText.includes('Land Agent ($20)')"), "missing below-market deals rows");
+    await page.goto(base + "/tax-sales/");
+    await page.waitFor("document.querySelectorAll('#tax-cartogram a.us-tile').length === 50", 12000);
+    assert(await page.eval("document.querySelectorAll('#tax-tbody tr').length === 50"), "expected 50 rows on /tax-sales/");
+    if (!isLocal) {
+      const alertOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/alerts/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.ok && d.storage_configured === true))`);
+      assert(alertOk, "live /api/alerts/ metadata check failed");
+    }
+  });
   await step("indexing policy matches SITE_INDEXABLE across core hubs", async () => {
     const indexable = await page.eval(`fetch(${JSON.stringify(base)} + "/data/sources.json").then(r => r.json()).then(d => !!d.site.indexable)`);
     const want = indexable ? "index" : "noindex";
-    for (const p of ["/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
+    for (const p of ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/new/", "/closing-soon/"]) {
       await page.goto(base + p);
       assert((await page.eval("document.querySelector('meta[name=robots]').content")).startsWith(want), p + " should be " + want);
     }
@@ -92,7 +103,7 @@ try {
     await page.viewport(375, 812, true);
     const bad = [];
     const listingRel = new URL(listing, base).pathname.replace(new URL(base + "/").pathname, "/");
-    for (const p of ["/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
+    for (const p of ["/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
       const w = await page.eval("document.documentElement.scrollWidth");
       if (w > 376) bad.push(p + " is " + w + "px wide");

@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-27T09:10:06Z",
+ "checked": "2026-11-27T20:03:52Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -345,6 +345,42 @@
    "upstream_total": 882,
    "url": "https://www.chicago.gov/city/en/sites/block-builder/home.html"
   },
+  "cleveland-landbank": {
+   "about": "Largest residential, commercial, and industrial vacant lots in the City of Cleveland Land Bank with GIS parcel outlines.",
+   "agency": "City of Cleveland Land Bank",
+   "complete": true,
+   "count": 1600,
+   "failures": 0,
+   "last_attempt": "2026-11-27T20:03:52Z",
+   "last_success": "2026-11-27T20:03:52Z",
+   "message": "",
+   "name": "City of Cleveland Land Bank vacant land",
+   "notes": [],
+   "ok": true,
+   "read": 1600,
+   "seconds": 5,
+   "state": "OH",
+   "upstream_total": 1600,
+   "url": "https://www.clevelandohio.gov/city-hall/departments/community-development/divisions/land-bank"
+  },
+  "dallas-landbank": {
+   "about": "Unimproved vacant residential land bank lots across Dallas County from City of Dallas Open Data GIS.",
+   "agency": "City of Dallas Land Bank",
+   "complete": true,
+   "count": 815,
+   "failures": 0,
+   "last_attempt": "2026-11-27T20:02:47Z",
+   "last_success": "2026-11-27T20:02:47Z",
+   "message": "",
+   "name": "City of Dallas Land Bank vacant lots",
+   "notes": [],
+   "ok": true,
+   "read": 815,
+   "seconds": 2,
+   "state": "TX",
+   "upstream_total": 815,
+   "url": "https://dallascityhall.com/departments/housing-neighborhood-revitalization/Pages/land-bank.aspx"
+  },
   "delaware-in": {
    "about": "Fall 2026 Delaware County / Muncie tax-sale vacant land parcels with published minimum bids and GIS parcel outlines.",
    "agency": "Delaware County, Indiana",
@@ -362,6 +398,24 @@
    "state": "IN",
    "upstream_total": 342,
    "url": "https://delawarecounty.in.gov/"
+  },
+  "detroit-commercial-land": {
+   "about": "Fixed-price City of Detroit vacant land parcels for sale with published asking prices and square footage.",
+   "agency": "City of Detroit Housing & Revitalization Dept.",
+   "complete": true,
+   "count": 48,
+   "failures": 0,
+   "last_attempt": "2026-11-27T20:02:47Z",
+   "last_success": "2026-11-27T20:02:47Z",
+   "message": "",
+   "name": "City of Detroit Priced Vacant Land For Sale",
+   "notes": [],
+   "ok": true,
+   "read": 48,
+   "seconds": 1,
+   "state": "MI",
+   "upstream_total": 48,
+   "url": "https://detroitmi.gov/departments/housing-and-revitalization-department/commercial-real-estate"
   },
   "detroit-dlba": {
    "about": "Actively marketed vacant land programs (Marketed, Oversized, Auction, Own It Now, Create-a-Project lots) from Detroit's official open-data GIS.",
@@ -542,6 +596,24 @@
    "state": "OH",
    "upstream_total": 1466,
    "url": "https://lucascountylandbank.org/"
+  },
+  "lucas-forfeited-2026": {
+   "about": "2026 tax-forfeited land sale parcels in Toledo & Lucas County with delinquent tax opening bids and zoning.",
+   "agency": "Lucas County Auditor, Ohio",
+   "complete": true,
+   "count": 43,
+   "failures": 0,
+   "last_attempt": "2026-11-27T20:02:47Z",
+   "last_success": "2026-11-27T20:02:47Z",
+   "message": "",
+   "name": "Lucas County Auditor 2026 Forfeited Land Sale",
+   "notes": [],
+   "ok": true,
+   "read": 43,
+   "seconds": 1,
+   "state": "OH",
+   "upstream_total": 43,
+   "url": "https://co.lucas.oh.us/262/Forfeited-Land-Sale"
   },
   "maui-hi": {
    "about": "Vacant government-owned parcels in West Maui with Tax Map Key (TMK) IDs, acreage, and GIS outlines.",
@@ -777,6 +849,24 @@
    "upstream_total": 10,
    "url": "https://www.peterboroughnh.gov/"
   },
+  "philly-landbank": {
+   "about": "Vacant land bank parcels in Philadelphia with OPA IDs, zoning districts, and GIS parcel outlines.",
+   "agency": "Philadelphia Land Bank / PHDC",
+   "complete": true,
+   "count": 2361,
+   "failures": 0,
+   "last_attempt": "2026-11-27T20:02:47Z",
+   "last_success": "2026-11-27T20:02:47Z",
+   "message": "",
+   "name": "Philadelphia Land Bank vacant lots",
+   "notes": [],
+   "ok": true,
+   "read": 2361,
+   "seconds": 9,
+   "state": "PA",
+   "upstream_total": 2361,
+   "url": "https://phdcphila.org/land/"
+  },
   "pittsburgh-vacant": {
    "about": "Vacant city-owned parcels marked Available for Sale (Public Sale) in Pittsburgh's daily open-data inventory, with zoning, square footage, and coordinates.",
    "agency": "City of Pittsburgh / Pittsburgh Land Bank",
@@ -866,6 +956,24 @@
    "state": "CO",
    "upstream_total": 50,
    "url": "https://www.sanmiguelcountyco.gov/"
+  },
+  "sauk-county-wi": {
+   "about": "Rural tax-forfeited land parcels open for Offer to Purchase in Sauk County, Wisconsin.",
+   "agency": "Sauk County Treasurer, Wisconsin",
+   "complete": true,
+   "count": 500,
+   "failures": 0,
+   "last_attempt": "2026-11-27T20:03:52Z",
+   "last_success": "2026-11-27T20:03:52Z",
+   "message": "",
+   "name": "Sauk County Tax-Forfeited Land For Sale",
+   "notes": [],
+   "ok": true,
+   "read": 500,
+   "seconds": 4,
+   "state": "WI",
+   "upstream_total": 500,
+   "url": "https://www.co.sauk.wi.us/treasurer/tax-deed-sales"
   },
   "shawnee-ks": {
    "about": "County-owned vacant parcels for sale in Shawnee County, Kansas with published fixed sale prices and GIS outlines.",

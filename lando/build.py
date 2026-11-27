@@ -2,12 +2,16 @@
 
     python3 -m lando.build [dist]
 
-Pages, the map data, CSV and JSON downloads, Atom feeds, sitemap.xml (indexable pages only), robots.txt, the
-IndexNow key file, share-card sources (_og/*.html, rendered by scripts/og.py) and manifest.json (a hash per page,
-for telling IndexNow only about indexable pages that changed).
+Generates:
+  - Interactive Zillow-for-Land explorer (/), national directory (/land-for-sale/), state & county hubs
+  - 50-State Land Price Observatory (/land-prices/* — 56 pages backed by USDA NASS 2010-2026 + 3,115 counties)
+  - Research & Benchmarks (/research/) + 29 source-cited buyer guides (/research/<slug>/)
+  - Interactive Valuation, Financing & Off-Grid Power Workbench (/analyze/)
+  - Individual GIS parcel dossiers (/land/<id>/)
+  - CSV/JSON downloads, Atom feeds, Sitemap Index (/sitemap.xml -> /sitemaps/{core,places,listings}.xml),
+    robots.txt, llms.txt, IndexNow key file, share cards, and manifest.json.
 """
 import csv
-import datetime
 import hashlib
 import io
 import json
@@ -15,11 +19,11 @@ import os
 import shutil
 import sys
 
-from . import adapters, config
+from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
-from .pages import DINO, Site, acres_text, esc, money, price_line
+from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "map.js", "listing.js", "tables.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "map.js", "listing.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 
 
 class Writer(object):
@@ -27,9 +31,10 @@ class Writer(object):
         self.dist = dist
         self.pages = {}
         self.indexable = []
+        self.indexable_groups = {"core": [], "places": [], "listings": []}
         self.files = 0
 
-    def write(self, rel, data, page_path=None, indexable=False):
+    def write(self, rel, data, page_path=None, indexable=False, group="core"):
         full = os.path.join(self.dist, rel)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         raw = data.encode("utf-8") if isinstance(data, str) else data
@@ -40,10 +45,11 @@ class Writer(object):
             self.pages[page_path] = hashlib.sha1(raw).hexdigest()[:16]
             if indexable:
                 self.indexable.append(page_path)
+                self.indexable_groups.setdefault(group, []).append(page_path)
 
-    def page(self, path, html_, indexable=False):
+    def page(self, path, html_, indexable=False, group="core"):
         rel = path.strip("/")
-        self.write((rel + "/" if rel else "") + "index.html", html_, path, indexable and config.INDEXABLE)
+        self.write((rel + "/" if rel else "") + "index.html", html_, path, indexable and config.INDEXABLE, group=group)
 
 
 def atom(title, path, listings, cat, updated):
@@ -63,13 +69,95 @@ def atom(title, path, listings, cat, updated):
 
 def og_card(title, big, sub):
     return ('<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:1200px;height:630px;overflow:hidden}'
-            'body{background:#f6f8f2;color:#193c2c;font-family:"Arial Rounded MT Bold",system-ui,-apple-system,"Segoe UI",Roboto,"DejaVu Sans",sans-serif;'
+            'body{background:#f6f8f2;color:#173628;font-family:"Arial Rounded MT Bold",system-ui,-apple-system,"Segoe UI",Roboto,"DejaVu Sans",sans-serif;'
             'display:flex;flex-direction:column;justify-content:space-between;padding:60px 70px;box-sizing:border-box;'
             'background-image:radial-gradient(circle at 90%% 20%%,#e3f6bb 0,#e3f6bb 220px,transparent 221px)}'
-            '.b{display:flex;align-items:center;gap:18px;font-size:34px;font-weight:700;color:#236b43}.b svg{width:72px;height:72px}'
-            'h1{font-size:62px;line-height:1.05;margin:0;max-width:900px;letter-spacing:-.01em}.v{font-size:40px;color:#236b43;font-weight:700}'
-            '.s{font-size:26px;color:#667568}</style></head><body><div class="b">%s Landosaur</div><div><h1>%s</h1><p class="v">%s</p></div>'
+            '.b{display:flex;align-items:center;gap:18px;font-size:34px;font-weight:700;color:#1f6840}.b svg{width:72px;height:72px}'
+            'h1{font-size:58px;line-height:1.06;margin:0;max-width:920px;letter-spacing:-.015em}.v{font-size:38px;color:#1f6840;font-weight:700}'
+            '.s{font-size:25px;color:#5a6a5e}</style></head><body><div class="b">%s Landosaur</div><div><h1>%s</h1><p class="v">%s</p></div>'
             '<p class="s">%s</p></body></html>') % (DINO, esc(title), esc(big), esc(sub))
+
+
+def build_llms_txt(cat, site, updated):
+    cur = cat.current()
+    b = research.compute_benchmarks(cat)
+    states = sorted(cat.states.values(), key=lambda s: s["name"])
+    base = config.BASE_URL
+    lines = [
+        "# Landosaur — Official U.S. Land Map, 50-State Land Price Observatory & Valuation Workbench",
+        "",
+        ("> Landosaur maps official public-agency land offerings across U.S. states and counties "
+         "(tax-sale auctions, surplus state trust land, municipal land banks, and state redevelopment notices), "
+         "paired with a 50-state USDA/FHFA Land Price Observatory (2010-%d across 3,115 counties), "
+         "%d source-cited buyer research guides, and a deterministic land deal & off-grid power analyzer." % (
+             site.market.latest_year, len(site.guides))),
+        "",
+        "## Key Platform Capabilities",
+        "",
+        "- **Live Official Inventory Map** (%s/): %s active official offerings across %d tracked states and %d agencies (checked daily), with split-screen map/list filtering, saved shortlists, 4-parcel side-by-side comparison, GIS outlines, USGS aerial/topo tiles, FEMA NFHL flood hazard overlays, and a distance ruler." % (
+            base, "{:,}".format(len(cur)), b["state_count"], b["agency_count"]),
+        "- **50-State Land Price Observatory** (%s/land-prices/): Official USDA NASS 2010-%d farm real estate, cropland, and pasture series plus 3,115 county-level benchmarks across all 50 states." % (
+            base, site.market.latest_year),
+        "- **Interactive Land Analyzer** (%s/analyze/): Client-side all-in acquisition, land loan & balloon amortization, utility power extension vs. off-grid solar comparison, verified closed-comp envelope, 6-gate diligence check, income cap-rate, and subdivision residual calculator." % base,
+        "- **Research & %d Due-Diligence Guides** (%s/research/): Deterministic public-agency price/acreage benchmarks plus source-cited field guides (tax sales, wetlands, septic, wells, road access, zoning, surveys, mineral rights, financing)." % (
+            len(site.guides), base),
+        "",
+        "## Official Agency Sources (%s snapshot)" % updated,
+        "",
+    ]
+    for src in adapters.SOURCES:
+        s = cat.status.get("sources", {}).get(src["id"], {})
+        count = s.get("count") or 0
+        lines.append("- **%s** (%s) — %s (%s %s)" % (
+            src["agency"], STATE_NAMES.get(src["state"], src["state"]), src["about"],
+            "{:,}".format(count), "listing" if count == 1 else "listings"))
+    lines.extend([
+        "",
+        "## Primary Hub URLs",
+        "",
+        "- [Interactive Land Map](%s/)" % base,
+        "- [Land for Sale by State (50-State Directory)](%s/land-for-sale/)" % base,
+        "- [50-State Land Price Observatory](%s/land-prices/)" % base,
+        "- [50-State Land Price Rankings](%s/land-prices/states/)" % base,
+        "- [Cheapest Official Land Per Acre](%s/land-prices/cheapest-land-per-acre/)" % base,
+        "- [U.S. Land Price History (2010-%d)](%s/land-prices/history/)" % (site.market.latest_year, base),
+        "- [Land Deal, Electricity & Valuation Analyzer](%s/analyze/)" % base,
+        "- [US Public-Agency Benchmarks & 29 Buyer Guides](%s/research/)" % base,
+        "- [Closing Soon Auctions & Proposals](%s/closing-soon/)" % base,
+        "- [New Listings](%s/new/)" % base,
+        "- [Official Sources & Read Health](%s/sources/)" % base,
+        "- [Open Data Downloads (CSV & JSON)](%s/data/)" % base,
+        "- [About & Disclosures](%s/about/)" % base,
+        "",
+        "## Tracked State Hubs",
+        "",
+    ])
+    for st in states:
+        avail = sum(1 for r in st["listings"] if r["available"])
+        lines.append("- [%s](%s%s): %s active offerings (Atom feed: %s/feeds/%s.xml)" % (
+            st["name"], base, cat.state_path(st), "{:,}".format(avail), base, st["code"].lower()))
+    lines.extend([
+        "",
+        "## Machine-Readable Data & Discovery",
+        "",
+        "- [Listings CSV](%s/data/listings.csv)" % base,
+        "- [Map JSON](%s/data/map.json)" % base,
+        "- [Sources Status JSON](%s/data/sources.json)" % base,
+        "- [New Listings Atom Feed](%s/feeds/new.xml)" % base,
+    ])
+    if config.INDEXABLE:
+        lines.append("- [Sitemap Index](%s/sitemap.xml)" % base)
+    lines.append("- [Robots Policy](%s/robots.txt)" % base)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _urlset_xml(paths, updated):
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for p in sorted(set(paths)):
+        out.append("<url><loc>%s</loc><lastmod>%s</lastmod></url>" % (esc(config.BASE_URL + p), updated))
+    out.append("</urlset>")
+    return "\n".join(out) + "\n"
 
 
 def build(dist, data_dir=None, now=None, log=print):
@@ -87,22 +175,44 @@ def build(dist, data_dir=None, now=None, log=print):
         key = fh.read().strip()
     w.write("%s.txt" % key, key)
 
-    w.page("/", site.home())
-    w.page("/new/", site.new(), indexable=True)
-    w.page("/closing-soon/", site.closing(), indexable=True)
-    w.page("/sources/", site.sources_page())
-    w.page("/about/", site.about())
+    # Core hubs
+    w.page("/", site.home(), indexable=True, group="core")
+    w.page("/land-for-sale/", site.land_for_sale_index(), indexable=True, group="core")
+    w.page("/analyze/", site.analyze_page(), indexable=True, group="core")
+    w.page("/research/", site.research(), indexable=True, group="core")
+    w.page("/new/", site.new(), indexable=True, group="core")
+    w.page("/closing-soon/", site.closing(), indexable=True, group="core")
+    w.page("/sources/", site.sources_page(), indexable=True, group="core")
+    w.page("/about/", site.about(), indexable=True, group="core")
     w.write("404.html", site.not_found())
-    for st in cat.states.values():
-        w.page(cat.state_path(st), site.state(st))
-        for c in st["counties"].values():
-            w.page(cat.county_path(st, c), site.county(st, c))
-            for g in c["groups"]:
-                w.page(cat.county_path(st, c) + g["slug"] + "/", site.county(st, c, g))
-    for r in cat.listings:
-        w.page(cat.listing_path(r), site.listing(r))
 
-    # map data: every listing, current or not; the page filters
+    # 50-State Land Price Observatory (56 pages)
+    w.page("/land-prices/", site.land_prices_index(), indexable=True, group="core")
+    w.page("/land-prices/states/", site.land_prices_states(), indexable=True, group="core")
+    w.page("/land-prices/cheapest-land-per-acre/", site.land_prices_cheapest(), indexable=True, group="core")
+    w.page("/land-prices/history/", site.land_prices_history(), indexable=True, group="core")
+    w.page("/land-prices/by-acreage/", site.land_prices_by_acreage(), indexable=True, group="core")
+    w.page("/land-prices/data-methodology/", site.land_prices_methodology(), indexable=True, group="core")
+    for st in site.all_states:
+        w.page(st["path"], site.land_prices_state(st), indexable=True, group="core")
+
+    # 29 Research Buyer Guides
+    for g in site.guides:
+        w.page(g["path"], site.guide_page(g), indexable=True, group="core")
+
+    # Tracked state & county inventory hubs
+    for st in cat.states.values():
+        w.page(cat.state_path(st), site.state(st), indexable=True, group="places")
+        for c in st["counties"].values():
+            w.page(cat.county_path(st, c), site.county(st, c), indexable=True, group="places")
+            for g in c["groups"]:
+                w.page(cat.county_path(st, c) + g["slug"] + "/", site.county(st, c, g), indexable=False)
+
+    # Individual listing dossiers (priced/deadline-bearing listings indexed in listings child sitemap)
+    for r in cat.listings:
+        w.page(cat.listing_path(r), site.listing(r), indexable=listing_is_indexable(r), group="listings")
+
+    # Map JSON & CSV downloads
     rows = []
     for r in cat.listings:
         rows.append([r["id"], r.get("lat"), r.get("lon"), r["state"], r["price"], r["price_kind"], r["acres"],
@@ -120,70 +230,90 @@ def build(dist, data_dir=None, now=None, log=print):
                      r["price_kind"], r["status"], "yes" if r["available"] else "no", r.get("deadline") or "", r.get("lat") or "",
                      r.get("lon") or "", r.get("first_seen") or "", r["checked"], r["url"], config.BASE_URL + cat.listing_path(r)])
     w.write("data/listings.csv", out.getvalue())
+
+    w.page("/data/", site.data_page([
+        ("/data/listings.csv", "Every active and recent official listing: facts, status, coordinates, official agency URL"),
+        ("/data/map.json", "Compact geospatial point table powering the interactive map"),
+        ("/data/sources.json", "Source status: last successful read, counts, failures, and site stats"),
+    ]), indexable=True, group="core")
+
     status = dict(cat.status)
-    status["site"] = {"base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cat.current()),
-                      "new": len(cat.new()), "closing_soon": len(cat.closing()), "commit": os.environ.get("GITHUB_SHA", ""),
-                      "indexable": config.INDEXABLE, "indexable_pages": sorted(w.indexable)}
+    status["site"] = {
+        "base_url": config.BASE_URL, "listings": len(cat.listings), "current": len(cat.current()),
+        "new": len(cat.new()), "closing_soon": len(cat.closing()), "guides": len(site.guides),
+        "states_tracked": len(cat.states), "states_priced": len(site.all_states),
+        "commit": os.environ.get("GITHUB_SHA", ""), "indexable": config.INDEXABLE,
+        "indexable_count": len(w.indexable),
+    }
     w.write("data/sources.json", json.dumps(status, indent=1, sort_keys=True))
-    w.page("/data/", site.data_page([("/data/listings.csv", "Every listing: facts, status, official link"),
-                                     ("/data/map.json", "Compact listing points used by the map"),
-                                     ("/data/sources.json", "Source status: last successful read, counts, failures")]))
 
     updated = (cat.status.get("checked") or cat.now.strftime("%Y-%m-%d"))[:10]
     new = cat.new()
     w.write("feeds/new.xml", atom("New government land listings | Landosaur", "/feeds/new.xml", new, cat, updated))
     for st in cat.states.values():
-        w.write("feeds/%s.xml" % st["code"].lower(), atom("New government land listings in %s | Landosaur" % st["name"],
-                                                          "/feeds/%s.xml" % st["code"].lower(), [r for r in new if r["state"] == st["code"]], cat, updated))
+        w.write("feeds/%s.xml" % st["code"].lower(), atom(
+            "New government land listings in %s | Landosaur" % st["name"],
+            "/feeds/%s.xml" % st["code"].lower(), [r for r in new if r["state"] == st["code"]], cat, updated))
 
     cur = cat.current()
-    w.write("_og/default.html", og_card("Government and auction land for sale, on one map", "%s listings from official sources" % "{:,}".format(len(cur)),
-                                        "City lots, tax-sale parcels and state land. Not an offer to sell."))
-    w.write("_og/new.html", og_card("New government land listings", "%s in the last %d days" % ("{:,}".format(len(new)), config.NEW_DAYS),
-                                    "Checked daily from official sources. Atom feeds by state."))
-    w.write("_og/closing.html", og_card("Land auctions closing soon", "%s deadlines in the next %d days" % ("{:,}".format(len(cat.closing())), config.CLOSING_DAYS),
-                                        "Official sources, checked daily. Confirm cutoffs with the agency."))
+    og_default_src = os.path.join(config.SITE_SRC, "og-default.png")
+    og_custom_dir = os.path.join(config.SITE_SRC, "og")
+    os.makedirs(os.path.join(dist, "og"), exist_ok=True)
+    for og_name in ["default.png", "research.png", "new.png", "closing.png"] + ["state-%s.png" % st["code"].lower() for st in cat.states.values()]:
+        custom = os.path.join(og_custom_dir, og_name)
+        if os.path.exists(custom):
+            shutil.copy(custom, os.path.join(dist, "og", og_name))
+        elif os.path.exists(og_default_src):
+            shutil.copy(og_default_src, os.path.join(dist, "og", og_name))
+    w.write("_og/default.html", og_card(
+        "Find, map, and value official land for sale",
+        "%s listings · 50-state land prices" % "{:,}".format(len(cur)),
+        "Official agencies, GIS flood & aerial maps, valuation workbench. Not an offer to sell."))
+    w.write("_og/research.html", og_card(
+        "US Public-Agency Land Benchmarks & 29 Buyer Guides",
+        "%s active official offerings" % "{:,}".format(len(cur)),
+        "Computed directly from official public agency inventories. Zero invented prices."))
+    w.write("_og/new.html", og_card(
+        "New government land listings",
+        "%s in the last %d days" % ("{:,}".format(len(new)), config.NEW_DAYS),
+        "Checked daily from official sources. Atom feeds by state."))
+    w.write("_og/closing.html", og_card(
+        "Land auctions closing soon",
+        "%s deadlines in the next %d days" % ("{:,}".format(len(cat.closing())), config.CLOSING_DAYS),
+        "Official sources, checked daily. Confirm cutoffs with the agency."))
     for st in cat.states.values():
         n = sum(1 for r in st["listings"] if r["available"])
-        w.write("_og/state-%s.html" % st["code"].lower(), og_card("Government and auction land in %s" % st["name"],
-                                                                  "%s current listings" % "{:,}".format(n), "Every listing links to the agency's own page."))
+        w.write("_og/state-%s.html" % st["code"].lower(), og_card(
+            "Government and auction land in %s" % st["name"],
+            "%s current listings" % "{:,}".format(n),
+            "Every listing links directly to the agency's own page."))
 
     if config.INDEXABLE:
-        sm = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-        for p in sorted(w.indexable):
-            sm.append("<url><loc>%s</loc><lastmod>%s</lastmod></url>" % (esc(config.BASE_URL + p), updated))
-        sm.append("</urlset>")
-        w.write("sitemap.xml", "\n".join(sm) + "\n")
+        children = []
+        for grp in ("core", "places", "listings"):
+            urls = w.indexable_groups.get(grp) or []
+            if not urls:
+                continue
+            rel_sm = "sitemaps/%s.xml" % grp
+            w.write(rel_sm, _urlset_xml(urls, updated))
+            children.append("/" + rel_sm)
+        idx = ['<?xml version="1.0" encoding="UTF-8"?>', '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+        for cpath in children:
+            idx.append("<sitemap><loc>%s</loc><lastmod>%s</lastmod></sitemap>" % (esc(config.BASE_URL + cpath), updated))
+        idx.append("</sitemapindex>")
+        w.write("sitemap.xml", "\n".join(idx) + "\n")
         w.write("robots.txt", "User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n" % config.BASE_URL)
-    else:   # staged: the whole copy stays out of search (fleet convention, SITE_INDEXABLE unset)
+    else:
         w.write("robots.txt", "User-agent: *\nDisallow: /\n")
-    llms_lines = [
-        "# Landosaur — Official U.S. Government & Auction Land Reference Hub",
-        "",
-        "> Landosaur maps rural, municipal, and government auction land offerings across U.S. states and counties read directly from official public-agency inventories (checked daily), with GIS parcel outlines, county USDA/FHFA land value context, buying cost worksheets, and direct links to each agency's listing.",
-        "",
-        "## Direct Answers: Rural Land, Raw Acreage & County Parcel Research",
-        "",
-        "- **Active public-agency inventory**: %s current offerings across %d states (snapshot checked %s) from official government agencies—including rural state trust acreage (Wisconsin BCPL, Alaska Mental Health Trust, Alaska DNR), county tax-forfeited auctions (Arkansas COSL), and municipal land-bank lots (St. Louis LRA)." % ("{:,}".format(len(cur)), len(cat.states), updated),
-        "- **Difference from commercial land portals**: Official agency inventories only (never commercial brokerage scrapes), zero invented prices where an agency publishes none, minimum bids labeled separately from fixed prices, not a broker or offer to sell.",
-        "- **Open data & feeds**: [Listings CSV](%s/data/listings.csv), [Map JSON](%s/data/map.json), [Sources JSON](%s/data/sources.json), [New Listings Atom Feed](%s/feeds/new.xml)." % (config.BASE_URL, config.BASE_URL, config.BASE_URL, config.BASE_URL),
-        "",
-        "## Key Pages",
-        "",
-        "- [Map & Filters](%s/)" % config.BASE_URL,
-        "- [New Listings](%s/new/)" % config.BASE_URL,
-        "- [Closing Soon](%s/closing-soon/)" % config.BASE_URL,
-        "- [Sources & Health](%s/sources/)" % config.BASE_URL,
-        "- [Data Downloads](%s/data/)" % config.BASE_URL,
-        "- [About & Disclosures](%s/about/)" % config.BASE_URL,
-        "",
-    ]
-    w.write("llms.txt", "\n".join(llms_lines))
+
+    w.write("llms.txt", build_llms_txt(cat, site, updated))
     w.write("manifest.json", json.dumps({"pages": w.pages, "indexable": sorted(w.indexable), "updated": updated}, sort_keys=True,
                                         separators=(",", ":")))
     w.write(".nojekyll", "")
-    log("built %d files, %d pages (%d indexable), %d listings (%d current) into %s" % (
-        w.files, len(w.pages), len(w.indexable), len(cat.listings), len(cur), dist))
+    log("built %d files, %d pages (%d indexable: core=%d places=%d listings=%d), %d listings (%d current) into %s" % (
+        w.files, len(w.pages), len(w.indexable),
+        len(w.indexable_groups["core"]), len(w.indexable_groups["places"]), len(w.indexable_groups["listings"]),
+        len(cat.listings), len(cur), dist))
     return w
 
 

@@ -99,8 +99,8 @@ class Catalog(object):
             if r["state"] == "LA" and not c.lower().endswith("parish"):
                 return c + " Parish"
             return c if re.search(r"(County|City|Borough|Parish)$", c) else c + " County"
-        if r["state"] == "AK":
-            return "Alaska (statewide programs)"
+        if r["state"]:
+            return "%s (statewide programs)" % STATE_NAMES.get(r["state"], r["state"])
         return "County not stated"
 
     def group(self, county):

@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-26T19:15:42Z",
+ "checked": "2026-11-27T01:04:02Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -56,6 +56,60 @@
    "state": "AR",
    "upstream_total": 2650,
    "url": "https://auction.cosl.org/Auctions/ListingsView"
+  },
+  "california-dgs": {
+   "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines.",
+   "agency": "California Department of General Services",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-27T01:04:02Z",
+   "last_success": "2026-11-27T01:04:02Z",
+   "message": "",
+   "name": "California DGS State Commercial Opportunities",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 1,
+   "state": "CA",
+   "upstream_total": null,
+   "url": "https://www.dgs.ca.gov/RESD/Projects/Page-Content/Projects-List-Folder/State-Commercial-Opportunities-Portal"
+  },
+  "detroit-dlba": {
+   "about": "Actively marketed vacant land programs (Marketed, Oversized, Auction, Own It Now, Create-a-Project lots) from Detroit's official open-data GIS.",
+   "agency": "Detroit Land Bank Authority",
+   "complete": true,
+   "count": 1152,
+   "failures": 0,
+   "last_attempt": "2026-11-27T01:04:02Z",
+   "last_success": "2026-11-27T01:04:02Z",
+   "message": "",
+   "name": "Detroit Land Bank Authority marketed vacant lots",
+   "notes": [],
+   "ok": true,
+   "read": 1152,
+   "seconds": 5,
+   "state": "MI",
+   "upstream_total": 1152,
+   "url": "https://buildingdetroit.org/properties"
+  },
+  "kansas-city-landbank": {
+   "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context.",
+   "agency": "Land Bank of Kansas City, Missouri",
+   "complete": true,
+   "count": 2742,
+   "failures": 0,
+   "last_attempt": "2026-11-27T01:04:02Z",
+   "last_success": "2026-11-27T01:04:02Z",
+   "message": "",
+   "name": "Land Bank of Kansas City vacant-lot inventory",
+   "notes": [],
+   "ok": true,
+   "read": 2742,
+   "seconds": 71,
+   "state": "MO",
+   "upstream_total": 2742,
+   "url": "https://kclandbank.org/"
   },
   "st-louis-lra": {
    "about": "City-owned vacant lots marked available in the city's open-data exports. No prices are published; buying goes through the city's application.",

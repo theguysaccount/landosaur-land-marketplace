@@ -59,6 +59,11 @@ NOTES = {  # long notes repeated on many listings are stored by key and expanded
     "ar_window": "Read from the Commissioner's auction grid; confirm the exact cutoff and sale conditions on the listing.",
     "outline": "GIS reference boundary from the agency, not a survey. The map pin is the outline's centre.",
     "access_attr": "A listing attribute; it does not establish recorded or year-round access.",
+    "dlba_program": "Published in the Detroit Land Bank Authority open-data GIS inventory as an actively marketed lot program. Confirm eligibility, pricing, and purchase rules on buildingdetroit.org.",
+    "dlba_price": "Pricing depends on the specific Detroit Land Bank program and application review. No asking price is published in the GIS feed.",
+    "kc_available": "Listed as Acquired in the Kansas City, Missouri Open Data Land Bank inventory (vacant land classes only). Confirm current availability and purchase terms with the Land Bank of Kansas City.",
+    "kc_price": "The Land Bank of Kansas City reviews purchase applications and sets sale terms per parcel. Assessor market values are not asking prices and are not shown as list prices.",
+    "ca_proposal": "Official California DGS development or surplus property proposal notice. Not an unconditional cash sale; confirm eligibility, lease/sale terms, and exact cutoff with California DGS.",
 }
 
 
@@ -597,27 +602,270 @@ def alaska_dnr(fetch, now, warn):
     return parse_dnr(page, home, now, warn), {"complete": True}
 
 
-URLS.update({"stl_inventory": STL + "LRA_INVENTORY.csv", "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv"})
+# ------------------------------------------------------------------------------------------- Detroit Land Bank (MI)
+
+DLBA_GIS = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/DLBA_Owned_Properties/FeatureServer/0/query"
+DLBA_URL = "https://buildingdetroit.org/properties"
+DLBA_PROGRAMS = (
+    "Marketed Lot For Sale",
+    "Oversized Lot For Sale",
+    "Auction Lot For Sale",
+    "Own It Now Lot For Sale",
+    "Create-a-Project For Sale",
+)
+
+
+def parse_detroit_features(features, warn):
+    out, seen = [], set()
+    for f in features:
+        a = f.get("attributes") or {}
+        pid = clean(str(a.get("parcel_id") or "")).rstrip(".")
+        addr = clean(str(a.get("name") or ""))
+        prog = clean(str(a.get("inventory_status_socrata") or ""))
+        if not pid or not addr or prog not in DLBA_PROGRAMS:
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        lat = a.get("latitude")
+        lon = a.get("longitude")
+        geom = f.get("geometry") or {}
+        if lat is None and geom.get("y") is not None:
+            lat = geom.get("y")
+        if lon is None and geom.get("x") is not None:
+            lon = geom.get("x")
+        try:
+            lat = round(float(lat), 6) if lat is not None else None
+            lon = round(float(lon), 6) if lon is not None else None
+            if lat is not None and lon is not None and not (-85 <= lon <= -81 and 41 <= lat <= 44):
+                lat = lon = None
+        except (TypeError, ValueError):
+            lat = lon = None
+        is_auction = "auction" in prog.lower()
+        facts = [
+            fact("sale_program", prog, "@dlba_gis", "dlba_program"),
+            fact("parcel_number", pid, DLBA_URL),
+            fact("price", "See Detroit Land Bank program terms (not published in GIS feed)", DLBA_URL, "dlba_price"),
+        ]
+        if clean(str(a.get("neighborhood") or "")):
+            facts.append(fact("neighborhood", clean(str(a["neighborhood"])), "@dlba_gis"))
+        if a.get("council_district") is not None and str(a.get("council_district")).strip():
+            facts.append(fact("council_district", "District %s" % clean(str(a["council_district"])), "@dlba_gis"))
+        out.append({
+            "id": "mi-dlba-%s" % slug(pid), "source": "detroit-dlba",
+            "title": "%s, Detroit (%s)" % (addr.title(), prog.lower()),
+            "state": "MI", "county": "Wayne", "locality": "Detroit", "apn": pid,
+            "acres": None, "price": None, "price_kind": "none",
+            "offering": "auction" if is_auction else "sale",
+            "status": "auction_terms" if is_auction else "listed",
+            "deadline": None, "url": DLBA_URL, "address": addr.title(),
+            "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+            "tags": ["land bank vacant lot", prog.lower(), "application required"],
+        })
+    return out
+
+
+def detroit_dlba(fetch, now, warn):
+    where = "inventory_status_socrata IN (%s)" % quote_list(DLBA_PROGRAMS)
+    fields = "parcel_id,name,inventory_status_socrata,neighborhood,council_district,latitude,longitude"
+    all_feats, offset, page_size = [], 0, 1000
+    complete = True
+    for _ in range(20):
+        q = urllib.parse.urlencode({
+            "f": "json", "where": where, "outFields": fields, "outSR": "4326",
+            "returnGeometry": "true", "resultRecordCount": str(page_size), "resultOffset": str(offset),
+        })
+        data = fetch.json(DLBA_GIS + "?" + q)
+        if not isinstance(data, dict) or "features" not in data:
+            raise StructureError("Detroit Land Bank ArcGIS response changed")
+        feats = data["features"]
+        all_feats.extend(feats)
+        if not data.get("exceededTransferLimit") or len(feats) < page_size:
+            break
+        offset += len(feats)
+    else:
+        complete = False
+        warn("Detroit Land Bank pagination reached safety limit")
+    rows = parse_detroit_features(all_feats, warn)
+    if len(rows) < 50:
+        raise StructureError("only %d Detroit Land Bank marketed lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": complete, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- Kansas City Land Bank (MO)
+
+KC_API = "https://data.kcmo.org/resource/2ebw-sp7f.json"
+KC_PORTAL = "https://kclandbank.org/"
+KC_DATASET = "https://data.kcmo.org/Neighborhoods/Land-Bank-and-Kansas-City-Missouri-Homesteading-Au/2ebw-sp7f"
+
+
+def parse_kc_rows(raw_rows, warn):
+    out, seen = [], set()
+    for r in raw_rows:
+        pid = clean(str(r.get("parcel_number") or ""))
+        addr = clean(str(r.get("address") or ""))
+        status_raw = clean(str(r.get("property_status") or ""))
+        inv_raw = clean(str(r.get("inventory_type") or ""))
+        pclass = clean(str(r.get("property_class") or ""))
+        if not pid or not addr:
+            continue
+        if status_raw.lower() != "acquired" or inv_raw.lower() != "land bank" or "vacant" not in pclass.lower():
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        county = clean(str(r.get("county") or "Jackson")).title()
+        sqft = number(r.get("square_footage"))
+        acres = round(sqft / 43560.0, 4) if sqft else None
+        loc = r.get("location_1") if isinstance(r.get("location_1"), dict) else {}
+        lat = lon = None
+        try:
+            if loc.get("latitude") is not None and loc.get("longitude") is not None:
+                la, lo = float(loc["latitude"]), float(loc["longitude"])
+                if 38.5 <= la <= 39.6 and -95.0 <= lo <= -94.0:
+                    lat, lon = round(la, 6), round(lo, 6)
+        except (TypeError, ValueError):
+            lat = lon = None
+        acq = str(r.get("date_of_acquisition") or "")[:10]
+        facts = [
+            fact("availability", "Acquired (Land Bank inventory)", "@kc_dataset", "kc_available"),
+            fact("parcel_number", pid, "@kc_dataset"),
+            fact("price", "Application-based (no list price published)", KC_PORTAL, "kc_price"),
+        ]
+        if sqft:
+            facts.append(fact("lot_area", "%s square feet" % "{:,}".format(int(round(sqft))), "@kc_dataset", "stl_area"))
+        if pclass:
+            facts.append(fact("property_class", pclass, "@kc_dataset"))
+        if clean(str(r.get("zoned_as") or "")):
+            facts.append(fact("zoning", clean(str(r["zoned_as"])), "@kc_dataset"))
+        if clean(str(r.get("neighborhood") or "")):
+            facts.append(fact("neighborhood", clean(str(r["neighborhood"])), "@kc_dataset"))
+        if clean(str(r.get("school_district") or "")):
+            facts.append(fact("school_district", clean(str(r["school_district"])), "@kc_dataset"))
+        if clean(str(r.get("city_council_district") or "")):
+            facts.append(fact("council_district", clean(str(r["city_council_district"])), "@kc_dataset"))
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", acq):
+            facts.append(fact("acquired_date", acq, "@kc_dataset"))
+        out.append({
+            "id": "kc-%s" % slug(pid), "source": "kansas-city-landbank",
+            "title": "%s, Kansas City (vacant lot)" % addr.title(),
+            "state": "MO", "county": county, "locality": "Kansas City", "apn": pid,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": KC_PORTAL, "address": addr.title(),
+            "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+            "tags": ["land bank vacant lot", "application required", pclass.lower()],
+        })
+    return out
+
+
+def kansas_city_landbank(fetch, now, warn):
+    where = "property_status='Acquired' AND upper(inventory_type)='LAND BANK' AND upper(property_class) like '%VACANT%'"
+    all_raw, offset, limit = [], 0, 1000
+    complete = True
+    for _ in range(15):
+        q = urllib.parse.urlencode({"$where": where, "$limit": str(limit), "$offset": str(offset), "$order": "parcel_number"})
+        batch = fetch.json(KC_API + "?" + q)
+        if not isinstance(batch, list):
+            raise StructureError("Kansas City Land Bank Socrata API structure changed")
+        all_raw.extend(batch)
+        if len(batch) < limit:
+            break
+        offset += len(batch)
+    else:
+        complete = False
+        warn("Kansas City Land Bank pagination reached safety limit")
+    rows = parse_kc_rows(all_raw, warn)
+    if len(rows) < 100:
+        raise StructureError("only %d Kansas City Land Bank vacant lots: feed looks incomplete" % len(rows))
+    return rows, {"complete": complete, "upstream_total": len(rows)}
+
+
+# ------------------------------------------------------------------------------------------- California DGS
+
+CA_DGS = "https://www.dgs.ca.gov/RESD/Projects/Page-Content/Projects-List-Folder/State-Commercial-Opportunities-Portal"
+
+
+def parse_california_dgs(page, now, warn):
+    out, seen = [], set()
+    for li in re.findall(r"(?is)<li[^>]*>(.*?)</li>", page):
+        text = clean(li)
+        m = re.match(r"^(.{3,200}?)\s*[-–—]\s*Proposal Deadline\s+([A-Z][a-z]+ \d{1,2}, \d{4})\s*$", text)
+        if not m:
+            continue
+        title = clean(m.group(1))
+        try:
+            d = datetime.datetime.strptime(m.group(2), "%B %d, %Y")
+            dl = datetime.datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=datetime.timezone(datetime.timedelta(hours=-8)))
+        except ValueError:
+            continue
+        site_m = re.search(r"Site ID\s*#?([A-Z0-9-]+)", title, re.I)
+        site_id = site_m.group(1) if site_m else slug(title)[:40]
+        lid = "ca-dgs-%s" % slug(site_id)
+        if lid in seen:
+            continue
+        seen.add(lid)
+        county = "Los Angeles" if re.search(r"Los Angeles", title, re.I) else ("Riverside" if re.search(r"Norco", title, re.I) else "")
+        locality = "Los Angeles" if re.search(r"Los Angeles", title, re.I) else ("Norco" if re.search(r"Norco", title, re.I) else "")
+        closed = now > dl
+        facts = [
+            fact("proposal_deadline", dl.strftime("%B %d, %Y"), CA_DGS, "ca_proposal"),
+            fact("sale_program", "State Commercial / Surplus Development Opportunity (RFP)", CA_DGS),
+        ]
+        if site_m:
+            facts.append(fact("agency_site_id", site_m.group(1), CA_DGS))
+        out.append({
+            "id": lid, "source": "california-dgs",
+            "title": "%s (California DGS)" % title,
+            "state": "CA", "county": county, "locality": locality, "apn": site_m.group(1) if site_m else "",
+            "acres": None, "price": None, "price_kind": "none", "offering": "proposal",
+            "status": "auction_closed" if closed else "proposal_open",
+            "deadline": dl.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": CA_DGS, "address": title, "lat": None, "lon": None, "geometry": None,
+            "facts": facts, "tags": ["state surplus notice", "development proposal"],
+        })
+    if not out:
+        raise StructureError("California DGS page has no recognizable proposal deadlines")
+    return out
+
+
+def california_dgs(fetch, now, warn):
+    return parse_california_dgs(fetch.text(CA_DGS), now, warn), {"complete": True}
+
+
+URLS.update({
+    "stl_inventory": STL + "LRA_INVENTORY.csv",
+    "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
+    "dlba_gis": "https://data.detroitmi.gov/datasets/dlba-owned-properties",
+    "kc_dataset": KC_DATASET,
+})
 
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
      "about": "City-owned vacant lots marked available in the city's open-data exports. No prices are published; buying goes through the city's application."},
+    {"id": "kansas-city-landbank", "name": "Land Bank of Kansas City vacant-lot inventory", "agency": "Land Bank of Kansas City, Missouri",
+     "url": KC_PORTAL, "state": "MO", "run": kansas_city_landbank,
+     "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context."},
     {"id": "arkansas-cosl", "name": "Arkansas Commissioner of State Lands", "agency": "Arkansas Commissioner of State Lands",
      "url": "https://auction.cosl.org/Auctions/ListingsView", "state": "AR", "run": arkansas,
      "about": "Tax-forfeited parcels offered after the county tax-sale auctions. Prices are minimum bids; terms and redemption rules apply."},
+    {"id": "detroit-dlba", "name": "Detroit Land Bank Authority marketed vacant lots", "agency": "Detroit Land Bank Authority",
+     "url": DLBA_URL, "state": "MI", "run": detroit_dlba,
+     "about": "Actively marketed vacant land programs (Marketed, Oversized, Auction, Own It Now, Create-a-Project lots) from Detroit's official open-data GIS."},
     {"id": "wisconsin-bcpl", "name": "Wisconsin Board of Commissioners of Public Lands", "agency": "Wisconsin BCPL",
      "url": WI, "state": "WI", "run": wisconsin, "about": "Surplus state trust land sold by sealed-bid auction or private sale."},
     {"id": "alaska-trust-otc", "name": "Alaska Mental Health Trust Land Office", "agency": "Alaska Mental Health Trust Land Office",
      "url": TRUST, "state": "AK", "run": alaska_trust, "about": "Trust land offered over the counter at fixed prices."},
     {"id": "alaska-dnr", "name": "Alaska Department of Natural Resources land sales", "agency": "Alaska DNR Division of Mining, Land and Water",
      "url": DNR, "state": "AK", "run": alaska_dnr, "about": "State land sold over the counter and by sealed-bid auction."},
+    {"id": "california-dgs", "name": "California DGS State Commercial Opportunities", "agency": "California Department of General Services",
+     "url": CA_DGS, "state": "CA", "run": california_dgs, "about": "Official state surplus and redevelopment opportunity notices with posted proposal deadlines."},
 ]
 NOT_CARRIED = [
     ("GSA RealEstateSales.gov (federal surplus)", "https://realestatesales.gov/",
      "Not crawled: its robots.txt disallows automated access. Browse it directly."),
-    ("California DGS surplus and site opportunities", "https://www.dgs.ca.gov/RESD/Projects/Page-Content/Projects-List-Folder/State-Commercial-Opportunities-Portal",
-     "Occasional proposal notices with deadlines; not yet carried over from the original application."),
     ("BLM public land sales", "https://www.blm.gov/programs/lands-and-realty/land-tenure/land-sales",
-     "Sale notices are published irregularly as press announcements; not yet carried over."),
+     "Sale notices are published irregularly as press announcements; planned for Phase 2 ingestion."),
+    ("Utah SITLA & Arizona ASLD Trust Land Auctions", "https://trustlands.utah.gov/",
+     "Public ArcGIS transaction layers verified; planned next with auction-notice date joins so closed contracts stay separate from open sales."),
 ]

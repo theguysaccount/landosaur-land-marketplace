@@ -1,0 +1,43 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "python3 -m lando.build dist",
+  "outputDirectory": "dist",
+  "trailingSlash": true,
+  "redirects": [
+    { "source": "/buying-help", "destination": "/research/buying-land/", "permanent": true },
+    { "source": "/buying-help/", "destination": "/research/buying-land/", "permanent": true },
+    { "source": "/opportunities", "destination": "/closing-soon/", "permanent": true },
+    { "source": "/opportunities/", "destination": "/closing-soon/", "permanent": true },
+    { "source": "/coverage", "destination": "/sources/", "permanent": true },
+    { "source": "/coverage/", "destination": "/sources/", "permanent": true },
+    { "source": "/methodology", "destination": "/land-prices/data-methodology/", "permanent": true },
+    { "source": "/methodology/", "destination": "/land-prices/data-methodology/", "permanent": true },
+    { "source": "/services", "destination": "/research/professional-work/", "permanent": true },
+    { "source": "/services/", "destination": "/research/professional-work/", "permanent": true },
+    { "source": "/privacy", "destination": "/about/#privacy", "permanent": true },
+    { "source": "/privacy/", "destination": "/about/#privacy", "permanent": true },
+    { "source": "/terms", "destination": "/about/#terms", "permanent": true },
+    { "source": "/terms/", "destination": "/about/#terms", "permanent": true },
+    { "source": "/sell", "destination": "/about/", "permanent": true },
+    { "source": "/sell/", "destination": "/about/", "permanent": true },
+    { "source": "/workspace", "destination": "/analyze/", "permanent": true },
+    { "source": "/workspace/:path*", "destination": "/analyze/", "permanent": true }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, s-maxage=3600, stale-while-revalidate=86400" },
+        { "key": "CDN-Cache-Control", "value": "public, s-maxage=3600, stale-while-revalidate=86400" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    },
+    {
+      "source": "/(sitemap\\.xml|sitemaps/.*\\.xml|robots\\.txt|llms\\.txt)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, s-maxage=1800, stale-while-revalidate=86400" }
+      ]
+    }
+  ]
+}

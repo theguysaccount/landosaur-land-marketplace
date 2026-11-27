@@ -115,6 +115,40 @@ class AlaskaTest(unittest.TestCase):
             adapters.parse_dnr("<html></html>", "", NOW, lambda w: None)
 
 
+class DetroitAndKcAndCaTest(unittest.TestCase):
+    def test_detroit_filters_marketed_lots(self):
+        feats = [
+            {"attributes": {"parcel_id": "17013507.", "name": "698 Field", "inventory_status_socrata": "Marketed Lot For Sale",
+                            "neighborhood": "Islandview", "council_district": 5, "latitude": 42.3506, "longitude": -83.0018}},
+            {"attributes": {"parcel_id": "99999999.", "name": "100 Other", "inventory_status_socrata": "DLBA Owned Structure",
+                            "latitude": 42.35, "longitude": -83.0}},
+        ]
+        rows = adapters.parse_detroit_features(feats, lambda w: None)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["state"], rows[0]["county"], rows[0]["price_kind"]), ("MI", "Wayne", "none"))
+        self.assertTrue(rows[0]["url"].startswith("https://buildingdetroit.org/"))
+
+    def test_kc_filters_acquired_vacant_land_bank_and_keeps_zoning(self):
+        raw = [
+            {"parcel_number": "JA28810112600000000", "property_class": "Residential Vacant", "property_status": "Acquired",
+             "inventory_type": "Land Bank", "zoned_as": "R-2.5", "address": "5608 E 28th St", "county": "JACKSON",
+             "square_footage": "8985.61", "location_1": {"latitude": "39.07454", "longitude": "-94.51766"}},
+            {"parcel_number": "JA999", "property_class": "Residential Vacant", "property_status": "Disposed",
+             "inventory_type": "Land Bank", "address": "1 Old St"},
+        ]
+        rows = adapters.parse_kc_rows(raw, lambda w: None)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["state"], rows[0]["county"], rows[0]["price"]), ("MO", "Jackson", None))
+        self.assertTrue(any(f["topic"] == "zoning" and f["value"] == "R-2.5" for f in rows[0]["facts"]))
+
+    def test_california_dgs_parses_deadlines(self):
+        html_doc = "<ul><li>CDCR Norco, Fifth Street, Site ID #S065202 - Proposal Deadline November 30, 2026</li></ul>"
+        rows = adapters.parse_california_dgs(html_doc, NOW, lambda w: None)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["state"], rows[0]["county"], rows[0]["status"]), ("CA", "Riverside", "proposal_open"))
+        self.assertTrue(rows[0]["deadline"].startswith("2026-12-01"))
+
+
 class GeometryTest(unittest.TestCase):
     def test_centroid_and_outline_link(self):
         r = {"id": "stl-1", "source": "st-louis-lra", "apn": "00209030000", "url": "https://x", "facts": [], "lat": None, "lon": None}

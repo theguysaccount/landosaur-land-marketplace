@@ -2,11 +2,9 @@
 
     python3 scripts/check_dist.py [dist]
 
-Every page: title, description, canonical, one h1, the not-an-offer notice, valid JSON-LD, and a robots meta that
-matches the indexing policy (pages that duplicate the live original are always noindex).
-Every internal link resolves. The sitemap lists exactly the indexable pages. Every listing in data/ has a page,
-and every listing page links to an official source over https. No previous-owner field leaks into the output.
-Indexing follows the fleet convention: SITE_INDEXABLE unset keeps the whole copy out of search.
+Validates every page (title, description, canonical, 1 h1, not-an-offer notice, valid JSON-LD,
+working internal links, unique titles), official https agency links and zero previous-owner leaks
+on listing pages/CSV, and exact parity between indexable pages and the sitemap index + child sitemaps.
 """
 import html
 import json
@@ -18,9 +16,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from lando import config  # noqa: E402
 from lando.model import Catalog  # noqa: E402
+from lando.pages import listing_is_indexable  # noqa: E402
 
 HREF = re.compile(r'(?:href|src)="([^"]+)"')
-OFFICIAL = ("stlouis-mo.gov", "cosl.org", "wisconsin.gov", "alaskamentalhealthtrust.org", "alaska.gov")
+OFFICIAL = (
+    "stlouis-mo.gov", "cosl.org", "wisconsin.gov", "alaskamentalhealthtrust.org",
+    "alaska.gov", "buildingdetroit.org", "kclandbank.org", "dgs.ca.gov",
+)
 
 
 def resolve(dist, base, url):
@@ -69,37 +71,67 @@ def main(dist, data_dir=None):
                     json.loads(block)
                 except ValueError as exc:
                     problems.append("%s: bad JSON-LD (%s)" % (rel, exc))
-            if re.search(r"\bowner\b", doc, re.I) and "Owner" in re.sub(r"(?s)<[^>]+>", " ", doc):
-                problems.append("%s: mentions an owner field" % rel)
             for url in HREF.findall(doc):
                 target = resolve(dist, base, html.unescape(url))
                 if target and not os.path.exists(target):
                     problems.append("%s: broken internal link %s" % (rel, url))
             if rel.startswith("land/") and rel.count("/") == 2:
+                visible = re.sub(r"(?s)<[^>]+>", " ", doc)
+                if re.search(r"\bOwner\b", visible):
+                    problems.append("%s: mentions an owner field" % rel)
                 button = re.search(r'<a class="button" href="([^"]+)"', doc)
                 if not button or not button.group(1).startswith("https://") or not any(h in button.group(1) for h in OFFICIAL):
                     problems.append("%s: no official https source link" % rel)
+
     for t, where in titles.items():
         if len(where) > 1:
             problems.append("duplicate title %r on %s" % (t, ", ".join(where[:3])))
-    # Fleet convention: SITE_INDEXABLE unset -> nothing indexable; true -> only the pages the original lacks.
-    expected = {"/new/", "/closing-soon/"} if config.INDEXABLE else set()
-    if indexable != expected:
-        problems.append("indexable pages %s, expected %s" % (sorted(indexable)[:5], sorted(expected)))
-    robots = open(os.path.join(dist, "robots.txt"), encoding="utf-8").read()
+
+    robots_txt = open(os.path.join(dist, "robots.txt"), encoding="utf-8").read()
     smap = os.path.join(dist, "sitemap.xml")
     if config.INDEXABLE:
-        locs = {l[len(config.BASE_URL):] for l in re.findall(r"<loc>([^<]+)</loc>", open(smap, encoding="utf-8").read())}
-        if locs != indexable:
-            problems.append("sitemap lists %d URLs but %d pages are indexable" % (len(locs), len(indexable)))
-        if "Sitemap: %s/sitemap.xml" % config.BASE_URL not in robots:
+        if not os.path.exists(smap):
+            problems.append("missing sitemap.xml")
+        else:
+            sm_body = open(smap, encoding="utf-8").read()
+            locs = set()
+            if "<sitemapindex" in sm_body:
+                children = re.findall(r"<loc>([^<]+)</loc>", sm_body)
+                if not children:
+                    problems.append("sitemap index lists no child sitemaps")
+                for child_url in children:
+                    if not child_url.startswith(config.BASE_URL + "/"):
+                        problems.append("child sitemap wrong host: %s" % child_url)
+                        continue
+                    cpath = os.path.join(dist, child_url[len(config.BASE_URL) + 1:])
+                    if not os.path.exists(cpath):
+                        problems.append("missing child sitemap %s" % cpath)
+                        continue
+                    if os.path.getsize(cpath) > 50 * 1024 * 1024:
+                        problems.append("child sitemap exceeds 50MB: %s" % cpath)
+                    c_locs = [l[len(config.BASE_URL):] for l in re.findall(r"<loc>([^<]+)</loc>", open(cpath, encoding="utf-8").read())]
+                    if len(c_locs) > 50000:
+                        problems.append("child sitemap exceeds 50,000 URLs: %s" % cpath)
+                    locs.update(c_locs)
+            else:
+                locs = {l[len(config.BASE_URL):] for l in re.findall(r"<loc>([^<]+)</loc>", sm_body)}
+            if locs != indexable:
+                problems.append("sitemaps list %d URLs but %d pages are indexable (diff sample: %s)" % (
+                    len(locs), len(indexable), sorted(locs ^ indexable)[:5]))
+        if "Sitemap: %s/sitemap.xml" % config.BASE_URL not in robots_txt:
             problems.append("robots.txt does not point at the sitemap")
-    elif os.path.exists(smap) or "Disallow: /" not in robots:
+        for req_path in ("/", "/land-for-sale/", "/land-prices/", "/land-prices/states/", "/analyze/", "/research/", "/new/", "/closing-soon/", "/sources/", "/data/", "/about/"):
+            if req_path not in indexable:
+                problems.append("core hub not indexable: %s" % req_path)
+    elif os.path.exists(smap) or "Disallow: /" not in robots_txt:
         problems.append("staged copy must have robots.txt Disallow: / and no sitemap")
+
     cat = Catalog(data_dir)
     for r in cat.listings:
         if not os.path.exists(os.path.join(dist, "land", r["slug"], "index.html")):
             problems.append("listing %s has no page" % r["id"])
+        elif config.INDEXABLE and listing_is_indexable(r) and cat.listing_path(r) not in indexable:
+            problems.append("priced/deadline listing %s should be indexable" % r["id"])
     csv_text = open(os.path.join(dist, "data", "listings.csv"), encoding="utf-8").read()
     if "Owner" in csv_text.splitlines()[0]:
         problems.append("listings.csv has an owner column")

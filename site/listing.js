@@ -1,22 +1,99 @@
-/* Listing page: parcel map and the all-in cost worksheet. */
+/* Listing page: GIS parcel map (Aerial/Topo/Streets + FEMA Flood overlay + distance measure), save/compare, and cost worksheet. */
 (function () {
   "use strict";
   function money(v) { return "$" + Math.round(v).toLocaleString("en-US"); }
+
+  // Local shortlist / compare sync
+  function loadList(k) { try { return JSON.parse(localStorage.getItem(k) || "[]"); } catch (e) { return []; } }
+  function saveList(k, a) { try { localStorage.setItem(k, JSON.stringify(a)); } catch (e) {} }
+  var saveBtn = document.getElementById("save-parcel");
+  var cmpBtn = document.getElementById("compare-parcel");
+  if (saveBtn) {
+    var pid = saveBtn.getAttribute("data-id");
+    function syncSave() {
+      var on = loadList("landosaur_saved").indexOf(pid) >= 0;
+      saveBtn.textContent = on ? "Saved to shortlist ★" : "Save parcel ☆";
+      saveBtn.classList.toggle("on", on);
+    }
+    saveBtn.addEventListener("click", function () {
+      var arr = loadList("landosaur_saved"), i = arr.indexOf(pid);
+      if (i >= 0) arr.splice(i, 1); else arr.push(pid);
+      saveList("landosaur_saved", arr);
+      syncSave();
+    });
+    syncSave();
+  }
+  if (cmpBtn) {
+    var cid = cmpBtn.getAttribute("data-id");
+    function syncCmp() {
+      var arr = loadList("landosaur_compare"), on = arr.indexOf(cid) >= 0;
+      cmpBtn.textContent = on ? "In compare list ✓" : "Add to compare";
+      cmpBtn.classList.toggle("on", on);
+    }
+    cmpBtn.addEventListener("click", function () {
+      var arr = loadList("landosaur_compare"), i = arr.indexOf(cid);
+      if (i >= 0) arr.splice(i, 1); else if (arr.length < 4) arr.push(cid);
+      saveList("landosaur_compare", arr);
+      syncCmp();
+    });
+    syncCmp();
+  }
 
   var data = document.getElementById("parcel");
   var box = document.getElementById("parcel-map");
   if (data && box && window.L) {
     var p = JSON.parse(data.textContent);
     var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
+    var topo = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map" });
     var aerial = L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "USGS The National Map: imagery" });
-    var map = L.map(box, { scrollWheelZoom: false, layers: [streets] }).setView([p.lat, p.lon], 16);
-    L.control.layers({ "Streets": streets, "Aerial (USGS)": aerial }).addTo(map);
-    if (p.geometry && p.geometry.length) {
+    var fema = L.tileLayer.wms("https://hazards.fema.gov/arcgis/services/public/NFHL/MapServer/WMSServer", {
+      layers: "28", format: "image/png", transparent: true, opacity: 0.48, attribution: "FEMA NFHL Flood Zones"
+    });
+    var hasPoly = p.geometry && p.geometry.length;
+    var map = L.map(box, { scrollWheelZoom: false, layers: [hasPoly ? aerial : streets] }).setView([p.lat, p.lon], 16);
+    L.control.layers({ "USGS Aerial": aerial, "Streets": streets, "USGS Topo": topo }, { "FEMA Flood Zones": fema }).addTo(map);
+    if (hasPoly) {
       var shape = L.polygon(p.geometry.map(function (ring) { return ring.map(function (pt) { return [pt[1], pt[0]]; }); }),
-        { color: "#236b43", weight: 3, fillColor: "#c5ed8b", fillOpacity: 0.35 }).addTo(map);
+        { color: "#c5ed8b", weight: 3, fillColor: "#236b43", fillOpacity: 0.25 }).addTo(map);
       map.fitBounds(shape.getBounds(), { padding: [30, 30], maxZoom: 18 });
     }
     L.circleMarker([p.lat, p.lon], { radius: 6, color: "#fff", weight: 2, fillColor: "#236b43", fillOpacity: 1 }).addTo(map);
+
+    // Interactive distance ruler (for measuring distance from road or power line)
+    var measBtn = document.getElementById("measure-toggle");
+    var measOut = document.getElementById("measure-out");
+    if (measBtn && measOut) {
+      var measuring = false, pts = [], line = null, dots = [];
+      function clearMeasure() {
+        pts = [];
+        if (line) { map.removeLayer(line); line = null; }
+        dots.forEach(function (d) { map.removeLayer(d); });
+        dots = [];
+        measOut.textContent = "";
+      }
+      measBtn.addEventListener("click", function () {
+        measuring = !measuring;
+        measBtn.textContent = measuring ? "Stop measuring (clear)" : "Measure distance on map";
+        measBtn.classList.toggle("on", measuring);
+        box.style.cursor = measuring ? "crosshair" : "";
+        if (!measuring) clearMeasure();
+        else measOut.textContent = "Click two or more points on the map to measure distance (feet / miles).";
+      });
+      map.on("click", function (ev) {
+        if (!measuring) return;
+        pts.push(ev.latlng);
+        dots.push(L.circleMarker(ev.latlng, { radius: 4, color: "#193c2c", fillColor: "#c5ed8b", fillOpacity: 1, weight: 2 }).addTo(map));
+        if (line) map.removeLayer(line);
+        if (pts.length >= 2) {
+          line = L.polyline(pts, { color: "#e59a6e", weight: 3, dashArray: "6 4" }).addTo(map);
+          var meters = 0;
+          for (var i = 1; i < pts.length; i++) meters += pts[i - 1].distanceTo(pts[i]);
+          var feet = meters * 3.28084;
+          var miles = feet / 5280;
+          measOut.textContent = "Measured path: " + Math.round(feet).toLocaleString("en-US") + " ft (" + miles.toFixed(2) + " mi) — map estimate, not a survey.";
+        }
+      });
+    }
   }
 
   var form = document.getElementById("worksheet");

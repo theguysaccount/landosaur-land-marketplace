@@ -6,23 +6,26 @@ DATA = os.path.join(ROOT, "data")
 SITE_SRC = os.path.join(ROOT, "site")
 
 SITE_NAME = "Landosaur"
-TAGLINE = "Government and auction land for sale, on one map, with every listing linked to its official source"
+TAGLINE = "Official government, auction & rural land for sale on one map, with 50-state land prices, GIS parcel dossiers, and valuation tools"
 
 REPO = os.environ.get("LANDO_REPO", "theguysaccount/landosaur-land-marketplace")
 REPO_URL = "https://github.com/" + REPO
-# The public address: one setting. Fleet convention (see ~/code/DOMAIN_ROLLOUT.md): repository variable SITE_URL.
-BASE_URL = (os.environ.get("SITE_URL") or os.environ.get("LANDO_BASE_URL")
-            or "https://theguysaccount.github.io/landosaur-land-marketplace").rstrip("/")
 
-# The original Landosaur application stays live and is never replaced. Fleet convention for staged copies:
-# SITE_INDEXABLE unset -> the whole copy is noindex (robots.txt Disallow, no sitemap, no IndexNow);
-# SITE_INDEXABLE=true -> only pages the original does not serve are indexed (/new/, /closing-soon/). Pages that
-# duplicate the original (map, listings, state and county pages, sources, about, data) stay noindex either way.
-ORIGINAL_URL = (os.environ.get("LANDO_ORIGINAL_URL") or "https://landosaur.fly.dev").rstrip("/")
-INDEXABLE = (os.environ.get("SITE_INDEXABLE") or "").strip().lower() in ("1", "true", "yes")
+# Public canonical address. Defaults to https://landosaur.com for Vercel production.
+BASE_URL = (os.environ.get("SITE_URL") or os.environ.get("LANDO_BASE_URL")
+            or "https://landosaur.com").rstrip("/")
+
+# Primary Landosaur site configuration (replaces retired landosaur.fly.dev).
+# Set SITE_INDEXABLE=false explicitly to suppress search indexing.
+ORIGINAL_URL = (os.environ.get("LANDO_ORIGINAL_URL") or "https://landosaur.com").rstrip("/")
+_RAW_INDEXABLE = os.environ.get("SITE_INDEXABLE")
+if _RAW_INDEXABLE is None or _RAW_INDEXABLE.strip() == "":
+    INDEXABLE = "github.io" not in BASE_URL
+else:
+    INDEXABLE = _RAW_INDEXABLE.strip().lower() in ("1", "true", "yes")
 
 # Sister site with county land values per acre (USDA and FHFA). Read at build time; a cached copy is committed.
-LAND_INDEX_URL = (os.environ.get("LANDO_LAND_INDEX_URL") or "https://theguysaccount.github.io/land-index-fund").rstrip("/")
+LAND_INDEX_URL = (os.environ.get("LANDO_LAND_INDEX_URL") or "https://index.grounded.to").rstrip("/")
 
 # Optional keys (see OPERATIONS.md). Empty means the feature stays off.
 SUPPORT_URL = os.environ.get("LANDO_SUPPORT_URL", "").strip()

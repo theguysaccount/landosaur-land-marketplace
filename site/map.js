@@ -138,10 +138,12 @@
       if (mode === "deadline") {
         return ((a[12] || "9999") < (b[12] || "9999") ? -1 : (a[12] || "9999") > (b[12] || "9999") ? 1 : 0) || (a[9] < b[9] ? -1 : 1);
       }
-      // Default: direct listings & active first, then closing soonest, then priced, then alphabetical
-      return ((b[13] ? 1 : 0) - (a[13] ? 1 : 0)) || (b[8] - a[8]) ||
-        ((a[12] || "9999") < (b[12] || "9999") ? -1 : (a[12] || "9999") > (b[12] || "9999") ? 1 : 0) ||
-        ((a[4] != null ? 0 : 1) - (b[4] != null ? 0 : 1)) || (a[9] < b[9] ? -1 : 1);
+      // Default ("Recommended"): direct listings first, then active mapped parcels with published price & stated acreage, then closing soonest
+      var sa = (a[13] ? 1000 : 0) + (a[8] ? 100 : 0) + (a[4] != null && a[4] > 0 ? 40 : 0) + (a[6] > 0 ? 30 : 0) + (a[1] != null ? 15 : 0) + (a[5] === "cash" ? 10 : 0);
+      var sb = (b[13] ? 1000 : 0) + (b[8] ? 100 : 0) + (b[4] != null && b[4] > 0 ? 40 : 0) + (b[6] > 0 ? 30 : 0) + (b[1] != null ? 15 : 0) + (b[5] === "cash" ? 10 : 0);
+      if (sb !== sa) return sb - sa;
+      return ((a[12] || "9999") < (b[12] || "9999") ? -1 : (a[12] || "9999") > (b[12] || "9999") ? 1 : 0) ||
+        (a[9] < b[9] ? -1 : 1);
     });
   }
 
@@ -213,26 +215,35 @@
     }
   }
 
-  function syncModeTabs(kindVal) {
+  var MODE_LABELS = {
+    "": "All Land",
+    "cash": "Buy It Now",
+    "min_bid": "Auction / Bid",
+    "none": "Land Bank / Offer",
+    "direct": "Direct Owner / Agent"
+  };
+
+  function syncModeTabs(kindVal, counts) {
     Array.prototype.forEach.call(document.querySelectorAll("[data-deal-mode]"), function (btn) {
-      btn.classList.toggle("active", btn.getAttribute("data-deal-mode") === (kindVal || ""));
+      var mode = btn.getAttribute("data-deal-mode") || "";
+      btn.classList.toggle("active", mode === (kindVal || ""));
+      if (counts && MODE_LABELS[mode]) {
+        var n = counts[mode] || 0;
+        btn.textContent = MODE_LABELS[mode] + " (" + n.toLocaleString("en-US") + ")";
+      }
     });
   }
 
   function apply(skipFit) {
     var f = readForm();
-    syncModeTabs(f.kind);
     writeHash(f);
     var mapBounds = (f.inview && !first) ? map.getBounds() : null;
     var shown = [], markers = [], bounds = [];
+    var modeCounts = { "": 0, "cash": 0, "min_bid": 0, "none": 0, "direct": 0 };
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       if (f.state && r[3] !== f.state) continue;
       if (!f.closed && !r[8]) continue;
-      if (f.kind === "cash" && r[5] !== "cash") continue;
-      else if (f.kind === "min_bid" && !(r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms")) continue;
-      else if (f.kind === "none" && !(r[5] === "none" && r[7] !== "auction_open" && r[7] !== "auction_terms")) continue;
-      else if (f.kind === "direct" && !r[13]) continue;
       if (!isNaN(f.max) && (r[4] == null || r[4] > f.max)) continue;
       if (!isNaN(f.acres) && (!r[6] || r[6] < f.acres)) continue;
       if (f.savedOnly && savedIds.indexOf(r[0]) < 0) continue;
@@ -240,6 +251,20 @@
       if (mapBounds) {
         if (r[1] == null || !mapBounds.contains([r[1], r[2]])) continue;
       }
+      var isCash = r[5] === "cash";
+      var isAuc = r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms";
+      var isNone = r[5] === "none" && !isAuc;
+      var isDirect = Boolean(r[13]);
+      modeCounts[""]++;
+      if (isCash) modeCounts.cash++;
+      if (isAuc) modeCounts.min_bid++;
+      if (isNone) modeCounts.none++;
+      if (isDirect) modeCounts.direct++;
+
+      if (f.kind === "cash" && !isCash) continue;
+      else if (f.kind === "min_bid" && !isAuc) continue;
+      else if (f.kind === "none" && !isNone) continue;
+      else if (f.kind === "direct" && !isDirect) continue;
       shown.push(r);
       if (r[1] != null) {
         var m = L.circleMarker([r[1], r[2]], { radius: r[13] ? 8 : 6, color: "#fff", weight: 2, fillColor: colour(r), fillOpacity: 0.95 });
@@ -248,6 +273,7 @@
         bounds.push([r[1], r[2]]);
       }
     }
+    syncModeTabs(f.kind, modeCounts);
     if (!skipFit) {
       cluster.clearLayers();
       cluster.addLayers(markers);

@@ -27,4 +27,4 @@ jobs:
           python -m lando.build dist
           python scripts/check_dist.py dist
       - name: Client scripts parse
-        run: for f in api/xray.js api/listings.js api/offers.js site/theme.js site/map.js site/listing.js site/xray.js site/list.js site/direct.js site/tables.js site/analyze.js scripts/e2e.mjs; do node --check "$f"; done
+        run: for f in api/xray.js api/listings.js api/offers.js api/search.js site/theme.js site/map.js site/listing.js site/xray.js site/list.js site/direct.js site/tables.js site/analyze.js scripts/e2e.mjs; do node --check "$f"; done

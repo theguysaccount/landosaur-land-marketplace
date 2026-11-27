@@ -311,12 +311,12 @@ class Site(object):
     def how_block(self):
         return (
             '<section><h2>How Landosaur works</h2><ul class="notes">'
-            '<li><strong>Official public sources + direct listings.</strong> City, county, state trust, and tax-sale feeds across 23 states plus 50-state direct owner, real estate agent, and AI-agent listings. Zero scraped broker spam.</li>'
+            '<li><strong>Official public sources + direct listings.</strong> City, county, state trust, and tax-sale feeds across %d states plus 50-state direct owner, real estate agent, and AI-agent listings. Zero scraped broker spam.</li>'
             '<li><strong>9-agency GIS Parcel X-Ray.</strong> Instant USGS 3DEP terrain profile, FEMA flood &amp; disaster risk, USFWS wetlands, USDA soil/septic depth, Census roads, USGS public-land adjacency, NASA solar/hardiness, and USDA/FHFA county benchmarks.</li>'
             '<li><strong>Clear Buy It Now vs. Auction bidding.</strong> Filter fixed-price Buy It Now parcels separately from auctions; bid or reserve direct listings on-site and link directly to official portals for government parcels.</li>'
-            '<li><strong>Agent-native listing API &amp; Analyzer.</strong> Publish any U.S. parcel in 60 seconds via <a href="%s">/list/</a> or a single AI agent API call, and model full all-in deal economics in the <a href="%s">Land Analyzer</a>.</li>'
-            '</ul><p><a href="%s">About our rules</a> · <a href="%s">All official sources</a> · <a href="%s">50-State Land Prices</a></p></section>'
-        ) % (self.u("/list/"), self.u("/analyze/"), self.u("/about/"), self.u("/sources/"), self.u("/land-prices/"))
+            '<li><strong>Two-sided Agent-native API &amp; Analyzer.</strong> Search 23,500+ parcels via <code>/api/search/</code>, publish any U.S. parcel in 60 seconds via <a href="%s">/list/</a> or a single AI agent API call, and model full all-in deal economics in the <a href="%s">Land Analyzer</a>.</li>'
+            '</ul><p><a href="%s">About our rules</a> · <a href="%s">All official sources</a> · <a href="%s">50-State Land Prices</a> · <a href="%s">Open Data &amp; RSS Feeds</a></p></section>'
+        ) % (len(self.cat.states), self.u("/list/"), self.u("/analyze/"), self.u("/about/"), self.u("/sources/"), self.u("/land-prices/"), self.u("/data/"))
 
     # ------------------------------------------------------------------ home (map)
     def home(self):

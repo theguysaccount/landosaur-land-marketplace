@@ -1,9 +1,26 @@
 {
   "name": "Landosaur Agent-First Land Marketplace API",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "base_url": "https://landosaur.com",
-  "description": "Zero-account open API for landowners, real estate agents, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to publish Buy It Now or Auction land listings across all 50 U.S. states, run 9-agency Federal Parcel X-Rays, and record buyer bids or Buy It Now reservations.",
+  "description": "Zero-account two-sided open API for landowners, real estate agents, buyers, and AI agents (Claude, ChatGPT, Codex, Gemini, Antigravity, OpenClaw) to search 23,500+ official + direct land parcels across 36+ live states, publish Buy It Now or Auction land listings in all 50 U.S. states, run 9-agency Federal Parcel X-Rays, and record live auction bids or Buy It Now reservations.",
   "endpoints": {
+    "search_land": {
+      "method": "GET",
+      "url": "https://landosaur.com/api/search/?state=IN&mode=auction&max_price=10000&min_acres=0.2&sort=price_asc&limit=25",
+      "description": "Search and filter all active official public-agency land parcels plus live Direct Owner/Agent listings in one unified JSON response.",
+      "query_params": {
+        "state": "Optional 2-letter U.S. state code (e.g. IN, KS, CA, FL, TX, WA, MN, VA)",
+        "mode": "Optional deal mode: all | buy_now | auction | offer | direct",
+        "min_price": "Optional minimum USD price or bid",
+        "max_price": "Optional maximum USD price or bid",
+        "min_acres": "Optional minimum acreage",
+        "max_acres": "Optional maximum acreage",
+        "q": "Optional keyword search (county, locality, street, APN)",
+        "sort": "recommended (default) | price_asc | price_desc | ppa_asc | acres_desc | deadline",
+        "limit": "1-100 (default 25)",
+        "offset": "Pagination offset (default 0)"
+      }
+    },
     "publish_listing": {
       "method": "POST",
       "url": "https://landosaur.com/api/listings/",
@@ -43,7 +60,7 @@
     "update_listing_status": {
       "method": "PATCH",
       "url": "https://landosaur.com/api/listings/?id=<listing_id>",
-      "body": { "edit_token": "<token returned on POST>", "status": "active | under_contract | sold | withdrawn" }
+      "body": { "edit_token": "<token returned on POST>", "status": "active | under_contract | sold | withdrawn", "price": 24000, "checkout_url": "https://buy.stripe.com/..." }
     },
     "place_bid_or_buy_now": {
       "method": "POST",
@@ -62,6 +79,12 @@
     "parcel_xray": {
       "method": "GET",
       "url": "https://landosaur.com/api/xray/?lat=34.8689&lon=-111.7614"
+    },
+    "feeds": {
+      "buy_now_atom": "https://landosaur.com/feeds/buy-now.xml",
+      "auctions_atom": "https://landosaur.com/feeds/auctions.xml",
+      "new_listings_atom": "https://landosaur.com/feeds/new.xml",
+      "state_atom_template": "https://landosaur.com/feeds/{state_code_lowercase}.xml"
     }
   }
 }

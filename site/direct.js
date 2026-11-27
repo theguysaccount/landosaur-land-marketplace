@@ -145,6 +145,21 @@
         "<p class='small' style='margin-top:8px'>Coordinates: " + item.lat + ", " + item.lon + " (GIS reference only).</p></div>" +
         "</div>" +
         "<section style='margin-top:24px'>" + actionHtml + "</section>" +
+        "<section style='margin-top:18px'><details class='faq-item' id='seller-console'><summary>Seller / Agent Management Console (Update Price, Checkout URL, or Mark Sold)</summary><div class='faq-body'>" +
+        "<p class='small'>Published this listing? Enter your <strong>Seller Edit Token</strong> to update the price, attach a Stripe/Escrow checkout link, or mark the parcel Under Contract, Sold, or Withdrawn live.</p>" +
+        "<form id='manage-form' class='worksheet' style='margin-top:10px'>" +
+        "<label style='grid-column:1/-1'><span>Seller Edit Token</span><input name='edit_token' type='password' required placeholder='Paste token returned when listing was published'></label>" +
+        "<label><span>Listing Status</span><select name='status'>" +
+        "<option value='active'" + (item.status === "active" ? " selected" : "") + ">Active</option>" +
+        "<option value='under_contract'" + (item.status === "under_contract" ? " selected" : "") + ">Under Contract / Pending</option>" +
+        "<option value='sold'" + (item.status === "sold" ? " selected" : "") + ">Sold</option>" +
+        "<option value='withdrawn'" + (item.status === "withdrawn" ? " selected" : "") + ">Withdrawn</option>" +
+        "</select></label>" +
+        "<label><span>Price / Starting Bid ($)</span><input name='price' type='number' min='1' step='any' value='" + esc(item.price) + "'></label>" +
+        "<label style='grid-column:1/-1'><span>Stripe / Escrow Checkout URL (optional HTTPS)</span><input name='checkout_url' type='url' value='" + esc(item.checkout_url || "") + "' placeholder='https://buy.stripe.com/... or https://www.escrow.com/...'></label>" +
+        "<label style='grid-column:1/-1'><span>Seller Notes</span><input name='notes' type='text' value='" + esc(item.notes || "") + "'></label>" +
+        "<div style='grid-column:1/-1'><button type='submit' id='manage-btn' class='button ghost'>Save Listing Changes →</button></div>" +
+        "</form><div id='manage-msg' class='callout' hidden style='margin-top:10px'></div></div></details></section>" +
         "<section class='xray-section' style='margin-top:24px'>" +
         "<div class='xray-header'><div><div class='eyebrow'>Live 9-Agency Federal Screening</div><h2>Live Parcel X-Ray, Terrain Profile &amp; Land Potential</h2></div>" +
         "<a class='button ghost sm no-print' href='" + base + "/xray/#lat=" + item.lat + "&amp;lon=" + item.lon + "'>Open full-screen X-Ray →</a></div>" +
@@ -222,6 +237,52 @@
             .finally(function () {
               oBtn.disabled = false;
               oBtn.textContent = "Submit →";
+            });
+        });
+      }
+
+      // Wire Seller / Agent Management Console (PATCH /api/listings/)
+      var mForm = document.getElementById("manage-form");
+      var mBtn = document.getElementById("manage-btn");
+      var mMsg = document.getElementById("manage-msg");
+      if (mForm) {
+        try {
+          var savedTok = sessionStorage.getItem("landosaur_edit_" + item.id);
+          if (savedTok) mForm.edit_token.value = savedTok;
+        } catch (e) {}
+        mForm.addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          mBtn.disabled = true;
+          mBtn.textContent = "Saving…";
+          var patch = {
+            edit_token: mForm.edit_token.value.trim(),
+            status: mForm.status.value,
+            price: parseFloat(mForm.price.value) || undefined,
+            checkout_url: mForm.checkout_url.value.trim(),
+            notes: mForm.notes.value.trim(),
+          };
+          fetch(base + "/api/listings/?id=" + encodeURIComponent(item.id), {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (r2) {
+              mMsg.hidden = false;
+              if (!r2.ok || !r2.d || !r2.d.ok) {
+                mMsg.innerHTML = "<strong>Update rejected:</strong> " + esc((r2.d && r2.d.error) || "Check your edit token.");
+                return;
+              }
+              mMsg.innerHTML = "<strong>Listing updated!</strong> Reloading live status…";
+              setTimeout(function () { location.reload(); }, 900);
+            })
+            .catch(function () {
+              mMsg.hidden = false;
+              mMsg.textContent = "Network error updating listing.";
+            })
+            .finally(function () {
+              mBtn.disabled = false;
+              mBtn.textContent = "Save Listing Changes →";
             });
         });
       }

@@ -164,12 +164,13 @@
             return;
           }
           var d = res.d;
+          try { sessionStorage.setItem("landosaur_edit_" + d.id, d.edit_token); } catch (e) {}
           var localHref = base + "/direct/?id=" + encodeURIComponent(d.id);
           outBox.innerHTML =
             "<h3>Listing Published Live on Landosaur!</h3>" +
             "<p>Your parcel is now live on the map and searchable nationwide, enriched with 9 live federal GIS signals.</p>" +
-            "<p><a class='button' href='" + localHref + "'>View Live Listing &amp; Bidding Page →</a></p>" +
-            "<p class='small' style='margin-top:10px'><strong>Save your Seller Edit Token</strong> (needed to mark sold or withdraw via API): <code>" + d.edit_token + "</code></p>";
+            "<p><a class='button' href='" + localHref + "'>View Live Listing, Bidding &amp; Seller Console →</a></p>" +
+            "<p class='small' style='margin-top:10px'><strong>Save your Seller Edit Token</strong> (needed to update price, add checkout URL, mark sold, or withdraw on the listing page or via API): <code>" + d.edit_token + "</code></p>";
           form.reset();
           syncMode();
           syncSeller();

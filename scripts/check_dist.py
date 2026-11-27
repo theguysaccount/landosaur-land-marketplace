@@ -28,6 +28,10 @@ OFFICIAL = (
     "baltimorecity.gov", "bigspringtx.gov",
     "kingcounty.gov", "charlottenc.gov", "cantonga.gov", "sanmiguelcountyco.gov",
     "navajocountyaz.gov", "publicsurplus.com", "brla.gov", "chnj.gov", "orlando.gov",
+    "delawarecounty.in.gov", "millelacs.mn.gov", "ottertailcounty.gov", "rva.gov",
+    "montgomeryal.gov", "cityofwaterlooiowa.com", "wycokck.org", "snco.gov",
+    "wilmingtonde.gov", "hartfordct.gov", "cityofomaha.org", "bluefieldwv.gov",
+    "memphistn.gov", "warwickri.gov", "boston.gov",
 )
 
 
@@ -37,6 +41,8 @@ def resolve(dist, base, url):
     if not url.startswith(base + "/"):
         return None
     path = url[len(base):].split("#")[0].split("?")[0] or "/"
+    if path.startswith("/api/"):
+        return None
     rel = path.lstrip("/")
     if path.endswith("/"):
         rel += "index.html"

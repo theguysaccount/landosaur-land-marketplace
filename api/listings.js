@@ -359,6 +359,14 @@ export async function PATCH(request) {
     const allowed = new Set(["active", "under_contract", "sold", "withdrawn"]);
     if (body.status && allowed.has(body.status)) item.status = body.status;
     if (body.price != null && posNum(body.price)) item.price = Math.round(posNum(body.price) * 100) / 100;
+    if (body.buy_now_price != null && posNum(body.buy_now_price)) {
+      item.buy_now_price = Math.round(posNum(body.buy_now_price) * 100) / 100;
+    }
+    if (body.checkout_url !== undefined) {
+      const cu = cleanStr(body.checkout_url, 500);
+      item.checkout_url = !cu ? null : isSafeHttpsUrl(cu) ? cu : item.checkout_url;
+    }
+    if (body.escrow_notes != null) item.escrow_notes = cleanStr(body.escrow_notes, 600);
     if (body.notes != null) item.notes = cleanStr(body.notes, 1200);
     item.updated_at = new Date().toISOString();
 

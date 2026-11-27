@@ -306,6 +306,97 @@ class Phase2AdaptersTest(unittest.TestCase):
         }], lambda w: None)
         self.assertEqual((len(orl), orl[0]["state"]), (1, "FL"))
 
+    def test_phase5_13_new_states(self):
+        in_r = adapters.parse_delaware_in_features([{
+            "attributes": {"State_PIN": "18-11-03-483-005", "Property_Street": "1617 E WEBER DR", "Property_City": "MUNCIE", "Minimum_Bid": 450.5, "AV___Total_Improvements": 0},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(in_r), in_r[0]["state"], in_r[0]["price_kind"]), (1, "IN", "min_bid"))
+
+        mn1 = adapters.parse_millelacs_mn_features([{
+            "attributes": {"PID": "09-965-0350", "SALEABLE": "Yes", "STRUCTURES": "No", "POLITICAL_SUBDIVISION": "Kathio Township", "ACRES": 0.52, "WATERFRONT": "Yes"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(mn1), mn1[0]["state"]), (1, "MN"))
+
+        mn2 = adapters.parse_ottertail_mn_features([{
+            "attributes": {"PIN": "67000990149000", "ACRES": 0.21, "PHYSADDR": "212 MAIN AVE E", "PHYSCITY": "DEER CREEK"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(mn2), mn2[0]["state"]), (1, "MN"))
+
+        va = adapters.parse_richmond_va_features([{
+            "attributes": {"PIN": "C0090800030", "DwellingValue": 0, "LandSqFt": 8712, "LandUse": "Vacant"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(va), va[0]["state"]), (1, "VA"))
+
+        al = adapters.parse_montgomery_al_features([{
+            "attributes": {"DISPLAY": "YES", "PARCEL_NUM": "0409321019008000", "CALC_ACRE": 0.21, "STREET_NAM": "HOUSER ST"},
+            "geometry": {"x": -86.3, "y": 32.36},
+        }], lambda w: None)
+        self.assertEqual((len(al), al[0]["state"]), (1, "AL"))
+
+        ia = adapters.parse_waterloo_ia_features([{
+            "attributes": {"OBJECTID": 2, "Area": "75.05 Acres", "Zoning": "M-2", "TIFDistrict": "NE Industrial"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ia), ia[0]["state"], ia[0]["acres"]), (1, "IA", 75.05))
+
+        ks1 = adapters.parse_wyandotte_ks_features([{
+            "attributes": {"PARCEL": "115534", "VACANT": "Y", "ACRE": 0.15, "NUMB": "3048", "ST_NAME": "MAIN", "CITY": "KANSAS CITY"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ks1), ks1[0]["state"]), (1, "KS"))
+
+        ks2 = adapters.parse_shawnee_ks_features([{
+            "attributes": {"PIN": "1492901006022000", "PADDRESS": "4649 SW SHENANDOAH CT", "ACRES": 0.35, "BLDGVAL": 0, "SALE_PRICE": 26342},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ks2), ks2[0]["state"], ks2[0]["price_kind"], ks2[0]["price"]), (1, "KS", "cash", 26342.0))
+
+        de = adapters.parse_wilmington_de_features([{
+            "attributes": {"L0NCC_REST_Parcel_Data_PRCLID": "2602220081", "L0NCC_REST_Parcel_Data_LOTSZ": 0.03, "L0NCC_REST_Parcel_Data_ADDRESS": "105 W 29TH ST"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(de), de[0]["state"]), (1, "DE"))
+
+        ct = adapters.parse_hartford_ct_features([{
+            "attributes": {"PARCEL_ID": "159484050", "Address": "42 Francis Ave.", "LAND_USE": "Vacant Lot", "ZONE": "CX-2", "LOT_SIZE___SQ__FT__": "5500"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ct), ct[0]["state"]), (1, "CT"))
+
+        ne = adapters.parse_omaha_ne_features([{
+            "attributes": {"PIN": "0125630000", "PROPERTY_A": "6161 S 132 ST", "ACRES": 0.45, "NUMBLDGS": 0, "IMPROVEMEN": 0},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ne), ne[0]["state"]), (1, "NE"))
+
+        wv = adapters.parse_bluefield_wv_features([{
+            "attributes": {"GISPID": "28-03-0006-0004-0000", "Acres_C": 0.34, "Zone": "R-2", "FullPhysic": "100 MAIN ST"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(wv), wv[0]["state"]), (1, "WV"))
+
+        tn = adapters.parse_memphis_tn_features([{
+            "attributes": {"PARID": "03201200010", "PAR_ADDR1": "0 LUCAS ST", "LANDUSE": "VACANT", "Acres": 0.4, "CurrentZon": "EMP"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(tn), tn[0]["state"]), (1, "TN"))
+
+        ri = adapters.parse_warwick_ri_features([{
+            "attributes": {"MSPARCELID": "331-0201", "MSLOCATION": "ROANOKE AVE", "MSAREACAC": 0.13, "MSLANDUSED": "Vac Res Land"},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ri), ri[0]["state"]), (1, "RI"))
+
+        ma = adapters.parse_boston_ma_features([{
+            "attributes": {"Parcel": "0107071000", "Address": "100 MAIN ST", "Care_and_Custody": "MOH", "Lot_Size_SF": 4946},
+            "geometry": {"rings": self.RING},
+        }], lambda w: None)
+        self.assertEqual((len(ma), ma[0]["state"]), (1, "MA"))
+
 
 class GeometryTest(unittest.TestCase):
     def test_centroid_and_outline_link(self):

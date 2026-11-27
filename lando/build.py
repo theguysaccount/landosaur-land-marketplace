@@ -147,6 +147,9 @@ def build_llms_txt(cat, site, updated):
         "- [Listings CSV](%s/data/listings.csv)" % base,
         "- [Map JSON](%s/data/map.json)" % base,
         "- [Sources Status JSON](%s/data/sources.json)" % base,
+        "- [Live Two-Sided Land Search API (JSON)](%s/api/search/?limit=25)" % base,
+        "- [Buy It Now Atom Feed](%s/feeds/buy-now.xml)" % base,
+        "- [Auctions Atom Feed](%s/feeds/auctions.xml)" % base,
         "- [New Listings Atom Feed](%s/feeds/new.xml)" % base,
     ])
     if config.INDEXABLE:
@@ -248,6 +251,10 @@ def build(dist, data_dir=None, now=None, log=print):
         ("/data/listings.csv", "Every active and recent official listing: facts, status, coordinates, official agency URL"),
         ("/data/map.json", "Compact geospatial point table powering the interactive map"),
         ("/data/sources.json", "Source status: last successful read, counts, failures, and site stats"),
+        ("/api/search/?limit=25", "Live JSON search API across official public parcels and direct owner/agent listings"),
+        ("/.well-known/landosaur-agent.json", "Machine-readable AI Agent API schema (search, X-Ray, publish, bid/reserve)"),
+        ("/feeds/buy-now.xml", "Atom feed of fixed-price Buy It Now official land parcels"),
+        ("/feeds/auctions.xml", "Atom feed of active public land auctions and tax sales"),
     ]), indexable=True, group="core")
 
     status = dict(cat.status)
@@ -262,13 +269,21 @@ def build(dist, data_dir=None, now=None, log=print):
 
     updated = (cat.status.get("checked") or cat.now.strftime("%Y-%m-%d"))[:10]
     new = cat.new()
-    w.write("feeds/new.xml", atom("New government land listings | Landosaur", "/feeds/new.xml", new, cat, updated))
-    for st in cat.states.values():
-        w.write("feeds/%s.xml" % st["code"].lower(), atom(
-            "New government land listings in %s | Landosaur" % st["name"],
-            "/feeds/%s.xml" % st["code"].lower(), [r for r in new if r["state"] == st["code"]], cat, updated))
-
     cur = cat.current()
+    buy_now_rows = [r for r in cur if r["price_kind"] == "cash"]
+    auction_rows = sorted(
+        [r for r in cur if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms")],
+        key=lambda r: (r.get("deadline") or "9999", 0 if r["price"] is not None else 1, r["id"]),
+    )
+    w.write("feeds/new.xml", atom("New government land listings | Landosaur", "/feeds/new.xml", new or cur[:80], cat, updated))
+    w.write("feeds/buy-now.xml", atom("Buy It Now fixed-price official land | Landosaur", "/feeds/buy-now.xml", buy_now_rows[:100], cat, updated))
+    w.write("feeds/auctions.xml", atom("Active public land auctions & tax sales | Landosaur", "/feeds/auctions.xml", auction_rows[:100], cat, updated))
+    for st in cat.states.values():
+        st_new = [r for r in new if r["state"] == st["code"]]
+        st_feed = st_new if st_new else [r for r in st["listings"] if r["available"]][:60]
+        w.write("feeds/%s.xml" % st["code"].lower(), atom(
+            "Official land listings in %s | Landosaur" % st["name"],
+            "/feeds/%s.xml" % st["code"].lower(), st_feed, cat, updated))
     og_default_src = os.path.join(config.SITE_SRC, "og-default.png")
     og_custom_dir = os.path.join(config.SITE_SRC, "og")
     os.makedirs(os.path.join(dist, "og"), exist_ok=True)

@@ -14,6 +14,9 @@
     },
     "api/offers.js": {
       "maxDuration": 15
+    },
+    "api/search.js": {
+      "maxDuration": 15
     }
   },
   "redirects": [

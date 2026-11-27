@@ -116,7 +116,7 @@ class Site(object):
             '<link rel="icon" href="%s" type="image/svg+xml">' % self.u("/assets/favicon.svg"),
             '<link rel="preconnect" href="https://fonts.googleapis.com">',
             '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-            '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap">',
+            '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=optional">',
             '<link rel="stylesheet" href="%s">' % self.u("/assets/style.css"),
             '<script>try{var t=localStorage.getItem("landosaur_theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>',
             '<link rel="alternate" type="application/atom+xml" title="New government land listings" href="%s">' % self.u("/feeds/new.xml"),
@@ -129,24 +129,25 @@ class Site(object):
         for block in jsonld or []:
             head.append('<script type="application/ld+json">%s</script>' % json.dumps(block, separators=(",", ":")).replace("</", "<\\/"))
         nav_items = (
-            ("/", "Map", False),
-            ("/services/", "Land Agent", True),
-            ("/xray/", "Parcel X-Ray", True),
-            ("/list/", "List Land", True),
-            ("/land-atlas/", "Land Atlas", False),
-            ("/land-for-sale/", "Land for Sale", False),
-            ("/land-prices/", "Land Prices", False),
-            ("/analyze/", "Analyzer", False),
-            ("/research/", "Research", False),
+            ("/", "Map", False, ""),
+            ("/services/", "Land Agent", True, "offer_clicked"),
+            ("/xray/", "Parcel X-Ray", True, "tool_used"),
+            ("/list/", "List Land", True, "tool_used"),
+            ("/land-atlas/", "Land Atlas", False, ""),
+            ("/land-for-sale/", "Land for Sale", False, ""),
+            ("/land-prices/", "Land Prices", False, ""),
+            ("/analyze/", "Analyzer", False, "tool_used"),
+            ("/research/", "Research", False, ""),
         )
         nav = "".join(
-            '<a href="%s"%s%s>%s</a>' % (
+            '<a href="%s"%s%s%s>%s</a>' % (
                 self.u(p),
                 ' class="nav-cta"' if is_cta else "",
                 ' aria-current="page"' if path == p or (p != "/" and path.startswith(p)) else "",
+                (' data-vital-event="%s"' % ev) if ev else "",
                 t,
             )
-            for p, t, is_cta in nav_items
+            for p, t, is_cta, ev in nav_items
         )
         extra = ""
         if config.SUPPORT_URL:
@@ -250,15 +251,20 @@ class Site(object):
             '<option value="%s"%s>%s</option>' % (s["code"], " selected" if scope == s["code"] else "", esc(s["name"]))
             for s in states
         )
+        scoped = [r for r in self.cat.current() if scope == "all" or r["state"] == scope]
+        cnt_all = len(scoped)
+        cnt_cash = sum(1 for r in scoped if r["price_kind"] == "cash")
+        cnt_auc = sum(1 for r in scoped if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms"))
+        cnt_none = sum(1 for r in scoped if r["price_kind"] == "none" and r["status"] not in ("auction_open", "auction_terms"))
         return (
             '<section class="mapzone" aria-label="%s">'
             '<div class="mode-switcher" role="group" aria-label="Filter by deal type">'
-            '<button type="button" class="mode-btn active" data-deal-mode="">All Land</button>'
-            '<button type="button" class="mode-btn" data-deal-mode="cash">Buy It Now</button>'
-            '<button type="button" class="mode-btn" data-deal-mode="min_bid">Auction / Bid</button>'
-            '<button type="button" class="mode-btn" data-deal-mode="none">Land Bank / Offer</button>'
-            '<button type="button" class="mode-btn" data-deal-mode="direct">Direct Owner / Agent</button>'
-            '<a class="mode-btn" href="%s" style="margin-left:auto;border-color:var(--forest);color:var(--forest)">+ List Land Free</a>'
+            '<button type="button" class="mode-btn active" data-deal-mode="" data-vital-event="tool_used">All Land (%s)</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="cash" data-vital-event="tool_used">Buy It Now (%s)</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="min_bid" data-vital-event="tool_used">Auction / Bid (%s)</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="none" data-vital-event="tool_used">Land Bank / Offer (%s)</button>'
+            '<button type="button" class="mode-btn" data-deal-mode="direct" data-vital-event="tool_used">Direct Owner / Agent (0)</button>'
+            '<a class="mode-btn" href="%s" data-vital-event="tool_used" style="margin-left:auto;border-color:var(--forest);color:var(--forest)">+ List Land Free</a>'
             '</div>'
             '<form class="filters" id="filters" onsubmit="return false">'
             '<label>State<select name="state"><option value="">All tracked states</option>%s</select></label>'
@@ -271,14 +277,14 @@ class Site(object):
             '<option value="price_desc">Price: high to low</option><option value="acres_desc">Largest acreage</option></select></label>'
             '<label class="grow">Search<input name="q" type="search" placeholder="County, city, address, parcel ID"></label>'
             '<div class="preset-bar" aria-label="Quick filters" style="flex-basis:100%%;margin:4px -16px -14px;border-top:1px solid var(--line);border-bottom:0">'
-            '<button type="button" class="pill-btn" data-preset="all">All active</button>'
-            '<button type="button" class="pill-btn" data-preset="cash">Buy It Now</button>'
-            '<button type="button" class="pill-btn" data-preset="min_bid">Auction / Bid</button>'
-            '<button type="button" class="pill-btn" data-preset="direct">Direct Owner / Agent</button>'
-            '<button type="button" class="pill-btn" data-preset="acres5">5+ acres</button>'
-            '<button type="button" class="pill-btn" data-preset="under5k">Under $5,000</button>'
-            '<button type="button" class="pill-btn" data-preset="ppa">Lowest $/acre</button>'
-            '<button type="button" class="pill-btn" data-preset="saved">Saved shortlist ★</button>'
+            '<button type="button" class="pill-btn" data-preset="all" data-vital-event="tool_used">All active</button>'
+            '<button type="button" class="pill-btn" data-preset="cash" data-vital-event="tool_used">Buy It Now</button>'
+            '<button type="button" class="pill-btn" data-preset="min_bid" data-vital-event="tool_used">Auction / Bid</button>'
+            '<button type="button" class="pill-btn" data-preset="direct" data-vital-event="tool_used">Direct Owner / Agent</button>'
+            '<button type="button" class="pill-btn" data-preset="acres5" data-vital-event="tool_used">5+ acres</button>'
+            '<button type="button" class="pill-btn" data-preset="under5k" data-vital-event="tool_used">Under $5,000</button>'
+            '<button type="button" class="pill-btn" data-preset="ppa" data-vital-event="tool_used">Lowest $/acre</button>'
+            '<button type="button" class="pill-btn" data-preset="saved" data-vital-event="tool_used">Saved shortlist ★</button>'
             '<div class="filter-toggles">'
             '<label><input name="inview" type="checkbox"> Search map area</label>'
             '<label><input name="savedOnly" type="checkbox"> Saved only</label>'
@@ -298,8 +304,8 @@ class Site(object):
             '</div>'
             '<div id="compare-dock" class="compare-dock" hidden>'
             '<span>Saved: <strong data-saved-count>0</strong> · Compare: <strong data-cmp-count>0</strong>/4</span>'
-            '<button type="button" data-open-compare>Compare side by side</button>'
-            '<button type="button" class="ghost-dk" data-export-saved>Export Saved CSV</button>'
+            '<button type="button" data-open-compare data-vital-event="tool_used">Compare side by side</button>'
+            '<button type="button" class="ghost-dk" data-export-saved data-vital-event="tool_used">Export Saved CSV</button>'
             '<button type="button" class="ghost-dk" data-clear-compare>Clear</button>'
             '</div>'
             '<div id="compare-modal" class="compare-modal" hidden role="dialog" aria-modal="true" aria-label="Compare parcels">'
@@ -307,7 +313,63 @@ class Site(object):
             '<button type="button" class="button ghost sm" data-close-compare>Close</button></div>'
             '<div data-cmp-body></div></div></div>'
             '</section>'
-        ) % (esc(title), self.u("/list/"), opts, esc(scope))
+        ) % (
+            esc(title),
+            "{:,}".format(cnt_all), "{:,}".format(cnt_cash), "{:,}".format(cnt_auc), "{:,}".format(cnt_none),
+            self.u("/list/"), opts, esc(scope),
+        )
+
+    def platform_comparison_block(self, active_count, state_count, agency_count):
+        return (
+            '<section id="land-platform-comparison">'
+            '<h2>How Landosaur compares to commercial land marketplaces</h2>'
+            '<p class="small">Side-by-side comparison of public-record transparency, rural parcel search, due-diligence screening, fees, and direct inquiry workflows across Landosaur, LandWatch, LandSearch, Land.com, and Zillow Land.</p>'
+            '<div class="scroll"><table class="data compare-matrix"><thead><tr>'
+            '<th scope="col">Comparison factor</th>'
+            '<th scope="col" class="col-ours">Landosaur</th>'
+            '<th scope="col">LandWatch</th>'
+            '<th scope="col">LandSearch</th>'
+            '<th scope="col">Land.com</th>'
+            '<th scope="col">Zillow Land</th>'
+            '</tr></thead><tbody>'
+            '<tr><th scope="row">County parcel &amp; deed source transparency</th>'
+            '<td class="col-ours">Maps %s official public-agency offerings (%d agencies across %d states, checked daily) plus direct owner/agent listings; every public parcel links straight to its official agency portal with parcel APN and GIS boundary when published.</td>'
+            '<td>Paid broker, agent, and owner classified listings (CoStar / Land.com network); links route to brokers rather than county/state agency portals.</td>'
+            '<td>Aggregates broker/MLS, auction, and owner land listings; county assessor or public source links vary by feed.</td>'
+            '<td>Paid broker, land-specialist, and auctioneer classifieds (CoStar network); primary contact is the listing brokerage.</td>'
+            '<td>MLS-syndicated and FSBO lots with basic county tax-assessment history; does not index municipal land banks or state trust auctions.</td></tr>'
+            '<tr><th scope="row">Rural acreage &amp; deal-mode filters</th>'
+            '<td class="col-ours">Splits Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings; filters by state, max price, min acreage, $/acre sort, viewport bounds, saved CSV shortlist, and 4-parcel side-by-side comparison.</td>'
+            '<td>Filters by state, county, price, acreage, and land category (hunting, farms, timber, residential, waterfront).</td>'
+            '<td>Interactive map with acreage, price, land-use, water, and mineral filters across rural and commercial land.</td>'
+            '<td>Acreage, price, and lifestyle/recreational category filters paired with a rural brokerage directory.</td>'
+            '<td>Lot-size and price filters inside a residential MLS search interface; no auction vs. land-bank deal-mode split.</td></tr>'
+            '<tr><th scope="row">Fee &amp; commission model</th>'
+            '<td class="col-ours">Free to search, map, X-Ray, analyze, list land, and download open CSV/JSON data; optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisition).</td>'
+            '<td>Free for buyers to browse; paid advertising and broker subscription packages fund listing placement.</td>'
+            '<td>Free for buyers to browse; paid seller, broker, and lead-generation plans.</td>'
+            '<td>Free for buyers to browse; paid brokerage marketing and featured-listing subscriptions.</td>'
+            '<td>Free for buyers to browse; funded by Premier Agent / broker advertising and lead referrals.</td></tr>'
+            '<tr><th scope="row">Public-record hazard, soil &amp; ownership visibility</th>'
+            '<td class="col-ours">Built-in free 9-agency Federal Parcel X-Ray (USGS LiDAR slope, FEMA flood &amp; hazard risk, USFWS wetlands, USDA soil/bedrock depth, Census roads, USGS public lands, NASA solar, 3,115-county USDA/FHFA benchmarks); excludes previous-owner PII for privacy.</td>'
+            '<td>Relies on broker-entered descriptions and photos; buyers run FEMA flood, wetland, soil, and zoning checks externally.</td>'
+            '<td>Listing summaries with select map overlays; buyers verify soils, wetlands, and county zoning outside the listing.</td>'
+            '<td>Broker descriptions and aerial maps; no built-in 9-agency federal GIS screening workbench.</td>'
+            '<td>Parcel outline and third-party flood/fire summary; limited rural soil/septic, wetland, and BLM/Forest adjacency data.</td></tr>'
+            '<tr><th scope="row">Direct buyer/seller inquiry &amp; open data flow</th>'
+            '<td class="col-ours">Direct link to official government bidding/application pages, on-site offers/bids for direct listings, turnkey Land Agent desk, plus open CSV/JSON downloads, Atom feeds, and <code>/api/search/</code>.</td>'
+            '<td>Lead-capture contact form routed to the listing broker or seller; no open bulk CSV/JSON feed.</td>'
+            '<td>Inquiry form routed to listing broker, auctioneer, or owner; no open public-agency dataset export.</td>'
+            '<td>Broker inquiry form and phone lead routing; no public bulk data downloads.</td>'
+            '<td>&ldquo;Contact agent&rdquo; form routed to buyer/Premier agents or listing brokers; closed MLS data terms.</td></tr>'
+            '</tbody></table></div>'
+            '<p class="small">Marketplace features reflect publicly documented product models as of November 2026; verify current terms directly with each platform. '
+            '<a href="%s" data-vital-event="tool_used">Run a free 9-agency Parcel X-Ray →</a> · <a href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20) →</a></p>'
+            '</section>'
+        ) % (
+            "{:,}".format(active_count), agency_count, state_count,
+            self.u("/xray/"), self.u("/services/"),
+        )
 
     def how_block(self):
         return (
@@ -348,15 +410,15 @@ class Site(object):
             '<article class="info-card"><div class="eyebrow">Turnkey Acquisition · Listed &amp; Unlisted</div>'
             '<h3>Land Agent Concierge ($20 + 10%%)</h3>'
             '<p>Skip county paperwork and outreach. Pay $20 to initiate full verification, bidding or off-market landowner contact, and deed transfer for any parcel in America.</p>'
-            '<a class="card-link" href="%s">Hire Land Agent ($20 to Start) →</a></article>'
+            '<a class="card-link" href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20 to Start) →</a></article>'
             '<article class="info-card"><div class="eyebrow">50-State Interactive Data &amp; Charts</div>'
             '<h3>U.S. Land Data Atlas (2010–%d)</h3>'
             '<p>Explore our interactive 50-state cartogram, multi-state USDA growth charts (%s/ac U.S. avg), live inventory supply breakdowns, and searchable 3,115-county table.</p>'
-            '<a class="card-link" href="%s">Open Land Data Atlas &amp; Charts →</a></article>'
+            '<a class="card-link" href="%s" data-vital-event="tool_used">Open Land Data Atlas &amp; Charts →</a></article>'
             '<article class="info-card"><div class="eyebrow">All 50 States · 9 Live Federal APIs</div>'
             '<h3>Free U.S. Parcel X-Ray &amp; Deal Analyzer</h3>'
             '<p>Drop a pin anywhere for USGS LiDAR terrain profile, FEMA flood &amp; wildfire risk, wetlands, soil/bedrock, Census roads, public lands, solar, and full ROI modeling.</p>'
-            '<a class="card-link" href="%s">Open Parcel X-Ray →</a> · <a class="card-link" href="%s">Deal Analyzer →</a></article>'
+            '<a class="card-link" href="%s" data-vital-event="tool_used">Open Parcel X-Ray →</a> · <a class="card-link" href="%s" data-vital-event="tool_used">Deal Analyzer →</a></article>'
             '</div></section>'
         ) % (
             self.u("/services/"), self.market.latest_year, esc(us_fre),
@@ -369,9 +431,9 @@ class Site(object):
             '<h1>Find, X-Ray, and acquire land in all 50 states</h1>'
             '<p class="lede">%s</p></div></div>'
             '<div class="hero-cta-group">'
-            '<a class="button" href="%s">Hire Land Agent ($20 · Listed or Unlisted) →</a>'
-            '<a class="button ghost" href="%s">50-State Data Atlas &amp; Charts</a>'
-            '<a class="button ghost" href="%s">List Land Free</a>'
+            '<a class="button" href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20 · Listed or Unlisted) →</a>'
+            '<a class="button ghost" href="%s" data-vital-event="tool_used">50-State Data Atlas &amp; Charts</a>'
+            '<a class="button ghost" href="%s" data-vital-event="tool_used">List Land Free</a>'
             '</div></div>'
             '<div class="hero-stats">'
             '<span class="stat-pill"><strong>%s</strong> active parcels</span>'
@@ -386,7 +448,7 @@ class Site(object):
             ),
             self.map_block("all"),
             '<section><h2>Browse live official inventory by state</h2><div class="state-grid">%s</div>'
-            '<p style="margin-top:12px"><a href="%s"><strong>View all 50 states in the Land for Sale Directory →</strong></a></p></section>' % (
+            '<p style="margin-top:12px"><a href="%s" data-vital-event="tool_used"><strong>View all 50 states in the Land for Sale Directory →</strong></a></p></section>' % (
                 state_tiles, self.u("/land-for-sale/"),
             ),
             pillars,
@@ -397,6 +459,7 @@ class Site(object):
         if new:
             body.append('<section><h2>New this fortnight</h2>%s<p><a href="%s">All new listings →</a> · <a href="%s">Atom feed</a></p></section>' % (
                 self.rows(new, True), self.u("/new/"), self.u("/feeds/new.xml")))
+        body.append(self.platform_comparison_block(len(cur), len(states), n_src))
         body.append(self.how_block())
         body.append(self.faq_block(
             b["home_faqs"],
@@ -421,8 +484,35 @@ class Site(object):
                     "publisher": {"@id": self.absu("/#organization")},
                 },
                 {
-                    "@type": "SoftwareApplication",
+                    "@type": "BreadcrumbList",
+                    "@id": self.absu("/#breadcrumb"),
+                    "itemListElement": [
+                        {"@type": "ListItem", "position": 1, "name": "Home", "item": self.absu("/")},
+                    ],
+                },
+                {
+                    "@type": "WebApplication",
                     "@id": self.absu("/#webapp"),
+                    "name": "Landosaur Land Map, GIS Parcel X-Ray & Valuation Workbench",
+                    "applicationCategory": "RealEstateApplication",
+                    "operatingSystem": "Web",
+                    "browserRequirements": "Requires JavaScript for interactive map and GIS X-Ray",
+                    "url": self.absu("/"),
+                    "description": desc,
+                    "isAccessibleForFree": True,
+                    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+                    "publisher": {"@id": self.absu("/#organization")},
+                    "featureList": [
+                        "Split-screen interactive map with Buy It Now, Auction/Min Bid, Land Bank, and Direct deal-mode filters plus 4-parcel side-by-side comparison",
+                        "Free 9-agency Federal Parcel X-Ray (USGS 3DEP LiDAR, FEMA NFHL flood & hazard risk, USFWS wetlands, USDA SSURGO soils, Census roads, PAD-US public lands, NASA solar)",
+                        "50-state USDA NASS 2010-2026 land price observatory and 3,115 county USDA/FHFA land value benchmarks",
+                        "Deterministic land deal, loan/balloon, grid vs. off-grid electricity, comparable sales, and residual development workbench",
+                        "Daily verified official public-agency feeds with free CSV, JSON, and Atom XML downloads",
+                    ],
+                },
+                {
+                    "@type": "SoftwareApplication",
+                    "@id": self.absu("/#software"),
                     "name": "Landosaur Land Map, GIS Parcel Dossier & Valuation Workbench",
                     "applicationCategory": "ReferenceApplication",
                     "operatingSystem": "Web",
@@ -431,13 +521,6 @@ class Site(object):
                     "isAccessibleForFree": True,
                     "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
                     "publisher": {"@id": self.absu("/#organization")},
-                    "featureList": [
-                        "Split-screen interactive map with viewport search, sort, saved shortlist, and 4-parcel side-by-side comparison",
-                        "Official parcel GIS outlines, USGS aerial and topo imagery, FEMA NFHL flood hazard overlay, and distance measurement tool",
-                        "50-state USDA NASS 2010-2026 land price observatory and 3,115 county USDA/FHFA land value benchmarks",
-                        "Deterministic land deal, loan/balloon, grid vs. off-grid electricity, comparable sales, and residual development workbench",
-                        "Daily verified official public-agency feeds with free CSV, JSON, and Atom XML downloads",
-                    ],
                 },
                 {
                     "@type": "Dataset",
@@ -480,14 +563,14 @@ class Site(object):
             '<div id="xray-app">',
             '<form id="xray-search-form" class="xray-search-bar" aria-label="Search any U.S. location">'
             '<input id="xray-q" type="search" placeholder="Enter address, town &amp; state, ZIP, or lat, lon (e.g. Sedona, AZ or 35.42, -92.45)" aria-label="U.S. address, town, or coordinates">'
-            '<button type="submit" class="button">Run Federal X-Ray</button>'
+            '<button type="submit" class="button" data-vital-event="tool_used">Run Federal X-Ray</button>'
             '</form>',
             '<div class="preset-bar" style="border-radius:12px;border:1px solid var(--line);margin-bottom:14px">'
             '<span class="small" style="font-weight:650;margin-right:4px">Try a real parcel:</span>'
-            '<button type="button" class="pill-btn" data-xray-preset="35.42,-92.45" data-xray-label="Van Buren County, AR">Ozark Rural Tract (AR)</button>'
-            '<button type="button" class="pill-btn" data-xray-preset="34.4160,-118.4352" data-xray-label="Santa Clarita, CA">LA County Auction Lot (CA)</button>'
-            '<button type="button" class="pill-btn" data-xray-preset="34.8689,-111.7614" data-xray-label="Sedona, AZ">High Desert Parcel (AZ)</button>'
-            '<button type="button" class="pill-btn" data-xray-preset="41.6639,-83.5379" data-xray-label="Toledo, OH">Toledo Land Bank Lot (OH)</button>'
+            '<button type="button" class="pill-btn" data-xray-preset="35.42,-92.45" data-xray-label="Van Buren County, AR" data-vital-event="tool_used">Ozark Rural Tract (AR)</button>'
+            '<button type="button" class="pill-btn" data-xray-preset="34.4160,-118.4352" data-xray-label="Santa Clarita, CA" data-vital-event="tool_used">LA County Auction Lot (CA)</button>'
+            '<button type="button" class="pill-btn" data-xray-preset="34.8689,-111.7614" data-xray-label="Sedona, AZ" data-vital-event="tool_used">High Desert Parcel (AZ)</button>'
+            '<button type="button" class="pill-btn" data-xray-preset="41.6639,-83.5379" data-xray-label="Toledo, OH" data-vital-event="tool_used">Toledo Land Bank Lot (OH)</button>'
             '</div>',
             '<div id="xray-map" class="map xray-tall" aria-label="Click anywhere on the U.S. map to run Parcel X-Ray">'
             '<noscript><p>Enable JavaScript to use the interactive Parcel X-Ray map.</p></noscript></div>',
@@ -768,7 +851,7 @@ class Site(object):
             '<input name="website_hp" type="text" tabindex="-1" autocomplete="off" style="display:none">'
 
             '<div class="fee-ledger" id="fee-breakdown-live" style="grid-column:1/-1"></div>'
-            '<div style="grid-column:1/-1;padding-top:4px"><button type="submit" id="concierge-submit" class="button">Start Acquisition with Land Agent — $20 →</button></div>'
+            '<div style="grid-column:1/-1;padding-top:4px"><button type="submit" id="concierge-submit" class="button" data-vital-event="offer_clicked">Start Acquisition with Land Agent — $20 →</button></div>'
             '</form>'
             '<div id="concierge-result" class="callout" hidden style="margin-top:14px"></div>'
             '<p class="small" style="margin-top:14px"><strong>Transparency &amp; Licensing Notice:</strong> Landosaur is an independent land intelligence platform and acquisition concierge—not a government agency. The $20 initiation fee begins parcel-specific research, verification, paperwork prep, or off-market outreach. The transparent 10% concierge transfer fee applies only when an acquisition successfully closes. Wherever state law requires a licensed real estate broker, title agent, or closing attorney to represent a buyer or execute deed conveyance, Landosaur coordinates directly through a licensed local partner in that state.</p>'

@@ -87,11 +87,21 @@ def build_llms_txt(cat, site, updated):
     lines = [
         "# Landosaur — Official U.S. Land Map, 50-State Land Price Observatory & Valuation Workbench",
         "",
+        "Last reviewed: 2026-11-27",
+        "",
         ("> Landosaur maps official public-agency land offerings across U.S. states and counties "
          "(tax-sale auctions, surplus state trust land, municipal land banks, and state redevelopment notices), "
          "paired with a 50-state USDA/FHFA Land Price Observatory (2010-%d across 3,115 counties), "
          "%d source-cited buyer research guides, and a deterministic land deal & off-grid power analyzer." % (
              site.market.latest_year, len(site.guides))),
+        "",
+        "## Platform Comparison (Landosaur vs. LandWatch, LandSearch, Land.com & Zillow Land)",
+        "",
+        "Published on the homepage (%s/#land-platform-comparison):" % base,
+        "- **Inventory & source transparency**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states (checked daily) plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, LandSearch, Land.com, and Zillow Land primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
+            "{:,}".format(len(cur)), b["agency_count"], b["state_count"]),
+        "- **Due-diligence & GIS visibility**: Landosaur includes a free 9-agency Federal Parcel X-Ray (%s/xray/) covering USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood & National Risk Index hazards, USFWS wetlands, USDA SSURGO soil/bedrock depth, Census roads, USGS PAD-US public lands, NASA solar/hardiness, and 3,115-county USDA/FHFA benchmarks; commercial listing portals leave federal GIS hazard and soil screening to external research." % base,
+        "- **Deal modes, fees & open data**: Landosaur separates Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings, keeps search, listing, X-Ray, valuation modeling, CSV/JSON exports, and `/api/search/` free, and offers an optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisitions) at %s/services/." % base,
         "",
         "## Key Platform Capabilities",
         "",

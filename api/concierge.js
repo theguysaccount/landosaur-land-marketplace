@@ -2,7 +2,7 @@
 // POST /api/concierge/ — Initiates acquisition for ANY listed Landosaur parcel OR ANY unlisted/off-market parcel across all 50 states.
 // GET  /api/concierge/?code=AGT-... — Check real-time status of an acquisition request.
 
-import { list, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import crypto from "node:crypto";
 import { geocodeUS, runXray } from "./xray.js";
 
@@ -13,6 +13,53 @@ const CORS = {
 };
 
 const PREFIX = "concierge-orders/";
+export const ORDER_CODE = /^AGT-[A-F0-9]{8}$/;
+const ORDER_STEPS = ["dossier_opened", "initiation_confirmed", "diligence", "outreach", "transfer"];
+const STATUS_STAGE = new Map([
+  ["awaiting_initiation_payment", 0],
+  ["received_pending_invoice", 0],
+  ["paid_active_diligence", 2],
+  ["outreach_active", 3],
+  ["transfer_in_progress", 4],
+  ["closed", 5],
+]);
+
+export async function readOrder(code) {
+  if (!ORDER_CODE.test(code)) return null;
+  const record = await get(PREFIX + code + ".json", { access: "public", useCache: false });
+  if (!record || record.statusCode !== 200) return null;
+  return { order: await new Response(record.stream).json(), etag: record.blob.etag };
+}
+
+export function writeOrder(order, etag) {
+  return put(PREFIX + order.confirmation_code + ".json", JSON.stringify(order, null, 2), {
+    access: "public",
+    contentType: "application/json",
+    addRandomSuffix: false,
+    ...(etag ? { ifMatch: etag } : { allowOverwrite: false }),
+  });
+}
+
+function publicProgress(order) {
+  const events = Array.isArray(order.timeline) ? order.timeline : [];
+  const timestamps = Object.fromEntries(events
+    .filter((event) => ORDER_STEPS.includes(event?.step) && Number.isFinite(Date.parse(event.at)))
+    .map((event) => [event.step, event.at]));
+  const stage = Math.max(STATUS_STAGE.get(order.status) ?? 0, order.paid_at ? 2 : 0);
+  return ORDER_STEPS.map((id, index) => ({
+    id,
+    state: stage === 0 && index === 0 || stage > index ? "complete" :
+      (stage === 0 && index === 1 || stage === index ? "current" : "pending"),
+    at: timestamps[id] || (index === 0 ? order.created_at : index === 1 ? order.paid_at : null) || null,
+  }));
+}
+
+function publicSummary(order) {
+  const info = order.xray_summary;
+  if (!info || typeof info !== "object") return null;
+  return Object.fromEntries(["county_name", "state_code", "elevation_ft", "fema_zone", "wetlands_100m",
+    "nearest_road_ft", "county_benchmark_per_acre"].map((field) => [field, info[field] ?? null]));
+}
 const VALID_SERVICES = new Set([
   "listed_acquisition",
   "unlisted_outreach",
@@ -80,12 +127,9 @@ export async function GET(request) {
     if (!configured) {
       return jsonResp({ error: "Order storage unavailable." }, 503);
     }
-    const res = await list({ prefix: PREFIX, limit: 250 });
-    const match = res.blobs.find((b) => b.pathname.endsWith(`/${code}.json`));
-    if (!match) return jsonResp({ error: "Order confirmation code not found." }, 404);
-    const r = await fetch(match.url, { cache: "no-store" });
-    if (!r.ok) return jsonResp({ error: "Unable to read order status." }, 502);
-    const order = await r.json();
+    const stored = await readOrder(code);
+    if (!stored) return jsonResp({ error: "Order confirmation code not found." }, 404);
+    const { order } = stored;
     // Return public-safe status view (no raw email/phone leak)
     return jsonResp({
       ok: true,
@@ -99,17 +143,33 @@ export async function GET(request) {
         state: order.state,
         apn: order.apn,
         official_price: order.official_price,
+        estimated_base_price: order.official_price || order.max_budget || null,
         concierge_fee_10pct: order.concierge_fee_10pct,
         estimated_turnkey_total: order.estimated_turnkey_total,
         initiation_fee_usd: order.initiation_fee_usd,
         created_at: order.created_at,
-        stripe_checkout_url: buildStripeUrl(order.confirmation_code, "", order.parcel_title),
+        paid_at: order.paid_at || null,
+        progress: publicProgress(order),
+        xray_summary: publicSummary(order),
+        stripe_checkout_url: STATUS_STAGE.get(order.status) === 0 && !order.paid_at
+          ? buildStripeUrl(order.confirmation_code, "", order.parcel_title) : null,
       },
     });
   } catch (err) {
     console.error("[concierge GET] error:", err);
     return jsonResp({ error: "Unable to check order status right now." }, 502);
   }
+}
+
+function coordinates(lat, lon) {
+  if (lat == null || lon == null || lat === "" || lon === "") return null;
+  const pair = [Number(lat), Number(lon)];
+  return pair[0] >= 18 && pair[0] <= 72 && pair[1] >= -180 && pair[1] <= -65 ? pair : null;
+}
+
+function drawnBoundary(value) {
+  if (!Array.isArray(value) || value.length < 3 || value.length > 300) return null;
+  return value.every((point) => Array.isArray(point) && point.length === 2 && coordinates(point[1], point[0])) ? value : null;
 }
 
 export async function POST(request) {
@@ -148,27 +208,22 @@ export async function POST(request) {
     const maxBudget = posNum(body.max_budget || body.offer_amount);
     const acres = posNum(body.acres);
     const notes = cleanStr(body.notes, 1500);
+    const boundary = drawnBoundary(body.boundary);
     const financing = cleanStr(body.financing || "cash", 40);
     const submittedByAgent = cleanStr(body.submitted_by_agent, 80) || "landosaur-web";
 
-    if (!parcelId && !apn && !location && !(Number.isFinite(Number(body.lat)) && Number.isFinite(Number(body.lon))) && serviceType !== "custom_sourcing") {
+    let point = coordinates(body.lat, body.lon);
+    if (!parcelId && !apn && !location && !point && serviceType !== "custom_sourcing") {
       return jsonResp({ error: "Provide a Landosaur parcel ID, county APN, address/town, or map coordinates." }, 400);
     }
 
-    let lat = Number(body.lat);
-    let lon = Number(body.lon);
-    if ((!Number.isFinite(lat) || !Number.isFinite(lon)) && location) {
+    if (!point && location) {
       const geo = await geocodeUS(location).catch(() => null);
-      if (geo) {
-        lat = geo.lat;
-        lon = geo.lon;
-      }
+      if (geo) point = coordinates(geo.lat, geo.lon);
     }
-
+    const [lat, lon] = point ? point.map((v) => Math.round(v * 100000) / 100000) : [null, null];
     let xraySummary = null;
-    if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= 18 && lat <= 72 && lon >= -180 && lon <= -65) {
-      lat = Math.round(lat * 100000) / 100000;
-      lon = Math.round(lon * 100000) / 100000;
+    if (point) {
       const xray = await runXray(lat, lon).catch(() => null);
       if (xray) {
         if (!county && xray.county?.county_name) county = xray.county.county_name;
@@ -184,9 +239,6 @@ export async function POST(request) {
           county_benchmark_per_acre: xray.county?.benchmark_usd_per_acre ?? null,
         };
       }
-    } else {
-      lat = null;
-      lon = null;
     }
 
     if (!parcelTitle) {
@@ -218,6 +270,7 @@ export async function POST(request) {
       lat,
       lon,
       acres,
+      ...(boundary ? { boundary } : {}),
       official_price: officialPrice,
       max_budget: maxBudget,
       concierge_fee_10pct: conciergeFee,
@@ -230,14 +283,10 @@ export async function POST(request) {
       submitted_by_agent: submittedByAgent,
       xray_summary: xraySummary,
       created_at: nowIso,
+      timeline: [{ step: "dossier_opened", at: nowIso }],
     };
 
-    await put(`${PREFIX}${confirmationCode}.json`, JSON.stringify(order, null, 2), {
-      access: "public",
-      contentType: "application/json",
-      addRandomSuffix: false,
-      allowOverwrite: false,
-    });
+    await writeOrder(order);
 
     const stripeCheckoutUrl = buildStripeUrl(confirmationCode, buyerEmail, parcelTitle);
 
@@ -252,7 +301,7 @@ export async function POST(request) {
         concierge_fee_10pct: conciergeFee,
         estimated_turnkey_total: turnkeyTotal,
         stripe_checkout_url: stripeCheckoutUrl,
-        tracking_url: `https://landosaur.com/api/concierge/?code=${confirmationCode}`,
+        tracking_url: `https://landosaur.com/services/?code=${confirmationCode}#track-order`,
         xray_summary: xraySummary,
         message: stripeCheckoutUrl
           ? "Acquisition dossier created. Complete the $20 Land Agent initiation checkout on Stripe to activate county verification, outreach, and transfer coordination."

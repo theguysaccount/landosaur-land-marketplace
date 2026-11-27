@@ -103,6 +103,37 @@ try {
       assert(concOk, "live /api/concierge/ metadata check failed");
     }
   });
+  await step("off-market letter and five-stage order tracker reflect form and server data", async () => {
+    await page.goto(base + "/services/?paid=1&service=unlisted_outreach&county=Van+Buren+County&state=AR&apn=FIELD-APN&acres=2");
+    assert(await page.eval(`(() => {
+      const form = document.getElementById("concierge-form");
+      form.max_budget.value = "4000";
+      form.max_budget.dispatchEvent(new Event("input", { bubbles: true }));
+      const brief = document.getElementById("acquisition-brief");
+      return !brief.hidden && brief.innerText.includes("FIELD-APN") && brief.innerText.includes("$4,000") &&
+        !document.getElementById("selected-parcel-banner").innerText.includes("Payment Received");
+    })()`), "document or checkout return showed incorrect details");
+
+    // Stub the status response inside the test browser only. No requests or test orders go to Blob.
+    await page.eval(`(() => {
+      const original = window.fetch;
+      window.fetch = function (url, ...options) {
+        if (!String(url).includes("/api/concierge/?code=AGT-0000ABCD")) return original(url, ...options);
+        return Promise.resolve(Response.json({ order: {
+          confirmation_code: "AGT-0000ABCD", parcel_title: "Test order", estimated_base_price: 4000,
+          concierge_fee_10pct: 400, estimated_turnkey_total: 4400,
+          progress: ["dossier_opened", "initiation_confirmed", "diligence", "outreach", "transfer"].map((id, index) =>
+            ({ id, state: ["complete", "complete", "current", "pending", "pending"][index] }))
+        } }));
+      };
+      const tracking = document.getElementById("track-order-form");
+      tracking.code.value = "AGT-0000ABCD";
+      tracking.requestSubmit();
+    })()`);
+    await page.waitFor("document.querySelectorAll('.order-progress li').length === 5");
+    assert(await page.eval(`document.querySelector(".order-progress [aria-current=step]").textContent.includes("title / lien") &&
+      document.getElementById("track-order-out").textContent.includes("$4,400")`), "progress or itemized estimate missing");
+  });
   await step("drawn X-Ray boundary measures and carries its coordinates into the Land Agent form", async () => {
     await page.goto(base + "/xray/#lat=35.42&lon=-92.45");
     await page.eval(`(() => {
@@ -180,6 +211,11 @@ try {
       const w = await page.eval("document.documentElement.scrollWidth");
       if (w > 375) bad.push(p + " is " + w + "px wide");
     }
+    await page.goto(base + "/land/ks-snco-0973604015014000/");
+    assert(await page.eval(`(() => {
+      const bar = document.querySelector(".mobile-land-agent"), links = document.querySelector(".dossier-metrics .benchmark-pill");
+      return bar && getComputedStyle(bar).position === "fixed" && bar.getBoundingClientRect().right <= 375 && !!links;
+    })()`), "mobile acquisition bar or county benchmark pill missing");
     assert(!bad.length, bad.join("; "));
   });
   await step("zero site console errors", async () => {

@@ -31,3 +31,14 @@ for (const result of results) {
     process.exitCode = 1;
   }
 }
+
+// An unsigned request can only check configuration. It cannot advance an order.
+const unsigned = await fetch(new URL("/api/stripe-webhook/", base), {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(15000),
+});
+if (![400, 503].includes(unsigned.status) || !unsigned.headers.get("cache-control")?.includes("no-store")) {
+  console.error("/api/stripe-webhook/ did not reject an unsigned request", unsigned.status);
+  process.exitCode = 1;
+} else {
+  console.log(unsigned.status, "/api/stripe-webhook/ (unsigned request)");
+}

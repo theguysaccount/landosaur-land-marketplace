@@ -18,13 +18,17 @@ export async function launch() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "lando-cdp-"));
   const chrome = spawn(binary, [...(process.env.CI ? ["--no-sandbox"] : []), "--headless=new", "--disable-gpu",
     "--hide-scrollbars", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  const exited = new Promise((resolve) => chrome.once("close", resolve));
+  const exited = new Promise((resolve) => {
+    chrome.once("exit", resolve);
+    chrome.once("error", resolve);
+  });
   let ws;
   let closing;
   function close() {
     closing ??= (async () => {
       ws?.close();
       const force = setTimeout(() => chrome.kill("SIGKILL"), 750);
+      chrome.stderr.destroy();
       chrome.kill("SIGTERM");
       try {
         await exited;
@@ -40,7 +44,7 @@ export async function launch() {
       let buf = "";
       const deadline = setTimeout(() => reject(new Error("Chrome DevTools did not start")), 10000);
       chrome.once("error", reject);
-      chrome.once("close", () => {
+      chrome.once("exit", () => {
         clearTimeout(deadline);
         reject(new Error("Chrome exited: " + buf.slice(-500)));
       });

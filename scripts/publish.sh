@@ -97,6 +97,7 @@ for (const file of await readdir("api")) {
 }
 JS
 python3 -m unittest discover -s tests -t .
+node --test tests/*.test.mjs
 
 if [ "$REFRESH" -eq 1 ] || [ "$REFRESH_INTELLIGENCE" -eq 1 ]; then
   echo "==> 2/7 Refreshing requested official data locally"

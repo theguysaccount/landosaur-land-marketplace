@@ -22,6 +22,9 @@
       "maxDuration": 30,
       "includeFiles": "data/{usda/land-index-counties.json,utilities/county-utilities.json}"
     },
+    "api/stripe-webhook.js": {
+      "maxDuration": 15
+    },
     "api/alerts.js": {
       "maxDuration": 15
     }

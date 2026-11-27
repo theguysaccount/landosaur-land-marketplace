@@ -798,7 +798,7 @@ class Site(object):
             '<div class="eyebrow">How Land Agent Works</div>'
             '<div class="card-grid" style="margin-top:10px">'
             '<article class="info-card"><div class="eyebrow">Step 1 · $20 Today</div><h3>Lock In Any Parcel</h3><p>Submit a Landosaur parcel ID, county APN, address, or satellite pin anywhere in all 50 states. Pay $20 to open your live acquisition dossier.</p></article>'
-            '<article class="info-card"><div class="eyebrow">Step 2 · We Do the Legwork</div><h3>Verify, Contact &amp; Submit</h3><p>We run 9-agency GIS screening, check county tax/lien/redemption status, prepare municipal applications or auction bids, or contact unlisted landowners directly.</p></article>'
+            '<article class="info-card"><div class="eyebrow">Step 2 · We Do the Legwork</div><h3>Verify, Contact &amp; Submit</h3><p>We run federal GIS screening, check county tax/lien/redemption status, prepare municipal applications or auction bids, or contact unlisted landowners directly.</p></article>'
             '<article class="info-card"><div class="eyebrow">Step 3 · 10% Only On Close</div><h3>Licensed Title &amp; Deed Transfer</h3><p>We coordinate closing through a licensed title company or closing attorney in the parcel\'s state so your deed records cleanly into your name.</p></article>'
             '</div></section>',
 
@@ -814,7 +814,7 @@ class Site(object):
             '<article class="info-card service-card" data-select-service="unlisted_outreach" style="cursor:pointer">'
             '<div class="eyebrow">Off-Market · All 50 States · $20 + 10%</div>'
             '<h3>Unlisted &amp; Off-Market Land Acquisition</h3>'
-            '<p>Found a parcel that isn\'t even for sale? Drop a pin or paste the APN—we pull county ownership records, run 9-agency X-Ray, make outreach with your offer, and coordinate closing.</p>'
+            '<p>Found a parcel that isn\'t even for sale? Drop a pin or paste the APN—we pull county ownership records, run federal X-Ray, make outreach with your offer, and coordinate closing.</p>'
             '<span class="card-link">Select Unlisted Land Agent →</span></article>'
 
             '<article class="info-card service-card" data-select-service="auction_proxy" style="cursor:pointer">'
@@ -884,6 +884,21 @@ class Site(object):
             '<input name="notes" type="text" placeholder="e.g. Confirm legal road access before bidding; LLC vest title; looking for 5-20 wooded acres"></label>'
             '<input name="website_hp" type="text" tabindex="-1" autocomplete="off" style="display:none">'
 
+            '<section class="dossier-card acquisition-brief" id="acquisition-brief" hidden>'
+            '<h3>Unlisted Landowner Letter of Intent</h3>'
+            '<p id="brief-target" class="brief-target"></p>'
+            '<p>Dear landowner,</p>'
+            '<p id="brief-offer"></p>'
+            '<p>This letter expresses interest in discussing a purchase. A sale requires a separate written agreement signed by both parties.</p>'
+            '<p id="brief-buyer"></p>'
+            '<h4>County research and outreach checklist</h4>'
+            '<ol><li>Assessor or parcel office. Confirm the APN, legal description, boundaries, and current ownership record.</li>'
+            '<li>Treasurer or tax collector. Confirm back taxes, assessments, and any tax-sale or redemption status.</li>'
+            '<li>Recorder or clerk. Review recorded deeds, easements, access rights, and liens with the closing professional.</li>'
+            '<li>Landowner outreach. Verify where to deliver a written offer and document the response.</li></ol>'
+            '<p class="small">It is not an offer. Any mapped boundary and acreage are approximate. Verify the tract with a survey and recorded legal description.</p>'
+            '<button type="button" id="print-acquisition-brief" class="button ghost sm no-print">Print / Save Acquisition Brief</button>'
+            '</section>'
             '<div class="fee-ledger" id="fee-breakdown-live" style="grid-column:1/-1"></div>'
             '<div style="grid-column:1/-1;padding-top:4px"><button type="submit" id="concierge-submit" class="button" data-vital-event="offer_clicked">Start Acquisition with Land Agent — $20 →</button></div>'
             '</form>'
@@ -891,12 +906,12 @@ class Site(object):
             '<p class="small" style="margin-top:14px"><strong>Transparency &amp; Licensing Notice:</strong> Landosaur is an independent land intelligence platform and acquisition concierge—not a government agency. The $20 initiation fee begins parcel-specific research, verification, paperwork prep, or off-market outreach. The transparent 10% concierge transfer fee applies only when an acquisition successfully closes. Wherever state law requires a licensed real estate broker, title agent, or closing attorney to represent a buyer or execute deed conveyance, Landosaur coordinates directly through a licensed local partner in that state.</p>'
             '</section>',
 
-            '<section class="dossier-card" style="margin-top:20px">'
+            '<section class="dossier-card" id="track-order" style="margin-top:20px">'
             '<h2>Track an Existing Land Agent Order</h2>'
             '<form id="track-order-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
-            '<input name="code" type="text" placeholder="Enter confirmation code (e.g. AGT-1A2B3C4D)" style="flex:1 1 240px;padding:9px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface-2);color:var(--ink)">'
+            '<input name="code" type="text" maxlength="12" aria-label="Land Agent confirmation code" placeholder="AGT-XXXXXXXX" style="flex:1 1 240px;padding:9px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface-2);color:var(--ink)">'
             '<button type="submit" class="button ghost sm">Check Order Status</button></form>'
-            '<div id="track-order-out" class="callout" hidden style="margin-top:10px"></div>'
+            '<div id="track-order-out" class="callout" aria-live="polite" hidden style="margin-top:10px"></div>'
             '</section>',
             '</div>',
         ]
@@ -904,7 +919,7 @@ class Site(object):
         return self.layout(
             "Land Agent & Buyer Services — Buy Listed or Unlisted Land ($20 to Start) | Landosaur",
             desc, "/services/", "".join(body), indexable=True, jsonld=[crumb_ld],
-            scripts=["vendor/leaflet.js", "services.js"], wide=True,
+            scripts=["vendor/leaflet.js", "geo.js", "services.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /land-atlas/ U.S. Land Data Atlas & Interactive Charts
@@ -2303,16 +2318,23 @@ class Site(object):
         kpi_right_lbl = "Zoning" if zoning_val else ("Agency Flag" if buildable_val else "Offering Status")
         kpi_right_sub = esc(r["county_label"] + ", " + r["state"])
 
+        county_delta = ""
+        if has_price and r.get("acres") and cv and cv.get("value"):
+            delta = round((r["price"] / r["acres"] / cv["value"] - 1) * 100)
+            label = ("%s%% %s county benchmark" % (abs(delta), "below" if delta < 0 else "above")
+                     if delta else "Near county benchmark")
+            county_delta = '<small class="badge benchmark-pill">%s</small>' % esc(label)
+
         summary_strip = (
             '<div class="dossier-metrics">'
             '<div class="kpi-card"><span>%s</span><strong>%s</strong><small>%s</small></div>'
             '<div class="kpi-card"><span>Lot / Tract Size</span><strong>%s</strong><small>Source figure (not a survey)</small></div>'
-            '<div class="kpi-card"><span>%s</span><strong>%s</strong><small>%s</small></div>'
+            '<div class="kpi-card"><span>%s</span><strong>%s</strong><small>%s</small>%s</div>'
             '<div class="kpi-card"><span>%s</span><strong style="font-size:19px">%s</strong><small>%s</small></div>'
             '</div>'
         ) % (
             kpi_price_lbl, kpi_price, kpi_price_sub,
-            kpi_acres, kpi_ppa_lbl, kpi_ppa, kpi_ppa_sub, kpi_right_lbl, kpi_right, kpi_right_sub,
+            kpi_acres, kpi_ppa_lbl, kpi_ppa, kpi_ppa_sub, county_delta, kpi_right_lbl, kpi_right, kpi_right_sub,
         )
 
         print_checklist = (
@@ -2386,10 +2408,19 @@ class Site(object):
             '</div>'
         ) % (agent_head, eligibility, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
 
+        mobile_agent = ""
+        if r["available"]:
+            estimate = "Est. turnkey " + money(turnkey_total) if has_price else "10% on close"
+            mobile_agent = (
+                '<aside class="mobile-land-agent no-print" aria-label="Land Agent acquisition">'
+                '<span>%s</span><a class="button sm" href="%s?%s">Land Agent · $20 →</a></aside>'
+            ) % (esc(estimate), self.u("/services/"), esc(svc_q))
+
         body = [
             crumbs,
             '<h1>%s</h1>' % esc(r["title"]),
             summary_strip,
+            mobile_agent,
             '<div class="dossier"><div class="dossier-card">%s<dl class="kv" style="margin-top:16px">%s</dl>'
             '<div class="btn-row">'
             '<a id="dossier-analyze-link" class="button ghost" href="%s?%s">Full Analyzer</a>'

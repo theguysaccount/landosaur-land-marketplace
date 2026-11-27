@@ -22,7 +22,11 @@ try {
       await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
       for (const route of routes) {
         await page.goto(base + route);
-        if (ready[route]) await page.waitFor(ready[route], 15000);
+        const url = new URL(route, base);
+        if (ready[url.pathname]) await page.waitFor(ready[url.pathname], 15000);
+        if (/^#[a-z][a-z0-9-]*$/i.test(url.hash)) {
+          await page.eval(`document.getElementById(${JSON.stringify(url.hash.slice(1))})?.scrollIntoView()`);
+        }
         await page.eval(`Promise.race([
           document.fonts.ready,
           new Promise((resolve) => setTimeout(resolve, 1200))
@@ -30,7 +34,8 @@ try {
         if (!(await page.eval("!!document.querySelector('#main h1') && !document.querySelector('[name=robots]')?.content.startsWith('noindex,nofollow')"))) {
           throw new Error("Unexpected screenshot page at " + route);
         }
-        const name = route.replace(/^\/|\/$/g, "").replaceAll("/", "-") || "home";
+        const name = [url.pathname, /^#[a-z][a-z0-9-]*$/i.test(url.hash) ? url.hash.slice(1) : ""]
+          .join("/").split("/").filter(Boolean).join("-") || "home";
         const { data } = await page.send("Page.captureScreenshot", { format: "png" });
         await fs.writeFile(path.join(out, `${name}-${device}-${theme}.png`), Buffer.from(data, "base64"));
       }

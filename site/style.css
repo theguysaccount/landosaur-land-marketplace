@@ -1212,3 +1212,67 @@ footer p { margin: 0 0 9px; }
 .chart-share-dialog label, .chart-share-dialog textarea, .chart-share-dialog input { display: block; width: 100%; margin-bottom: .5rem; box-sizing: border-box; }
 .chart-embed > header, .chart-embed > footer, .chart-embed > .skip { display: none; }
 .chart-embed #main { width: 100%; }
+
+/* Acquisition desk */
+.acquisition-brief { grid-column: 1 / -1; margin-top: 0; }
+.acquisition-brief h3 { margin-top: 0; }
+.brief-target { font-weight: 650; overflow-wrap: anywhere; }
+.order-progress {
+  padding: 0;
+  margin: 1rem 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .55rem;
+}
+.order-progress li {
+  display: grid;
+  align-content: start;
+  gap: .32rem;
+  padding: .62rem;
+  border: 1px solid var(--line-strong);
+  border-radius: .65rem;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.order-progress .order-step-current { border-color: var(--forest); }
+.order-progress small { color: var(--muted); }
+.order-progress .order-step-complete small { font-weight: 700; }
+.order-fees { margin-top: .75rem; }
+.kpi-card .benchmark-pill { margin-top: .35rem; white-space: normal; }
+.mobile-land-agent { display: none; }
+
+@media (max-width: 680px) {
+  .order-progress { grid-template-columns: 1fr; }
+  .order-progress li { grid-template-columns: minmax(0, 1fr) auto; }
+  .mobile-land-agent {
+    position: fixed;
+    z-index: 850;
+    bottom: 0;
+    inset-inline: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    background: var(--surface);
+    border-top: 1px solid var(--line-strong);
+    padding: .62rem max(1rem, env(safe-area-inset-right)) calc(.62rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+    color: var(--ink);
+    font-size: .83rem;
+    font-weight: 650;
+  }
+  .mobile-land-agent .button { flex-shrink: 0; }
+  body:has(.mobile-land-agent) { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom)); }
+}
+@media print {
+  .mobile-land-agent { display: none !important; }
+  body.print-acquisition > :not(main),
+  body.print-acquisition main > :not(#services-app),
+  body.print-acquisition #services-app > :not(#start-land-agent),
+  body.print-acquisition #start-land-agent > :not(#concierge-form),
+  body.print-acquisition #concierge-form > :not(#acquisition-brief) { display: none !important; }
+  body.print-acquisition #main,
+  body.print-acquisition #start-land-agent,
+  body.print-acquisition #concierge-form,
+  body.print-acquisition #acquisition-brief { display: block; padding: 0; margin: 0; border: 0; box-shadow: none; }
+}

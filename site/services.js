@@ -13,7 +13,7 @@
       : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   }
   function esc(s) {
-    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   var form = document.getElementById("concierge-form");
@@ -21,6 +21,8 @@
   var feePreview = document.getElementById("fee-breakdown-live");
   var mapWrap = document.getElementById("unlisted-pin-wrap");
   var previewEl = document.getElementById("concierge-xray-preview");
+  var brief = document.getElementById("acquisition-brief");
+  var boundary = window.LandosaurGeo ? window.LandosaurGeo.decode(sp.get("boundary")) : [];
   var outBox = document.getElementById("concierge-result");
   var submitBtn = document.getElementById("concierge-submit");
   var serviceCards = Array.prototype.slice.call(document.querySelectorAll("[data-select-service]"));
@@ -57,6 +59,7 @@
       if (!mapWrap.hidden && pinMap) setTimeout(function () { pinMap.invalidateSize(); }, 80);
     }
     updateFeePreview();
+    updateBrief();
     if (scrollToForm) {
       var anchor = document.getElementById("start-land-agent");
       if (anchor) anchor.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -69,6 +72,34 @@
     });
   });
 
+  function updateBrief() {
+    if (!form || !brief) return;
+    var county = form.county.value.trim(), state = form.state.value.trim().toUpperCase();
+    var apn = form.apn.value.trim(), loc = form.location.value.trim();
+    var coords = form.lat.value && form.lon.value ? form.lat.value + ", " + form.lon.value : "";
+    var acres = Number(form.acres.value);
+    brief.hidden = form.service_type.value !== "unlisted_outreach" || !(coords || loc || apn && county);
+    if (brief.hidden) return;
+    document.getElementById("brief-target").textContent = [
+      [county, state].filter(Boolean).join(", "), apn && "APN " + apn, loc, coords,
+      acres > 0 && acres.toLocaleString("en-US", { maximumFractionDigits: 4 }) + " approximate acres",
+      boundary.length && boundary.length + "-point drawn boundary",
+    ].filter(Boolean).join(" · ");
+    var budget = Number(form.max_budget.value);
+    document.getElementById("brief-offer").textContent = budget > 0 ?
+      "I would like to discuss purchasing the parcel identified above for up to " + money(budget) +
+      ", subject to confirming title, access and boundaries, completing due diligence, and agreeing to written purchase terms." :
+      "I would like to discuss purchasing the parcel identified above, subject to agreeing on a price and completing due diligence.";
+    var buyer = form.buyer_name.value.trim();
+    document.getElementById("brief-buyer").textContent = buyer ? "Sincerely, " + buyer : "Sincerely, ____________________";
+  }
+
+  document.getElementById("print-acquisition-brief")?.addEventListener("click", function () {
+    document.body.classList.add("print-acquisition");
+    window.addEventListener("afterprint", function () { document.body.classList.remove("print-acquisition"); }, { once: true });
+    window.print();
+  });
+
   // Drop-a-pin satellite map for Unlisted / Off-Market Land Acquisition
   var pinMapEl = document.getElementById("concierge-pin-map");
   var pinMap = null, pinMarker = null;
@@ -77,17 +108,25 @@
     var streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxNativeZoom: 19, maxZoom: 20, attribution: "&copy; OpenStreetMap" });
     pinMap = L.map(pinMapEl, { scrollWheelZoom: true, doubleClickZoom: true, touchZoom: true, maxZoom: 20, layers: [aerial] }).setView([38.5, -96.0], 4);
     L.control.layers({ "USGS Satellite": aerial, "Streets": streets }).addTo(pinMap);
-    pinMap.on("click", function (ev) { setPin(ev.latlng.lat, ev.latlng.lng, true); });
+    pinMap.on("click", function (ev) {
+      if (pinBoundary) pinMap.removeLayer(pinBoundary);
+      pinBoundary = null;
+      boundary = [];
+      setPin(ev.latlng.lat, ev.latlng.lng, true);
+    });
   }
 
+  var pinBoundary = null, pinRequest = 0;
   function setPin(lat, lon, runX) {
     lat = Math.round(Number(lat) * 100000) / 100000;
     lon = Math.round(Number(lon) * 100000) / 100000;
-    if (!isFinite(lat) || !isFinite(lon)) return;
+    if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+    var revision = ++pinRequest;
     if (form) {
       form.lat.value = lat;
       form.lon.value = lon;
     }
+    updateBrief();
     if (pinMap) {
       if (pinMarker) pinMap.removeLayer(pinMarker);
       pinMarker = L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 2.5, fillColor: "#c8f189", fillOpacity: 1 }).addTo(pinMap);
@@ -95,15 +134,17 @@
     }
     if (runX && previewEl) {
       previewEl.hidden = false;
-      previewEl.innerHTML = "<p class='small'>Running live 9-agency Federal Parcel X-Ray on pinned parcel…</p>";
+      previewEl.innerHTML = "<p class='small'>Running live federal Parcel X-Ray on pinned parcel…</p>";
       fetch(base + "/api/xray/?lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon))
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
+          if (revision !== pinRequest) return;
           if (!d || d.error) { previewEl.innerHTML = "<p class='small'>Pin placed at " + lat + ", " + lon + ".</p>"; return; }
           if (d.county) {
             if (form && !form.county.value && d.county.county_name) form.county.value = d.county.county_name;
             if (form && !form.state.value && d.county.state_code) form.state.value = d.county.state_code;
           }
+          updateBrief();
           var bits = [];
           if (d.county && d.county.county_name) bits.push("<strong>" + esc(d.county.county_name) + ", " + esc(d.county.state_code) + "</strong>");
           if (d.usgs && d.usgs.elevation_ft != null) bits.push("Elev " + d.usgs.elevation_ft.toLocaleString("en-US") + " ft");
@@ -112,7 +153,7 @@
           if (d.county && d.county.benchmark_usd_per_acre) bits.push("County avg " + money(d.county.benchmark_usd_per_acre) + "/ac");
           previewEl.innerHTML = "<p style='margin:0'><strong>Unlisted Parcel X-Ray:</strong> " + bits.join(" · ") + "</p>";
         })
-        .catch(function () { previewEl.hidden = true; });
+        .catch(function () { if (revision === pinRequest) previewEl.hidden = true; });
     }
   }
 
@@ -134,21 +175,10 @@
     });
   }
 
-  // Post-Stripe Checkout confirmation banner (?paid=1)
-  if (sp.get("paid") === "1" && banner) {
-    banner.hidden = false;
-    var sid = sp.get("session_id") || "";
-    var lastCode = "";
-    try { lastCode = sessionStorage.getItem("lando_last_agt") || ""; } catch (e) {}
-    banner.innerHTML =
-      "<div class='eyebrow'>Payment Received · Land Agent Activated</div>" +
-      "<h3 style='margin:4px 0 6px'>Your $20 Landosaur Land Agent Initiation Is Confirmed" + (lastCode ? (" · <code>" + esc(lastCode) + "</code>") : "") + "</h3>" +
-      "<p style='margin:0'>Our acquisition desk is now reviewing your dossier for county tax/lien/redemption verification, owner or agency outreach, and closing transfer coordination." +
-      (sid ? (" Stripe receipt ref: <code>" + esc(sid.slice(0, 28)) + "…</code>.") : "") +
-      " Use the order status tracker below with your <code>AGT-</code> code anytime.</p>";
-  }
+  var returningFromCheckout = sp.get("paid") === "1";
+  var lastCode = "";
+  try { lastCode = sessionStorage.getItem("lando_last_agt") || ""; } catch (e) {}
 
-  // Pre-fill from URL parameters (arriving from any of the 25,087 parcel dossiers OR from Land Atlas county!)
   var pId = sp.get("parcel") || "";
   var pTitle = sp.get("title") || "";
   var pPrice = sp.get("price") || "";
@@ -170,9 +200,18 @@
     if (pState) form.state.value = pState;
     if (pApn) form.apn.value = pApn;
     if (pLat && pLon) setPin(parseFloat(pLat), parseFloat(pLon), false);
+    if (boundary.length && pinMap) {
+      pinBoundary = L.polygon(boundary.map(function (point) { return [point[1], point[0]]; }), { color: "#176e41", weight: 3, interactive: false }).addTo(pinMap);
+      setTimeout(function () { if (pinBoundary) pinMap.fitBounds(pinBoundary.getBounds(), { padding: [20, 20], maxZoom: 17 }); }, 100);
+    }
+    if (!Array.from(form.service_type.options).some(function (option) { return option.value === pSvc; })) pSvc = "unlisted_outreach";
     setActiveService(pSvc, false);
+    if (returningFromCheckout && banner) {
+      banner.hidden = false;
+      banner.innerHTML = "<h3>Check your Land Agent payment</h3><p>Payment status comes from the order record. Use your confirmation code below to check for Stripe verification.</p><a href='#track-order'>Go to the order tracker ↓</a>";
+    }
 
-    if (pId && banner) {
+    if (pId && banner && !returningFromCheckout) {
       var pr = parseFloat(pPrice);
       var fee10 = (!isNaN(pr) && pr > 0) ? Math.round(pr * 0.1 * 100) / 100 : null;
       var tot = fee10 != null ? Math.round((pr + fee10) * 100) / 100 : null;
@@ -193,6 +232,7 @@
     form.service_type.addEventListener("change", function () { setActiveService(form.service_type.value, false); });
     form.official_price.addEventListener("input", updateFeePreview);
     form.max_budget.addEventListener("input", updateFeePreview);
+    form.addEventListener("input", updateBrief);
 
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -212,6 +252,7 @@
         lat: form.lat.value ? parseFloat(form.lat.value) : undefined,
         lon: form.lon.value ? parseFloat(form.lon.value) : undefined,
         acres: form.acres.value ? parseFloat(form.acres.value) : undefined,
+        boundary: boundary.length ? boundary : undefined,
         official_price: form.official_price.value ? parseFloat(form.official_price.value) : undefined,
         max_budget: form.max_budget.value ? parseFloat(form.max_budget.value) : undefined,
         financing: form.financing.value,
@@ -245,6 +286,7 @@
           outBox.innerHTML =
             "<h3>Land Agent Dossier Opened · <code>" + esc(d.confirmation_code) + "</code></h3>" +
             "<p>" + esc(d.message) + "</p>" + estHtml + stripeHtml;
+          if (trackForm) trackForm.code.value = d.confirmation_code;
         })
         .catch(function () {
           outBox.textContent = "Network error submitting acquisition request. Please try again.";
@@ -256,30 +298,82 @@
     });
   }
 
-  // Order status lookup
   var trackForm = document.getElementById("track-order-form");
   var trackOut = document.getElementById("track-order-out");
+  var stages = {
+    dossier_opened: "Dossier opened",
+    initiation_confirmed: "$20 initiation confirmed",
+    diligence: "Federal X-Ray and county title / lien audit",
+    outreach: "Agency bid or landowner outreach",
+    transfer: "Licensed title and deed transfer",
+  };
+  var orderRequest = 0;
+
+  function showOrder(order) {
+    var html = "<h3>" + esc(order.parcel_title || "Land Agent order") + "</h3><p><code>" +
+      esc(order.confirmation_code) + "</code></p>";
+    var steps = Array.isArray(order.progress) ? order.progress : [];
+    html += "<ol class='order-progress'>" + steps.map(function (step) {
+      var state = ["complete", "current", "pending"].includes(step.state) ? step.state : "pending";
+      var stamp = step.at && Number.isFinite(Date.parse(step.at)) ? new Date(step.at).toLocaleDateString("en-US") : "";
+      return "<li class='order-step-" + state + "'" + (state === "current" ? " aria-current='step'" : "") + "><strong>" +
+        esc(stages[step.id] || "") + "</strong><small>" +
+        (state === "complete" ? "Complete" : state === "current" ? "Current" : "Pending") + (stamp ? " · " + esc(stamp) : "") + "</small></li>";
+    }).join("") + "</ol>";
+
+    var summary = order.xray_summary;
+    if (summary) {
+      var findings = [];
+      if (summary.elevation_ft != null) findings.push("Elevation " + summary.elevation_ft.toLocaleString("en-US") + " ft");
+      if (summary.fema_zone) findings.push("FEMA zone " + summary.fema_zone);
+      if (summary.wetlands_100m != null) findings.push(summary.wetlands_100m ? "Mapped wetlands within 100 m" : "No mapped wetlands within 100 m");
+      if (summary.nearest_road_ft != null) findings.push("Nearest mapped road " + summary.nearest_road_ft.toLocaleString("en-US") + " ft");
+      if (summary.county_benchmark_per_acre != null) findings.push("County benchmark " + money(summary.county_benchmark_per_acre) + "/acre");
+      if (findings.length) html += "<p><strong>Recorded Parcel X-Ray</strong><br>" + esc(findings.join(" · ")) + "</p>";
+    }
+    if (order.estimated_turnkey_total != null) {
+      html += "<div class='fee-ledger order-fees'><div class='fee-line'><span>" + (order.official_price ? "Parcel price in order" : "Target offer / budget") +
+        "</span><strong>" + money(order.estimated_base_price) + "</strong></div>" +
+        "<div class='fee-line'><span>Land Agent fee on close (10%)</span><strong>" + money(order.concierge_fee_10pct) + "</strong></div>" +
+        "<div class='fee-line total'><span>Estimated parcel price plus closing fee</span><strong>" + money(order.estimated_turnkey_total) + "</strong></div></div>";
+    }
+    if (order.stripe_checkout_url && !returningFromCheckout) html +=
+      "<p><a class='button sm' href='" + esc(order.stripe_checkout_url) + "'>Complete $20 Stripe Checkout →</a></p>";
+    trackOut.innerHTML = html;
+  }
+
+  function checkOrder(code, remaining, revision) {
+    trackOut.hidden = false;
+    fetch(base + "/api/concierge/?code=" + encodeURIComponent(code))
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        if (revision !== orderRequest) return;
+        if (!data.order) { trackOut.textContent = data.error || "Confirmation code not found."; return; }
+        showOrder(data.order);
+        if (remaining && data.order.stripe_checkout_url && !data.order.paid_at) {
+          setTimeout(function () { if (revision === orderRequest) checkOrder(code, remaining - 1, revision); }, 6000);
+        }
+      })
+      .catch(function () { if (revision === orderRequest) trackOut.textContent = "Could not look up the order right now."; });
+  }
+
   if (trackForm && trackOut) {
-    trackForm.addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      var code = (trackForm.code.value || "").trim().toUpperCase();
-      if (!code) return;
-      trackOut.hidden = false;
+    trackForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var code = trackForm.code.value.trim().toUpperCase();
+      if (!/^AGT-[A-F0-9]{8}$/.test(code)) {
+        ++orderRequest;
+        trackOut.hidden = false;
+        trackOut.textContent = "Enter the AGT code from your acquisition dossier.";
+        return;
+      }
       trackOut.textContent = "Checking order " + code + "…";
-      fetch(base + "/api/concierge/?code=" + encodeURIComponent(code))
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-        .then(function (res) {
-          if (!res.ok || !res.d || !res.d.order) {
-            trackOut.textContent = (res.d && res.d.error) || "Confirmation code not found.";
-            return;
-          }
-          var o = res.d.order;
-          trackOut.innerHTML =
-            "<strong>" + esc(o.confirmation_code) + "</strong> · Status: <span class='badge ok'>" + esc(o.status.replace(/_/g, " ")) + "</span><br>" +
-            esc(o.parcel_title) + (o.estimated_turnkey_total ? (" · Est. Turnkey: <strong>" + money(o.estimated_turnkey_total) + "</strong>") : "") +
-            (o.stripe_checkout_url ? (" · <a href='" + esc(o.stripe_checkout_url) + "' target='_blank' rel='noopener'>Complete $20 Checkout ↗</a>") : "");
-        })
-        .catch(function () { trackOut.textContent = "Could not look up order right now."; });
+      checkOrder(code, 0, ++orderRequest);
     });
+    var initialCode = (sp.get("code") || (returningFromCheckout ? lastCode : "") || "").trim().toUpperCase();
+    if (/^AGT-[A-F0-9]{8}$/.test(initialCode)) {
+      trackForm.code.value = initialCode;
+      checkOrder(initialCode, returningFromCheckout ? 4 : 0, ++orderRequest);
+    }
   }
 })();

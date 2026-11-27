@@ -57,6 +57,20 @@
       "headers": [
         { "key": "Cache-Control", "value": "public, s-maxage=1800, stale-while-revalidate=86400" }
       ]
+    },
+    {
+      "source": "/data/map\\.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, s-maxage=60, stale-while-revalidate=300" },
+        { "key": "CDN-Cache-Control", "value": "public, s-maxage=60, stale-while-revalidate=300" }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" },
+        { "key": "CDN-Cache-Control", "value": "no-store" }
+      ]
     }
   ]
 }

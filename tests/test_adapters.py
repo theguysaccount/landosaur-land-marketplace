@@ -2310,6 +2310,31 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertFalse(adapters.mohave_az_otc(fetch, cutoff_day + datetime.timedelta(days=1), self.fail)[0])
         fetch.text.assert_not_called()
 
+    def test_missoula_requires_explicit_sale_demolition_and_city_parcel(self):
+        fetch = unittest.mock.Mock()
+        available = "The 1427 W. Broadway property is currently for sale."
+        demolished = "The project reached substantial completion on May 12, 2023."
+        fetch.text.return_value = f"<p>{available}</p><p>{demolished}</p>"
+        pin = adapters.MISSOULA_MT_PARCEL
+        feature = {"attributes": {"PARCELID": pin, "TaxYear": 2026, "TotalAcres": .573},
+                   "geometry": {"rings": [[[-114.018, 46.8775], [-114.018, 46.8778],
+                                           [-114.0173, 46.8778], [-114.018, 46.8775]]]}}
+        with patch.object(adapters, "_arcgis_query", return_value=[feature]) as query:
+            rows, info = adapters.missoula_mt_west_broadway(fetch, NOW, self.fail)
+            self.assertEqual(info, {"complete": True, "upstream_total": 1})
+            parcel, = rows
+            self.assertEqual((parcel["apn"], parcel["acres"], parcel["price"]), (pin, .573, None))
+            self.assertTrue(parcel["geometry"])
+            self.assertIn("CITY OF MISSOULA", query.call_args.args[2])
+            self.assertNotIn("OwnerName", query.call_args.args[3])
+            fetch.text.return_value = available
+            warnings = []
+            self.assertFalse(adapters.missoula_mt_west_broadway(fetch, NOW, warnings.append)[0])
+            self.assertEqual(len(warnings), 1)
+            fetch.text.return_value = demolished
+            self.assertFalse(adapters.missoula_mt_west_broadway(fetch, NOW, self.fail)[0])
+            query.assert_called_once()
+
     def test_cowlitz_checks_roster_and_exact_undeveloped_assessments(self):
         roster = b"Reviewed Cowlitz County auction roster"
         fetch = unittest.mock.Mock()

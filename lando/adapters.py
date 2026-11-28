@@ -212,6 +212,8 @@ def outline_url(listing):
         return one_parcel_url(CENTERVILLE_SD_GIS, "PARCEL='%s'" % listing["apn"].replace("'", "''"), CENTERVILLE_SD_FIELDS)
     if listing["source"] == "conrad-mt-industrial-park":
         return one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "missoula-mt-west-broadway" and listing["apn"] == MISSOULA_MT_PARCEL:
+        return one_parcel_url(MT_COMPOSITE_PARCELS, f"PARCELID='{MISSOULA_MT_PARCEL}'", MISSOULA_MT_FIELDS)
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -7516,6 +7518,49 @@ def conrad_mt_industrial_park(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(CONRAD_MT_AVAILABLE_LOTS)}
 
 
+MISSOULA_MT_SALE = "https://www.ci.missoula.mt.us/2918/Shaping-the-Future-of-West-Broadway"
+MISSOULA_MT_GUIDE = "https://www.ci.missoula.mt.us/DocumentCenter/View/80301/2026-City-Lands-Redevelopment-Guide"
+MISSOULA_MT_PARCEL = "04220021219070000"
+MISSOULA_MT_FIELDS = "PARCELID,TaxYear,TotalAcres"
+
+
+def missoula_mt_west_broadway(fetch, now, warn):
+    page = clean(fetch.text(MISSOULA_MT_SALE))
+    if "The 1427 W. Broadway property is currently for sale." not in page:
+        return [], {"complete": True, "upstream_total": 0}
+    if "reached substantial completion on May 12, 2023" not in page:
+        warn("Missoula’s demolition confirmation changed. Review the condition of the Broadway site.")
+        return [], {"complete": True, "upstream_total": 1}
+
+    where = (f"PARCELID='{MISSOULA_MT_PARCEL}' "
+             "AND UPPER(OwnerName) IN ('CITY OF MISSOULA','MISSOULA CITY OF')")
+    parcels = _arcgis_query(fetch, MT_COMPOSITE_PARCELS, where, MISSOULA_MT_FIELDS, post=True)
+    if len(parcels) != 1:
+        return [], {"complete": True, "upstream_total": 1}
+    parcel = parcels[0]
+    attrs = parcel["attributes"]
+    rings = (parcel.get("geometry") or {}).get("rings")
+    acres = number(attrs.get("TotalAcres"))
+    if attrs.get("PARCELID") != MISSOULA_MT_PARCEL or attrs.get("TaxYear") != now.year or not acres or not rings:
+        return [], {"complete": True, "upstream_total": 1}
+
+    # The 2026 city aerial confirms the cleared tract. The state valuation still includes the former motel.
+    row = {
+        "id": "mt-missoula-1427-w-broadway", "source": "missoula-mt-west-broadway",
+        "title": "1427 West Broadway (Missoula redevelopment land)",
+        "state": "MT", "county": "Missoula", "locality": "Missoula", "address": "1427 West Broadway Street",
+        "apn": MISSOULA_MT_PARCEL, "acres": acres, "price": None, "price_kind": "none",
+        "offering": "sale", "status": "listed", "deadline": None, "url": MISSOULA_MT_SALE,
+        "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The City of Missoula is offering the former Sleepy Inn site for redevelopment.", "="),
+                  fact("condition", "The city completed motel deconstruction in 2023.", MISSOULA_MT_GUIDE),
+                  fact("sale_terms", "Contact the city for the current asking price and requirements under the Envision West Broadway plan.", "=")],
+        "tags": ["city-owned land", "redevelopment"],
+    }
+    apply_geometry(row, rings, outline_url(row), "Montana parcel GIS")
+    return ([row] if row["geometry"] else []), {"complete": True, "upstream_total": 1}
+
+
 NORTHUMBERLAND_PA_REPO = "https://www.northumberlandcountypa.gov/htdocs/index.php/repository-sale/"
 
 
@@ -12181,8 +12226,14 @@ SOURCES = [
      "agency": "Cowlitz County Treasurer, Washington", "url": COWLITZ_WA_SALE, "state": "WA",
      "run": cowlitz_wa_foreclosure, "requires_sale_match": True, "timezone": "America/Los_Angeles",
      "about": "Scheduled county tax-deed auctions with acreage and published minimum bids, matched to undeveloped assessments."},
+    {"id": "missoula-mt-west-broadway", "name": "Missoula West Broadway redevelopment land",
+     "agency": "City of Missoula, Montana", "url": MISSOULA_MT_SALE, "state": "MT",
+     "run": missoula_mt_west_broadway, "requires_sale_match": True,
+     "about": "City-owned redevelopment tract at the cleared former Sleepy Inn site, matched to the Montana state parcel map."},
 ]
 NOT_CARRIED = [
+    ("Montana State Library 2025 provisional aerial imagery", "https://msl.mt.gov/geoinfo/Data/web_services",
+     "The imagery service path disallows automated access. Independently published city imagery verified the Missoula site."),
     ("Cowlitz County assessor parcel boundaries", "https://www.co.cowlitz.wa.us/2890/Public-GIS-Datasets",
      "The assessor’s parcel map terms require a data sharing agreement to disseminate boundaries. The independently published sale notice is carried."),
     ("Sandy, Oregon industrial property catalogue", "https://www.ci.sandy.or.us/property/clackamas-county-property",

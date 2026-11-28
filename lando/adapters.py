@@ -808,6 +808,97 @@ def alaska_dnr(fetch, now, warn):
     return parse_dnr(page, home, now, warn), {"complete": True}
 
 
+UA_LAND = "https://www.alaska.edu/ualand/land/listings/index.php"
+UA_SALE_FIELDS = {"parcel_number", "name", "location", "sale_type", "acres", "price",
+                  "parcel_page", "land_sale_lease", "land_status"}
+UA_VACANCY_IMAGES = {
+    "CB.CF.0034": "CB.CF.0034-red-outline.png",
+    "CB.SS.0001": "CB.SS.0001%20Road%20View%201.png",
+    "CB.SS.0002": "CB.SS.0002%20Road%20View%201.png",
+    "MS.GB.0005": "20240523_map_MS.GB.0004-5.png",
+    "PW.EV.0025": "DJI_0636-25.png",
+    "US.WC.0002": "Parcel%20A10%20Aerial4.jpg",
+}
+
+
+def parse_ua_sale_feed(report):
+    reader = csv.DictReader(io.StringIO(report))
+    reader.fieldnames = [field.strip() for field in reader.fieldnames or ()]
+    if not UA_SALE_FIELDS.issubset(reader.fieldnames):
+        raise StructureError("The University of Alaska’s public sale catalog columns changed")
+    rows = {}
+    for item in reader:
+        if (item["land_status"] != "active" or item["land_sale_lease"] != "otc_sale"
+                or item["sale_type"] != "Over-The-Counter Land Sale Program"):
+            continue
+        pin = clean(item["parcel_number"])
+        path = item["parcel_page"]
+        if (not re.fullmatch(r"[A-Z]{2}\.[A-Z]{2}\.\d{4}", pin)
+                or not re.fullmatch(r"/ualand/land/sale/[a-z0-9-]+/" + re.escape(pin) + r"\.php", path or "", re.I)):
+            raise StructureError("The University of Alaska catalog has an unrecognized offer link")
+        if pin in rows:
+            raise StructureError("The University of Alaska catalog repeats an offer")
+        rows[pin] = item
+    return rows
+
+
+def parse_ua_sale_detail(item, page):
+    pin = clean(item["parcel_number"])
+    report = clean(page)
+    terms_at = report.find("Over-The-Counter Land Sale Purchase Terms")
+    summary = report[:terms_at] if terms_at >= 0 else ""
+    if (pin not in summary or "Start Offer Process" not in summary or "at or above the Minimum Price" not in report
+            or re.search(r"\b(?:listing sold|sale pending|under contract|no longer available|withdrawn from sale)\b", summary, re.I)):
+        return None
+    imagery = UA_VACANCY_IMAGES.get(pin)
+    if not re.search(r"\b(?:vacant|undeveloped) (?:lot|land|parcel)\b", summary, re.I) and not (imagery and imagery in page):
+        return None
+    price = re.search(r"\bMinimum Offer:\s*\$([\d,]+(?:\.\d{2})?)\b", summary)
+    acres = re.search(r"\bAcreage:\s*([\d,.]+)\b", summary)
+    locality = re.search(r"\bLocation:\s*([A-Za-z][A-Za-z .'-]+),\s*(?:Alaska|AK)\b", summary)
+    if not price or not acres:
+        raise StructureError("The University of Alaska’s parcel page lacks the published minimum or acreage")
+    amount, area = number(price[1]), number(acres[1])
+    if not amount or not area or amount != number(item["price"]) or area != number(item["acres"]):
+        return None
+    return {
+        "id": "ak-ua-otc-" + slug(pin), "source": "ua-ak-otc-land",
+        "title": f"{clean(item['name'])} (University of Alaska parcel {pin})",
+        "state": "AK", "county": "", "locality": locality[1] if locality else "", "apn": "", "address": "",
+        "acres": area, "price": amount, "price_kind": "min_bid", "offering": "sale", "status": "listed",
+        "deadline": None, "url": urllib.parse.urljoin(UA_LAND, item["parcel_page"]),
+        "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("university_parcel", pin, "="),
+                  fact("availability", "The University of Alaska accepts over-the-counter purchase offers at or above the published minimum.", "=")],
+        "tags": ["university trust land", "over-the-counter land sale"],
+    }
+
+
+def alaska_university_otc(fetch, now, warn):
+    page = fetch.text(UA_LAND)
+    script = re.search(r'<script\b[^>]*src="(ualand\.js(?:\?version=[\d.]+)?)"', page)
+    if not script or "Land Listings" not in page:
+        raise StructureError("The University of Alaska’s public catalog no longer links its sale inventory")
+    source = fetch.text(urllib.parse.urljoin(UA_LAND, script[1]))
+    sheet = re.search(r"var gsheet\s*=\s*['\"](https://docs\.google\.com/spreadsheets/d/[\w-]+)/edit#gid=(\d+)['\"]", source)
+    if not sheet:
+        raise StructureError("The University of Alaska’s published spreadsheet link changed")
+    feed_url = sheet[1] + "/gviz/tq?" + urllib.parse.urlencode({"gid": sheet[2], "tqx": "out:csv"})
+    roster = parse_ua_sale_feed(fetch.text(feed_url))
+    rows = []
+    for item in roster.values():
+        url = urllib.parse.urljoin(UA_LAND, item["parcel_page"])
+        try:
+            page = fetch.text(url)
+        except FetchError as exc:
+            if exc.status in (404, 410):
+                continue
+            raise
+        if row := parse_ua_sale_detail(item, page):
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
 # ------------------------------------------------------------------------------------------- Detroit Land Bank (MI)
 
 DLBA_GIS = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/DLBA_Owned_Properties/FeatureServer/0/query"
@@ -7602,6 +7693,99 @@ def florence_or_business_park(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": count}
 
 
+LINCOLN_OR_LAND = "https://www.co.lincoln.or.us/358/Tax-Foreclosed-Property-for-Sale"
+LINCOLN_OR_TERMS = "https://www.co.lincoln.or.us/356/Purchase-Information"
+LINCOLN_OR_ASSESSOR = "https://propertyweb.co.lincoln.or.us/Property-Detail/PropertyQuickRefID/"
+LINCOLN_OR_PARCELS = "https://gis.odot.state.or.us/arcgis1006/rest/services/ames/ames/MapServer/38/query"
+LINCOLN_OR_ROSTER = "/DocumentCenter/View/8877/Available-Property-List---10222026"
+LINCOLN_OR_ROSTER_SHA = "fcd028b7a0cd3ec390a1a5c3be3c56f135c0c78c9cc46bd5ba5ce5920b409f77"
+LINCOLN_OR_ROW = re.compile(
+    r"^[ \t]*(?P<item>\*?\d+[ \t]+)?(?P<account>R\d+)[ \t]*(?P<map>\d{2}-\d{2}-\d{2}-[A-Z0-9]{2})"
+    r"[ \t]+(?P<lot>\d{1,5})[ \t]+(?P<details>[^\r\n]*?)[ \t]+(?P<acres>\d*\.?\d+)"
+    r"[ \t]+acres?[ \t]+\d{1,2}/\d{1,2}/\d{4}[^\r\n]*$", re.M
+)
+
+
+def parse_lincoln_or_roster(report):
+    if ("The property listed below is available for private purchase until sold" not in report
+            or "LAST AUCTION" not in report):
+        raise StructureError("Lincoln County’s current private-sale roster layout changed")
+    entries = list(LINCOLN_OR_ROW.finditer(report))
+    accounts = [entry["account"] for entry in entries]
+    if not entries or len(set(accounts)) != len(accounts):
+        raise StructureError("Lincoln County’s roster has missing or duplicate assessment accounts")
+    roster = {}
+    for entry in entries:
+        # The unnumbered group is offered together. Starred rows flag occupied property.
+        if not entry["item"] or entry["item"].startswith("*"):
+            continue
+        locality = re.match(r"(Elk City|Newport|Siletz|South Beach|Toledo|Waldport)\b", entry["details"])
+        map_id = f"{entry['map']}-{entry['lot'].zfill(5)}-00"
+        roster[entry["account"]] = (map_id, number(entry["acres"]), locality[1] if locality else "")
+    return roster, len(entries)
+
+
+def lincoln_or_is_vacant(page, map_id, year):
+    report = clean(page)
+    if (f"Map Number {map_id} Property Use 950: EXEMPT COUNTY VACANT LAND" not in report
+            or "Property Status A Active" not in report
+            or not re.search(r"\bOwner Name LINCOLN COUNTY Mailing Address\b", report, re.I)):
+        return False
+    values = re.search(r'<table\b[^>]*id="[^"]*tblValueHistoryDataRP"[^>]*>(.*?)</table>', page, re.I | re.S)
+    if not values:
+        return False
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", values[1], re.I | re.S):
+        cells = [clean(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.I | re.S)]
+        if len(cells) < 4 or not re.fullmatch(r"\d{4}(?: \(In Process\))?", cells[0]):
+            continue
+        return (int(cells[0][:4]) >= year and cells[1] == "$0"
+                and bool(number(cells[2])) and cells[2] == cells[3])
+    return False
+
+
+def lincoln_or_tax_foreclosed(fetch, now, warn):
+    page = fetch.text(LINCOLN_OR_LAND)
+    if "Tax Foreclosed Property for Sale" not in clean(page):
+        raise StructureError("Lincoln County’s sale directory changed")
+    if f'href="{LINCOLN_OR_ROSTER}"' not in page:
+        warn("Lincoln County’s private-sale link changed. Review the current roster before relisting.")
+        return [], {"complete": True, "upstream_total": 0}
+    if "All available properties are for sale as cash only" not in clean(fetch.text(LINCOLN_OR_TERMS)):
+        raise StructureError("Lincoln County’s published purchase terms changed")
+    report_url = urllib.parse.urljoin(LINCOLN_OR_LAND, LINCOLN_OR_ROSTER)
+    roster, upstream_total = parse_lincoln_or_roster(
+        pdf_text(fetch, report_url, extraction_mode="plain", checked_sha256=LINCOLN_OR_ROSTER_SHA))
+    outlines = {}
+    if roster:
+        where = "MapTaxlot IN (%s)" % quote_list(map_id for map_id, _, _ in roster.values())
+        features = _arcgis_query(fetch, LINCOLN_OR_PARCELS, where, "MapTaxlot,EFFECTV_DT")
+        seen = Counter(feature["attributes"].get("MapTaxlot") for feature in features)
+        for feature in features:
+            item = feature["attributes"]
+            map_id = item.get("MapTaxlot")
+            if seen[map_id] == 1 and item.get("EFFECTV_DT") == str(now.year):
+                outlines[map_id] = (feature.get("geometry") or {}).get("rings", [])
+    rows = []
+    for account, (map_id, acres, locality) in roster.items():
+        assessment = LINCOLN_OR_ASSESSOR + account
+        if not lincoln_or_is_vacant(fetch.text(assessment), map_id, now.year):
+            continue
+        row = {
+            "id": "or-lincoln-tax-foreclosed-" + account.lower(), "source": "lincoln-or-tax-foreclosed",
+            "title": f"Parcel {account} (Lincoln County tax-foreclosed land)", "state": "OR", "county": "Lincoln",
+            "locality": locality, "apn": account, "address": "", "acres": acres,
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": LINCOLN_OR_LAND, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county accepts offers for this vacant tax-foreclosed property.", LINCOLN_OR_TERMS),
+                      fact("sale_terms", "Cash only. The county reviews offers using current property values and other conditions.", LINCOLN_OR_TERMS),
+                      fact("map_tax_lot", map_id, "=")],
+            "tags": ["tax-foreclosed land", "county land sale"],
+        }
+        apply_geometry(row, outlines.get(map_id) or [], LINCOLN_OR_PARCELS, "Oregon Department of Transportation")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": upstream_total}
+
+
 GRAYS_HARBOR_WA_SALE = "https://www.graysharbor.gov/departments/foresty-tax-title/purchase-surplus-tax-title-property/"
 GRAYS_HARBOR_WA_ROSTER = "https://cms5.revize.com/revize/graysharborcounty/Forestry/2026%20Available%20Properties%20to%20Purchase_OTC.pdf"
 GRAYS_HARBOR_WA_PARCELS = "https://services3.arcgis.com/CxYgmwdx507LY5lO/arcgis/rest/services/Parcels___Grays_Harbor_County/FeatureServer/1/query"
@@ -9505,6 +9689,14 @@ def fulton_ga_tax_deed(fetch, now, warn):
 
 
 SOURCES = [
+    {"id": "ua-ak-otc-land", "name": "University of Alaska over-the-counter land",
+     "agency": "University of Alaska Land Management", "url": UA_LAND, "state": "AK",
+     "run": alaska_university_otc, "requires_sale_match": True,
+     "about": "The university’s active land offers, with minimum offers and acreage confirmed on each parcel’s sale page."},
+    {"id": "lincoln-or-tax-foreclosed", "name": "Lincoln County vacant tax-foreclosed property",
+     "agency": "Lincoln County Property Management, Oregon", "url": LINCOLN_OR_LAND, "state": "OR",
+     "run": lincoln_or_tax_foreclosed, "requires_sale_match": True,
+     "about": "County parcels accepting cash purchase offers, independently verified as vacant in the county assessment portal."},
     {"id": "florence-or-business-park", "name": "Florence Pacific View Business Park vacant lots",
      "agency": "City of Florence, Oregon", "url": FLORENCE_OR_LAND, "state": "OR",
      "run": florence_or_business_park, "requires_sale_match": True,
@@ -10036,6 +10228,8 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Bristol Bay Native Association land offers", "https://bbna.com/our-communities/land-sales-permits-and-leases/",
+     "The association’s host returned HTTP 403 for robots.txt."),
     ("John Day municipal industrial land catalog", "https://www.cityofjohnday.com/building/page/industrial-park",
      "The city host closed the robots.txt connection. Later council records also contradict some older lot labels."),
     ("Florence regional property marketing vendor",
@@ -10106,7 +10300,7 @@ NOT_CARRIED = [
     ("Hawaii Awards & Notices Data System", "https://hands.ehawaii.gov/hands/opportunities",
      "The state procurement portal returned HTML in place of robots.txt."),
     ("Town of Suffield tax-sale news article and assessor map", "https://www.suffieldct.gov/our-town/news/town-news-default/~board/town-news/post/town-of-suffield-tax-sale-1790963357528",
-     "The town disallows the article path, and its linked assessor map did not serve robots.txt over verified TLS."),
+     "The town disallows the article path, and the linked assessor map service disallows parcel queries in robots.txt."),
     ("Suffield linked assessor property cards", "https://www.propertyrecordcards.com/SearchMaster.aspx?towncode=139",
      "The assessor vendor disallows its property search path in robots.txt."),
     ("Arkansas GeoStor statewide assessor portal", "https://geostor.arkansas.gov/",

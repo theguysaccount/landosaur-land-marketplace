@@ -1,6 +1,8 @@
 """Polite HTTP for agency crawls with per-origin robots checks, pacing, and bounded responses."""
 import json
 import re
+import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -92,7 +94,17 @@ class Fetcher:
         self._robots_locks = {}
         self._next_request = {}
         self._lock = threading.Lock()
-        self._opener = urllib.request.build_opener(NoRedirect())
+        handlers = [NoRedirect()]
+        if sys.platform == "darwin":
+            try:
+                import truststore
+            except ImportError:
+                pass
+            else:
+                # Use the macOS trust service to validate agencies with incomplete certificate chains.
+                context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                handlers.append(urllib.request.HTTPSHandler(context=context))
+        self._opener = urllib.request.build_opener(*handlers)
 
     @staticmethod
     def _origin(parts):

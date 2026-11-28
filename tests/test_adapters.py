@@ -45,6 +45,60 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_alaska_university_matches_active_land_offers_to_current_details(self):
+        header = "parcel_number ,name,location,sale_type,acres,price,parcel_page,land_sale_lease,land_status\n"
+        base = "CB.SS.0001,Silver Springs Terrace,Silver Springs,Over-The-Counter Land Sale Program,1.99,45000,"
+        path = "/ualand/land/sale/silver-springs-terrace/CB.SS.0001.php"
+        active = base + path + ",otc_sale,active\n"
+        sold = active.replace("CB.SS.0001", "CB.SS.0002").replace(",active", ",sold")
+        lease = active.replace("CB.SS.0001", "CB.SS.0003").replace("otc_sale", "landlease")
+        rows = adapters.parse_ua_sale_feed(header + active + sold + lease)
+        item, = rows.values()
+        page = ("<h1>CB.SS.0001</h1> Minimum Offer: $45,000 Start Offer Process "
+                "An undeveloped lot. Location: Silver Springs, Alaska Acreage: 1.990 "
+                "Over-The-Counter Land Sale Purchase Terms and Conditions: at or above the Minimum Price")
+        row = adapters.parse_ua_sale_detail(item, page)
+        self.assertEqual((row["price"], row["acres"], row["price_kind"]), (45000, 1.99, "min_bid"))
+        self.assertEqual(row["locality"], "Silver Springs")
+        self.assertIsNone(adapters.parse_ua_sale_detail(item, page.replace("45,000", "42,500")))
+        self.assertIsNone(adapters.parse_ua_sale_detail(item, page.replace("An undeveloped lot.", "Sale pending.")))
+        self.assertIsNone(adapters.parse_ua_sale_detail(item, page.replace("An undeveloped lot.", "Existing house.")))
+
+    def test_lincoln_county_sale_ignores_past_bid_and_requires_current_vacancy(self):
+        roster = (
+            "The property listed below is available for private purchase until sold.\n"
+            "MINIMUM BID @ LAST AUCTION\n"
+            "R254816 08-10-19-DA 100 Lincoln City R-1 0.41 acres 10/15/2026\n"
+            "R344448 08-10-19-DA 142 Lincoln City A-C 2.07 acres 10/15/2026\n"
+            "8 R486160 11-10-14-BC 201 Elk City examples A-C 0.19 acres 10/15/2026 $4,000\n"
+            "17 R521169 13-12-36-AC 3401 Waldport SW Fehrenbacher Drive RR-2 0.31 acres 10/15/2026 $117,740\n"
+            "*20 R505139 14-12-27-AD 2502 Yachats 80 8th Street R-1 0.11 acres 10/15/2026 $300,000\n"
+        )
+        current = (
+            'Property Status A Active Map Number 11-10-14-BC-00201-00 Property Use 950: EXEMPT COUNTY VACANT LAND'
+            ' Owner Name LINCOLN COUNTY Mailing Address'
+            '<table id="row_tblValueHistoryDataRP"><tr><td>2027 (In Process)</td>'
+            '<td>$0</td><td>$17,120</td><td>$17,120</td></tr></table>'
+        )
+        improved = current.replace("11-10-14-BC-00201-00", "13-12-36-AC-03401-00").replace("$0", "$40,540")
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = {
+            adapters.LINCOLN_OR_LAND: f'Tax Foreclosed Property for Sale <a href="{adapters.LINCOLN_OR_ROSTER}">List</a>',
+            adapters.LINCOLN_OR_TERMS: "All available properties are for sale as cash only",
+            adapters.LINCOLN_OR_ASSESSOR + "R486160": current,
+            adapters.LINCOLN_OR_ASSESSOR + "R521169": improved,
+        }.__getitem__
+        outline = {"attributes": {"MapTaxlot": "11-10-14-BC-00201-00", "EFFECTV_DT": "2026"},
+                   "geometry": {"rings": [[[-123.9, 44.6], [-123.91, 44.62], [-123.92, 44.6], [-123.9, 44.6]]]}}
+        with patch.object(adapters, "pdf_text", return_value=roster), patch.object(adapters, "_arcgis_query", return_value=[outline]):
+            rows, info = adapters.lincoln_or_tax_foreclosed(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual(info["upstream_total"], 5)
+        self.assertEqual((row["apn"], row["acres"], row["price"], row["locality"]), ("R486160", 0.19, None, "Elk City"))
+        self.assertTrue(row["geometry"])
+        self.assertNotIn("Owner", json.dumps(row))
+        self.assertFalse(adapters.lincoln_or_is_vacant(current.replace("2027", "2025"), "11-10-14-BC-00201-00", 2026))
+
     def test_florence_requires_current_city_lot_and_exact_vacant_tax_account(self):
         fetch = unittest.mock.Mock()
         fixture_map = b"%PDF- visually reviewed availability fixture"

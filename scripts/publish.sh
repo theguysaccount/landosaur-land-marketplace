@@ -103,9 +103,16 @@ fi
 
 refresh_data() {
   local -a python_run=(python3)
-  if ! python3 -c 'import pypdf, openpyxl' 2>/dev/null && command -v uv >/dev/null; then
+  local packages='import pypdf, openpyxl, shapefile'
+  local interpreter
+  interpreter="$(command -v python3)"
+  if [ "$(uname -s)" = Darwin ]; then
+    packages="$packages; import truststore"
+    interpreter='>=3.10'
+  fi
+  if ! python3 -c "$packages" 2>/dev/null && command -v uv >/dev/null; then
     export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/work/uv-cache}"
-    python_run=(uv run --python "${UV_PYTHON:-$(command -v python3)}" --with-requirements "$ROOT/requirements-refresh.txt" python)
+    python_run=(uv run --python "${UV_PYTHON:-$interpreter}" --with-requirements "$ROOT/requirements-refresh.txt" python)
   fi
   if [ "$REFRESH" -eq 1 ]; then
     if [ -n "$REFRESH_ONLY" ]; then

@@ -341,7 +341,10 @@ async function queryWetlands(lat, lon) {
   });
   const url = `https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0/query?${params}`;
   const d = await fetchJson(url, {}, 7500);
-  const feats = d?.features || [];
+  if (d?.error || !Array.isArray(d?.features) || d.exceededTransferLimit) {
+    throw new Error("Incomplete USFWS wetlands query");
+  }
+  const feats = d.features;
   const types = [...new Set(feats.map((f) => f?.attributes?.WETLAND_TYPE).filter(Boolean))];
   return {
     status: "ok",

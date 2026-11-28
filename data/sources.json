@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T07:16:43Z",
+ "checked": "2026-11-28T07:34:48Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1425,6 +1425,24 @@
    "upstream_total": 1,
    "url": "https://www.cityoflidgerwoodnd.com/index.asp?SEC=048E0664-5172-4644-860F-FCB33875DC36"
   },
+  "lincoln-or-tax-foreclosed": {
+   "about": "County parcels accepting cash purchase offers, independently verified as vacant in the county assessment portal.",
+   "agency": "Lincoln County Property Management, Oregon",
+   "complete": true,
+   "count": 8,
+   "failures": 0,
+   "last_attempt": "2026-11-28T07:29:57Z",
+   "last_success": "2026-11-28T07:29:57Z",
+   "message": "",
+   "name": "Lincoln County vacant tax-foreclosed property",
+   "notes": [],
+   "ok": true,
+   "read": 8,
+   "seconds": 39,
+   "state": "OR",
+   "upstream_total": 12,
+   "url": "https://www.co.lincoln.or.us/358/Tax-Foreclosed-Property-for-Sale"
+  },
   "lorain-oh-forfeiture": {
    "about": "Current auction tracts that the county identifies as vacant in its published parcel map.",
    "agency": "Lorain County Auditor",
@@ -2488,6 +2506,24 @@
    "state": "MN",
    "upstream_total": 6,
    "url": "https://www.toddcountymn.gov/government/departments/auditor_and_treasurer/tax_forfeited_land.php"
+  },
+  "ua-ak-otc-land": {
+   "about": "The university\u2019s active land offers, with minimum offers and acreage confirmed on each parcel\u2019s sale page.",
+   "agency": "University of Alaska Land Management",
+   "complete": true,
+   "count": 8,
+   "failures": 0,
+   "last_attempt": "2026-11-28T07:34:48Z",
+   "last_success": "2026-11-28T07:34:48Z",
+   "message": "",
+   "name": "University of Alaska over-the-counter land",
+   "notes": [],
+   "ok": true,
+   "read": 8,
+   "seconds": 12,
+   "state": "AK",
+   "upstream_total": 8,
+   "url": "https://www.alaska.edu/ualand/land/listings/index.php"
   },
   "utah-udot": {
    "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data.",

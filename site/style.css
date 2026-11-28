@@ -631,6 +631,16 @@ body.map-fs-open { overflow: hidden; }
 .map.small { height: 420px; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-xs); }
 .map.xray-tall { height: 480px; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
 
+.map-overlay-status {
+  max-width: min(260px, calc(100vw - 36px));
+  padding: 6px 9px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  line-height: 1.35;
+}
+
 .map-legend {
   position: absolute;
   bottom: 14px;

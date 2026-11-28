@@ -86,8 +86,88 @@
     });
     return new ExportLayer(service, options);
   }
-  var publicLands = arcgisOverlay("https://edits.nationalmap.gov/arcgis/rest/services/PAD-US/PAD_US_4_1/MapServer", {
-    opacity: 0.55, maxNativeZoom: 15, maxZoom: 20, attribution: "USGS PAD-US 4.1 fee-managed lands",
+  var publicLandsOverview = arcgisOverlay("https://edits.nationalmap.gov/arcgis/rest/services/PAD-US/PAD_US_4_1/MapServer", {
+    opacity: 0.55, maxNativeZoom: 8, maxZoom: 20,
+  });
+  var publicLands = L.layerGroup([], { attribution: "USGS PAD-US 4.1 fee-managed lands" });
+  var publicLandsBoundaries = L.geoJSON(null, {
+    renderer: L.svg(), interactive: false,
+    style: { className: "pad-us-boundary", color: "#286c46", weight: 1.5, fillOpacity: 0.25 },
+    coordsToLatLng: ([lon, lat]) => L.latLng(lat, lon + 360 * Math.round((map.getCenter().lng - lon) / 360)),
+  });
+  var publicLandsNotice = L.control({ position: "bottomleft" });
+  var publicLandsMessage = el("div", "map-overlay-status");
+  publicLandsMessage.setAttribute("role", "status");
+  publicLandsMessage.hidden = true;
+  publicLandsNotice.onAdd = () => publicLandsMessage;
+  var publicLandsRequest;
+
+  function showPublicLandsMessage(message) {
+    publicLandsMessage.textContent = message;
+    publicLandsMessage.hidden = !message;
+  }
+
+  async function loadPublicLands() {
+    publicLandsRequest?.abort();
+    publicLandsBoundaries.clearLayers();
+    if (map.getZoom() < 9) {
+      publicLands.addLayer(publicLandsOverview);
+      showPublicLandsMessage("Zoom in to inspect individual protected areas.");
+      return;
+    }
+    publicLands.removeLayer(publicLandsOverview).addLayer(publicLandsBoundaries);
+    showPublicLandsMessage("");
+    const request = new AbortController();
+    publicLandsRequest = request;
+    const timeout = setTimeout(() => request.abort(), 10000);
+    const bounds = map.getBounds();
+    const width = bounds.getEast() - bounds.getWest();
+    const west = map.wrapLatLng(bounds.getSouthWest()).lng;
+    const east = west + width;
+    const ranges = east > 180 ? [[west, 180], [-180, east - 360]] : [[west, east]];
+    const endpoint = "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Fee_Managers_PADUS/FeatureServer/0/query";
+    const limit = 600;
+    try {
+      const collections = await Promise.all(ranges.map(async ([left, right]) => {
+        const query = new URLSearchParams({
+          f: "geojson", where: "FeatClass = 'Fee' AND Mang_Type IN ('FED','STAT','LOC','DIST','TERR')",
+          geometry: [left, bounds.getSouth(), right, bounds.getNorth()].map(value => value.toFixed(5)).join(","),
+          geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
+          outFields: "OBJECTID", returnGeometry: "true", orderByFields: "Shape__Area DESC,OBJECTID ASC",
+          maxAllowableOffset: (width / map.getSize().x / 2).toFixed(7), resultRecordCount: String(limit),
+        });
+        const response = await fetch(endpoint + "?" + query, { signal: request.signal });
+        if (!response.ok) throw new Error("PAD-US request failed");
+        const collection = await response.json();
+        if (collection.type !== "FeatureCollection" || !Array.isArray(collection.features)) {
+          throw new Error("Invalid PAD-US feature collection");
+        }
+        return collection;
+      }));
+      if (publicLandsRequest !== request || request.signal.aborted) return;
+      for (const collection of collections) publicLandsBoundaries.addData(collection);
+      if (collections.some(collection => collection.features.length >= limit)) {
+        showPublicLandsMessage("Zoom in to see smaller protected areas.");
+      }
+    } catch {
+      if (publicLandsRequest === request && map.hasLayer(publicLands) && map.getZoom() >= 9) {
+        showPublicLandsMessage("Public lands data is temporarily unavailable. Move the map to retry.");
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  publicLands.on("add", () => {
+    publicLandsNotice.addTo(map);
+    map.on("moveend", loadPublicLands);
+    loadPublicLands();
+  });
+  publicLands.on("remove", () => {
+    publicLandsRequest?.abort();
+    publicLandsRequest = undefined;
+    publicLandsNotice.remove();
+    map.off("moveend", loadPublicLands);
+    publicLands.clearLayers();
   });
   var wetlands = arcgisOverlay("https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands/MapServer", {
     opacity: 0.58, minZoom: 11, maxNativeZoom: 16, maxZoom: 20, attribution: "USFWS National Wetlands Inventory",

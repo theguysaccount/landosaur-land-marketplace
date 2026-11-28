@@ -11,8 +11,9 @@ const externalResourceHosts = new Set([
 function isExternalResourceError(error) {
   const url = error.match(/^log: Failed to load resource: .* (https?:\/\/\S+)$/)?.[1];
   if (!url) return false;
-  const host = new URL(url).hostname;
-  return externalResourceHosts.has(host) || host.endsWith(".tile.openstreetmap.org");
+  const { hostname, pathname } = new URL(url);
+  return externalResourceHosts.has(hostname) || hostname.endsWith(".tile.openstreetmap.org") ||
+    (hostname === "services.arcgis.com" && pathname.includes("/Fee_Managers_PADUS/FeatureServer/0/query"));
 }
 const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)/.test(base);
 const { page, close } = await launch();
@@ -287,7 +288,7 @@ try {
     await page.waitFor("/listings match/.test(document.querySelector('#map-count')?.textContent)");
     const layers = [
       ["USGS 3DEP Hillshade", "USGSShadedReliefOnly"], ["NLCD Land Cover", "mrlc_Land-Cover"],
-      ["PAD-US Managed Public Lands", "PAD_US_4_1"], ["USFWS Wetlands", "/Wetlands/MapServer/export"],
+      ["USFWS Wetlands", "/Wetlands/MapServer/export"],
       ["FEMA Flood Zones", "NFHL"],
     ];
     function selectLayer(label, enabled) {
@@ -320,6 +321,14 @@ try {
       }
       assert(await restore(), "could not restore the map after testing " + label);
     }
+
+    const protectedArea = "-92.52,34.825;-92.46,34.825;-92.46,34.86;-92.52,34.86";
+    await page.goto(base + "/?map=protected#area=" + encodeURIComponent(protectedArea));
+    await page.waitFor("/listings match/.test(document.querySelector('#map-count')?.textContent)");
+    assert(await selectLayer("PAD-US Managed Public Lands", true), "missing PAD-US layer");
+    await page.waitFor("[...document.querySelectorAll('#map path.pad-us-boundary')].some(path => path.getBBox().width > 0)", 15000);
+    assert(await selectLayer("PAD-US Managed Public Lands", false), "could not hide PAD-US boundaries");
+    await page.waitFor("!document.querySelector('#map path.pad-us-boundary')");
   });
   await step("watchlist compares parcels and produces valid CSV, GeoJSON, KML and GPX files", async () => {
     await page.goto(base + "/#state=KS");

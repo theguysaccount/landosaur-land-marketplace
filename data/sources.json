@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T06:47:44Z",
+ "checked": "2026-11-28T06:51:42Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -974,6 +974,24 @@
    "state": "VT",
    "upstream_total": 1,
    "url": "https://fcidc.com/st-albans-town-6/"
+  },
+  "fulton-ga-tax-deed": {
+   "about": "Published current tax-deed offerings matched to the assessor\u2019s vacant residential land classification.",
+   "agency": "Fulton County Sheriff, Georgia",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T06:51:42Z",
+   "last_success": "2026-11-28T06:51:42Z",
+   "message": "",
+   "name": "Fulton County Sheriff vacant land tax deeds",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 4,
+   "state": "GA",
+   "upstream_total": 3,
+   "url": "https://www.fultoncountyga.gov/Inside-Fulton-County/Fulton-County-Departments/Sheriff/Tax-Sales"
   },
   "glynn-brunswick-landbank": {
    "about": "Priced vacant lots published as available. Properties under foreclosure or containing structures are excluded.",
@@ -1964,6 +1982,24 @@
    "state": "MN",
    "upstream_total": 18,
    "url": "https://ottertailcounty.gov/"
+  },
+  "palmer-ma-land-auction": {
+   "about": "Current town offers with a published vacant land description, minimum bid and exact auction time.",
+   "agency": "Town of Palmer, Massachusetts",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T06:51:42Z",
+   "last_success": "2026-11-28T06:51:42Z",
+   "message": "",
+   "name": "Palmer municipal vacant land auctions",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 1,
+   "state": "MA",
+   "upstream_total": 1,
+   "url": "https://www.townofpalmer.com/townpropertysales"
   },
   "peterborough-nh": {
    "about": "Tax-deeded municipal land parcels in Peterborough, New Hampshire with GIS outlines, acreage, and zoning.",

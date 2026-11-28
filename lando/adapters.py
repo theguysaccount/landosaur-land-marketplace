@@ -9281,7 +9281,103 @@ def north_logan_ut_surplus(fetch, now, warn):
     return [row], {"complete": True, "upstream_total": 1}
 
 
+PALMER_MA_PROPERTY = "https://www.townofpalmer.com/townpropertysales"
+FULTON_GA_TAX_PAGE = "https://www.fultoncountyga.gov/Inside-Fulton-County/Fulton-County-Departments/Sheriff/Tax-Sales"
+FULTON_GA_TAX_PARCELS = "https://services1.arcgis.com/AQDHTHDrZzfsFsB5/arcgis/rest/services/Tax_Parcels/FeatureServer/0/query"
+FULTON_GA_DECEMBER_ROSTER = (
+    "/-/media/Departments/Sheriff/Tax-Sales/2026/"
+    "Sheriffs-December-1-2026-Tax--Levy-Sale-List--2nd-Posting-11252026.pdf"
+)
+# These APNs were verified against the scanned parcel and situs columns on page 3.
+FULTON_GA_DECEMBER_VACANT = {
+    "13 003100020608": "0 CATALINA CIR",
+    "13 003300010649": "0 GREEN MOUNTAIN TRL",
+    "14 003000010095": "0 HUTCHENS RD SE",
+}
+FULTON_GA_DECEMBER_SHA = "6cd2f478da4bd7cab676bb04d91ac3c646eddfab76c073521f72cd0236c11dc0"
+
+
+def palmer_ma_land_auction(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    text = clean(fetch.text(PALMER_MA_PROPERTY))
+    if "Town Properties Available for Purchase" not in text:
+        raise StructureError("Palmer's current town land sale directory changed")
+    sale = re.search(
+        r"Land Auction: ([^:]+?) Parcel ID: ([\d-]+), Title Ref\.: [\d/]+ ([\d,]+) Square Foot Parcel "
+        r"Vacant Land .+? Date: \w+, (\w+ \d{1,2}, \d{4}) Time: (\d{1,2}:\d{2} [AP]M) "
+        r"Location: .+? Bidder Registration: \d{1,2}:\d{2} [AP]M Minimum Bid: \$([\d,]+)(?:\.00)?\b",
+        text, re.I,
+    )
+    if not sale or re.search(r"\bland auction (?:has been |was )?(?:cancelled|canceled|postponed)\b", text, re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    street, pin, sqft, date, clock, bid = sale.groups()
+    when = datetime.datetime.strptime(f"{date} {clock}", "%B %d, %Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+    if when <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    row = {
+        "id": "ma-palmer-" + pin, "source": "palmer-ma-land-auction", "title": f"{street}, Palmer (town land auction)",
+        "state": "MA", "county": "Hampden", "locality": "Palmer", "address": street, "apn": pin,
+        "acres": round(number(sqft) / 43560, 4), "price": number(bid), "price_kind": "min_bid",
+        "offering": "auction", "status": "auction_open",
+        "deadline": when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": PALMER_MA_PROPERTY, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("parcel_number", pin, "="), fact("lot_area", f"{sqft} square feet in the town notice", "="),
+                  fact("minimum_bid", f"${bid} published minimum bid", "=")],
+        "tags": ["vacant land", "town land auction"],
+        "terms": "See the town notice for registration, certified funds and the same-day closing terms.",
+    }
+    return [row], {"complete": True, "upstream_total": 1}
+
+
+def fulton_ga_tax_deed(fetch, now, warn):
+    cutoff = datetime.datetime(2026, 12, 1, 15, tzinfo=datetime.timezone.utc)
+    absent = [], {"complete": True, "upstream_total": 0}
+    if now >= cutoff:
+        return absent
+    page = fetch.text(FULTON_GA_TAX_PAGE)
+    if "Sheriff’s Tax Deed" not in clean(page) or FULTON_GA_DECEMBER_ROSTER not in page:
+        return absent
+    roster = urllib.parse.urljoin(FULTON_GA_TAX_PAGE, FULTON_GA_DECEMBER_ROSTER)
+    if hashlib.sha256(fetch.bytes(roster)).hexdigest() != FULTON_GA_DECEMBER_SHA:
+        return absent
+    where = "ParcelID IN (" + quote_list(FULTON_GA_DECEMBER_VACANT) + ")"
+    gis_url, features = arcgis_query(fetch, FULTON_GA_TAX_PARCELS, where, "ParcelID,Address,LUCode,LivUnits,LandAcres")
+    rows = []
+    for feature in features:
+        attrs = feature.get("attributes", {})
+        pin = attrs.get("ParcelID")
+        situs = FULTON_GA_DECEMBER_VACANT.get(pin)
+        acres = number(attrs.get("LandAcres"))
+        if (not situs or clean(attrs.get("Address")).upper() != situs or attrs.get("LUCode") != "100"
+                or attrs.get("LivUnits") != 0 or not acres or acres <= 0):
+            continue
+        row = {
+            "id": "ga-fulton-sheriff-" + slug(pin.replace(" ", "")), "source": "fulton-ga-tax-deed",
+            "title": f"{situs.title()} (Fulton County Sheriff tax sale)", "state": "GA", "county": "Fulton",
+            "locality": "", "address": situs.title(), "apn": pin, "acres": acres,
+            "price": None, "price_kind": "none", "offering": "auction", "status": "auction_open",
+            "deadline": "2026-12-01T15:00:00Z", "url": FULTON_GA_TAX_PAGE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", pin, roster + "#page=3"),
+                      fact("land_use", "Fulton County GIS classifies this parcel as vacant residential land.", gis_url),
+                      fact("sale_terms", "The county records a tax deed after payment. Redemption rules apply.", "=")],
+            "tags": ["vacant land", "tax deed auction"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), gis_url, "Fulton County GIS")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(FULTON_GA_DECEMBER_VACANT)}
+
+
 SOURCES = [
+    {"id": "fulton-ga-tax-deed", "name": "Fulton County Sheriff vacant land tax deeds",
+     "agency": "Fulton County Sheriff, Georgia", "url": FULTON_GA_TAX_PAGE, "state": "GA",
+     "run": fulton_ga_tax_deed, "requires_sale_match": True,
+     "about": "Published current tax-deed offerings matched to the assessor’s vacant residential land classification."},
+    {"id": "palmer-ma-land-auction", "name": "Palmer municipal vacant land auctions",
+     "agency": "Town of Palmer, Massachusetts", "url": PALMER_MA_PROPERTY, "state": "MA",
+     "run": palmer_ma_land_auction, "requires_sale_match": True,
+     "about": "Current town offers with a published vacant land description, minimum bid and exact auction time."},
     {"id": "north-logan-ut-surplus", "name": "North Logan sealed bids for surplus land",
      "agency": "North Logan City, Utah", "url": NORTH_LOGAN_NOTICE, "state": "UT",
      "run": north_logan_ut_surplus, "requires_sale_match": True,
@@ -9863,6 +9959,10 @@ NOT_CARRIED = [
      "The county’s auction host returned HTTP 403 for robots.txt."),
     ("Provo City surplus property notices", "https://www.provo.gov/272/Property-Management",
      "The city’s property announcements host returned HTTP 403 for robots.txt."),
+    ("Hawaii Awards & Notices Data System", "https://hands.ehawaii.gov/hands/opportunities",
+     "The state procurement portal returned HTML in place of robots.txt."),
+    ("Town of Suffield tax-sale news article and assessor map", "https://www.suffieldct.gov/our-town/news/town-news-default/~board/town-news/post/town-of-suffield-tax-sale-1790963357528",
+     "The town disallows the article path, and its linked assessor map did not serve robots.txt over verified TLS."),
     ("Prince George’s County available surplus land", "https://www.princegeorgescountymd.gov/departments-offices/redevelopment-authority/surplus-real-property-program/available-county-surplus-real-property-disposition",
      "The county host returned HTTP 403 for robots.txt."),
     ("Northumberland County, Pennsylvania assessment parcel boundaries", "https://gis.norrycopa.net/arcgis/rest/services/Assessment/NC_Tax_Parcels/MapServer",

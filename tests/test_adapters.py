@@ -45,6 +45,46 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_fulton_tax_deed_requires_reviewed_notice_and_exact_vacant_tax_record(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = f'Sheriff’s Tax Deed <a href="{adapters.FULTON_GA_DECEMBER_ROSTER}">Latest sale</a>'
+        fetch.bytes.return_value = b"%PDF- verified notice fixture"
+        geo = [
+            {"attributes": {"ParcelID": "13 003100020608", "Address": "0 CATALINA CIR",
+                            "LUCode": "100", "LivUnits": 0, "LandAcres": 0.5778}},
+            {"attributes": {"ParcelID": "13 003300010649", "Address": "0 GREEN MOUNTAIN TRL",
+                            "LUCode": "100", "LivUnits": 1, "LandAcres": 0.5383}},
+            {"attributes": {"ParcelID": "14 003000010095", "Address": "0 OTHER STREET",
+                            "LUCode": "100", "LivUnits": 0, "LandAcres": 0.41}},
+        ]
+        with patch.object(adapters, "arcgis_query", return_value=("https://services1.arcgis.com/exact", geo)) as query:
+            self.assertEqual(adapters.fulton_ga_tax_deed(fetch, NOW, self.fail)[0], [])
+            query.assert_not_called()
+            digest = adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()
+            with patch.object(adapters, "FULTON_GA_DECEMBER_SHA", digest):
+                rows, _ = adapters.fulton_ga_tax_deed(fetch, NOW, self.fail)
+                row, = rows
+                self.assertEqual((row["apn"], row["price"], row["deadline"]),
+                                 ("13 003100020608", None, "2026-12-01T15:00:00Z"))
+                at_sale = datetime.datetime(2026, 12, 1, 15, tzinfo=datetime.timezone.utc)
+                self.assertEqual(adapters.fulton_ga_tax_deed(fetch, at_sale, self.fail)[0], [])
+
+    def test_palmer_uses_the_exact_auction_minimum_and_local_deadline(self):
+        fetch = unittest.mock.Mock()
+        page = ('Town Properties Available for Purchase <h3>Land Auction: Country Lane</h3>'
+                'Parcel ID: 14-17-10, Title Ref.: 1691/178 20,000 Square Foot Parcel Vacant Land '
+                'Sold free of taxes Date: Tuesday, December 1, 2026 Time: 11:00 AM '
+                'Location: Town Administration Building Bidder Registration: 10:30 AM '
+                'Minimum Bid: $12,500 Certified funds required. Recording cost $155.')
+        fetch.text.return_value = page
+        rows, _ = adapters.palmer_ma_land_auction(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["price_kind"], row["acres"]),
+                         ("14-17-10", 12500, "min_bid", 0.4591))
+        self.assertEqual(row["deadline"], "2026-12-01T16:00:00Z")
+        fetch.text.return_value = page + " Land auction has been cancelled."
+        self.assertEqual(adapters.palmer_ma_land_auction(fetch, NOW, self.fail)[0], [])
+
     def test_north_logan_lists_the_offered_portion_and_expires_at_noon(self):
         page = ('<dt>Event End Date &amp; Time</dt><dd>December 8, 2026 12:00 PM</dd>'
                 '<dd class="agenda">INVITATION TO BID to Purchase LAND (Portion of Parcel 04-273-8001)\n'

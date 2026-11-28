@@ -2245,6 +2245,36 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             features.pop()
             self.assertEqual(adapters.hillsboro_or_meek(fetch, None, self.fail)[0], [])
 
+    def test_pendleton_bmrc_carries_only_the_city_marketed_facility_site(self):
+        from urllib.parse import parse_qs, urlsplit
+
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = ('<h1>Available Properties</h1><h3>BMRC Property (near Keystone RV)</h3>'
+                                   '<p>Status: For Sale</p><p>Type: Bare Land – Industrial</p><h3>Next</h3>')
+        feature = {"attributes": {"account_id": 167337, "map_tax": "2N3209B001101",
+                                  "RMV_PROPER": 301, "SUM_OF_ACR": 4.78}}
+
+        def result(url):
+            args = parse_qs(urlsplit(url).query)
+            self.assertIn("account_id=167337", args["where"][0])
+            self.assertEqual(args["returnGeometry"], ["false"])
+            self.assertNotIn("MAILING_NA", args["outFields"][0])
+            return {"features": [feature]}
+
+        fetch.json.side_effect = result
+        report = ('Account ID    167337\nMap           2N3209-B0-01101\n'
+                  '1      1601     500      2015      100     500 - Commercial Other Improvements       10\n')
+        with patch.object(adapters, "pdf_text", return_value=report) as assessor:
+            rows, metadata = adapters.pendleton_or_bmrc(fetch, None, self.fail)
+            row, = rows
+            self.assertEqual(metadata, {"complete": True, "upstream_total": 1})
+            self.assertEqual((row["apn"], row["acres"], row["price"], row["geometry"]),
+                             ("2N3209B001101", 4.78, None, None))
+            assessor.return_value = report + '2    1601    403    2026    100    Industrial warehouse     5000\n'
+            self.assertEqual(adapters.pendleton_or_bmrc(fetch, None, self.fail)[0], [])
+            fetch.text.return_value = fetch.text.return_value.replace('For Sale', 'Pending Sale')
+            self.assertEqual(adapters.pendleton_or_bmrc(fetch, None, self.fail)[0], [])
+
     def test_genesee_merges_confirmed_vacant_bundles_and_excludes_sold_lots(self):
         root = adapters.GENESEE_MI_FEATURED
         home = "https://www.thelandbank.org/"

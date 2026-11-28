@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T16:46:29Z",
+ "checked": "2026-11-28T17:06:44Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -2578,6 +2578,24 @@
    "state": "CO",
    "upstream_total": 1,
    "url": "https://www.parkcountyco.gov/Archive.aspx?AMID=94"
+  },
+  "pendleton-or-bmrc": {
+   "about": "A qualifying industrial purchase opportunity marketed by the city and matched against county assessment records.",
+   "agency": "City of Pendleton Economic Development",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T17:06:44Z",
+   "last_success": "2026-11-28T17:06:44Z",
+   "message": "",
+   "name": "Pendleton vacant Westgate industrial property",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 5,
+   "state": "OR",
+   "upstream_total": 1,
+   "url": "https://www.developpendleton.com/available-properties"
   },
   "peterborough-nh": {
    "about": "Tax-deeded municipal land parcels in Peterborough, New Hampshire with GIS outlines, acreage, and zoning.",

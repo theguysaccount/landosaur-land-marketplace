@@ -4295,6 +4295,64 @@ def hillsboro_or_meek(fetch, now, warn):
     return [listing], {"complete": True, "upstream_total": 1}
 
 
+# --- City of Pendleton marketed Westgate industrial land (OR) ---
+PENDLETON_OR_OFFERS = "https://www.developpendleton.com/available-properties"
+PENDLETON_OR_COUNTY_GIS = (
+    "https://services3.arcgis.com/tNPgIZWOB0Efvm0g/ArcGIS/rest/services/Tax_Lots/FeatureServer/0/query"
+)
+PENDLETON_OR_BMRC_ACCOUNT = "https://public.co.umatilla.or.us/pso/detail/167337/R"
+PENDLETON_OR_BMRC_REPORT = (
+    "https://public.co.umatilla.or.us/pso/download/?report=Improvement&accountId=167337"
+    "&rollType=Real&year=2026&improvementId=85204"
+)
+PENDLETON_OR_BMRC_TAXLOT = "2N3209B001101"
+
+
+def pendleton_or_bmrc(fetch, now, warn):
+    page = fetch.text(PENDLETON_OR_OFFERS)
+    if "Available Properties" not in clean(page):
+        raise StructureError("Pendleton’s available property directory changed")
+    card = re.search(r"<h3\b[^>]*>\s*BMRC Property \(near Keystone RV\)\s*</h3>(.*?)(?=<h[23]\b)", page, re.S)
+    if not card or not re.search(r"Status:\s*For Sale\s+Type:\s*Bare Land [–-] Industrial\b", clean(card[1])):
+        return [], {"complete": True, "upstream_total": 0}
+
+    where = (f"account_id=167337 AND map_tax='{PENDLETON_OR_BMRC_TAXLOT}'"
+             " AND UPPER(MAILING_NA) IN ('PENDLETON CITY OF','CITY OF PENDLETON')")
+    features = _arcgis_query(fetch, PENDLETON_OR_COUNTY_GIS, where, "account_id,map_tax,RMV_PROPER,SUM_OF_ACR",
+                             extra={"returnGeometry": "false", "returnDistinctValues": "true"})
+    if len(features) != 1:
+        return [], {"complete": True, "upstream_total": 1}
+    parcel = features[0]["attributes"]
+    acres = number(parcel.get("SUM_OF_ACR"))
+    if (parcel.get("account_id") != 167337 or parcel.get("map_tax") != PENDLETON_OR_BMRC_TAXLOT
+            or parcel.get("RMV_PROPER") != 301 or acres != 4.78):
+        return [], {"complete": True, "upstream_total": 1}
+
+    # The former 10.88-acre tract includes an adjoining baseball field. This tax lot is the former facility site.
+    report = pdf_text(fetch, PENDLETON_OR_BMRC_REPORT)
+    improvements = re.findall(r"^\s*\d+\s+\d{4}\s+\d{3}\s+\d{4}\s+\d+\s+(.+?)\s+\d+\s*$", report, re.M)
+    if (not re.search(r"Account ID\s+167337\b", report) or "2N3209-B0-01101" not in report
+            or improvements != ["500 - Commercial Other Improvements"]):
+        return [], {"complete": True, "upstream_total": 1}
+
+    listing = {
+        "id": "or-pendleton-bmrc", "source": "pendleton-or-bmrc",
+        "title": "Former Blue Mountain Recovery Center site (Pendleton industrial land for sale)",
+        "state": "OR", "county": "Umatilla", "locality": "Pendleton", "address": "Westgate Industrial Park",
+        "apn": PENDLETON_OR_BMRC_TAXLOT, "acres": acres, "price": None, "price_kind": "none",
+        "offering": "sale", "status": "listed", "deadline": None, "url": PENDLETON_OR_OFFERS,
+        "lat": None, "lon": None, "geometry": None,
+        "facts": [
+            fact("availability", "Pendleton Economic Development lists this former facility site as bare industrial land for sale.", "="),
+            fact("sale_terms", "The city limits sales to companies making a substantial investment, creating jobs, or both.", "="),
+            fact("acreage", f"{acres:g} assessed acres. Confirm the sale boundary, existing lease and site conditions with the city.", PENDLETON_OR_BMRC_ACCOUNT),
+            fact("parcel_number", PENDLETON_OR_BMRC_TAXLOT, PENDLETON_OR_BMRC_ACCOUNT),
+        ],
+        "tags": ["industrial land", "sale inquiry"],
+    }
+    return [listing], {"complete": True, "upstream_total": 1}
+
+
 # --- Maui Vacant Government-Owned Parcels (HI) ---
 MAUI_HI_GIS = "https://services3.arcgis.com/fsrDo0QMPlK9CkZD/arcgis/rest/services/Vacant_Government_Owned_Parcels_in_West_Maui/FeatureServer/0/query"
 MAUI_HI_URL = "https://www.mauicounty.gov/"
@@ -13343,6 +13401,10 @@ SOURCES = [
      "agency": "Hillsboro Economic Development Council", "url": GREATER_PORTLAND_OFFERS, "state": "OR",
      "run": hillsboro_or_meek, "requires_sale_match": True,
      "about": "A city-marketed industrial land offer matched to the four vacant public tax lots shown in its brochure."},
+    {"id": "pendleton-or-bmrc", "name": "Pendleton vacant Westgate industrial property",
+     "agency": "City of Pendleton Economic Development", "url": PENDLETON_OR_OFFERS, "state": "OR",
+     "run": pendleton_or_bmrc, "requires_sale_match": True,
+     "about": "A qualifying industrial purchase opportunity marketed by the city and matched against county assessment records."},
     {"id": "connecticut-dot-land", "name": "Connecticut DOT vacant land public bids",
      "agency": "Connecticut Department of Transportation", "url": CTDOT_SALE, "state": "CT",
      "run": connecticut_dot_land, "requires_sale_match": True,
@@ -13629,6 +13691,14 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("Hermiston industrial property directory", "https://www.hermiston.gov/economic-development/page/access-property",
+     "The city's robots.txt connection closed without returning a policy."),
+    ("Pendleton Westgate industrial area nomination", "https://www.oregon.gov/biz/programs/rsis/pages/default.aspx",
+     "Business Oregon's linked nomination PDF path is disallowed by robots.txt."),
+    ("Umatilla County's linked 2026 aerial imagery provider", "https://umatillacounty.net/departments/at/gis",
+     "The imagery provider's robots.txt returned HTTP 503. No aerial tiles were requested from it."),
+    ("Pendleton council packet archive", "https://www.pendletonor.gov/",
+     "The linked CivicWeb agenda PDF path is disallowed by robots.txt."),
     ("Port of Portland commercial property exhibits", "https://www.portofportland.com/trip",
      "The linked document and map host returned HTTP 400 for robots.txt. Greater Portland Inc independently publishes specific purchase listings."),
     ("Waterbury Land Bank listing portal", "https://waterburylandbank.org/properties",

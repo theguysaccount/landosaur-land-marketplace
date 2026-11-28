@@ -8933,6 +8933,50 @@ def tnecd_certified_sites(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(listings)}
 
 
+FIRSTPARK_ME = "https://firstpark.com/available-lots/"
+
+
+def firstpark_me_lots(fetch, now, warn):
+    directory = fetch.text(FIRSTPARK_ME)
+    markers = re.findall(r'<g\b[^>]*\bclass="[^"]*\blot-group\b[^"]*"[^>]*>', directory, re.I)
+    if not markers:
+        raise StructureError("FirstPark’s official sale map changed")
+    rows = []
+    seen = set()
+    for marker in markers:
+        fields = dict(re.findall(r'\bdata-([a-z]+)="([^"]*)"', marker))
+        if fields.get("status") != "available":
+            continue
+        lot = re.fullmatch(r"Lot (\d+[A-Z]?)", clean(fields.get("name")))
+        road = clean(fields.get("road"))
+        acres, buildable = number(fields.get("total")), number(fields.get("buildable"))
+        if not lot or not road or not acres or not buildable or buildable > acres or lot[1] in seen:
+            raise StructureError("FirstPark’s advertised lot or acreage data changed")
+        lot_number = lot[1].lower()
+        path = f"/available-lots/firstpark-lot-{lot_number}/"
+        if fields.get("url") != path:
+            raise StructureError("FirstPark’s official lot detail address changed")
+        seen.add(lot[1])
+        url = urllib.parse.urljoin(FIRSTPARK_ME, path)
+        detail = clean(fetch.text(url))
+        if not re.search(rf"\bFirstPark Lot {lot[1]}\b", detail) or "For Sale or Build to Suit" not in detail:
+            continue
+        rows.append({
+            "id": "me-firstpark-lot-" + lot_number, "source": "firstpark-me-lots",
+            "title": f"FirstPark lot {lot[1]} (Oakland business park)", "state": "ME", "county": "Kennebec",
+            "locality": "Oakland", "address": road, "acres": acres, "price": None, "price_kind": "none",
+            "offering": "offer", "status": "listed", "deadline": None, "url": url,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [
+                fact("availability", "FirstPark offers this development site for sale or build to suit.", url),
+                fact("acreage", f"{acres:g} acres in the authority’s lot directory", FIRSTPARK_ME),
+                fact("developable_acreage", f"{buildable:g} buildable acres in the authority’s lot directory", FIRSTPARK_ME),
+            ],
+            "tags": ["development land", "business park"],
+        })
+    return rows, {"complete": True, "upstream_total": len(markers)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9427,6 +9471,10 @@ SOURCES = [
      "agency": "Tennessee Department of Economic and Community Development", "url": TNECD_CERTIFIED, "state": "TN",
      "run": tnecd_certified_sites, "requires_sale_match": True,
      "about": "State-certified development sites listed for purchase on Tennessee’s official directory, matched to published public holdings and offer terms."},
+    {"id": "firstpark-me-lots", "name": "FirstPark vacant business park lots",
+     "agency": "Kennebec Regional Development Authority, Maine", "url": FIRSTPARK_ME, "state": "ME",
+     "run": firstpark_me_lots, "requires_sale_match": True,
+     "about": "Available development lots from the authority’s current lot map with published total and buildable acreage."},
 ]
 NOT_CARRIED = [
     ("Wyoming Business Council industrial sites vendor", "https://www.wyomingsites.com/",

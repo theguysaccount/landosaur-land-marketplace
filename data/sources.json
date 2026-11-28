@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T05:46:23Z",
+ "checked": "2026-11-28T05:53:28Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -866,6 +866,24 @@
    "state": "PA",
    "upstream_total": 19,
    "url": "https://countyofelkpa.gov/elk-county-offices/tax-claim-bureau/repository-properties/"
+  },
+  "firstpark-me-lots": {
+   "about": "Available development lots from the authority\u2019s current lot map with published total and buildable acreage.",
+   "agency": "Kennebec Regional Development Authority, Maine",
+   "complete": true,
+   "count": 11,
+   "failures": 0,
+   "last_attempt": "2026-11-28T05:53:28Z",
+   "last_success": "2026-11-28T05:53:28Z",
+   "message": "",
+   "name": "FirstPark vacant business park lots",
+   "notes": [],
+   "ok": true,
+   "read": 11,
+   "seconds": 18,
+   "state": "ME",
+   "upstream_total": 24,
+   "url": "https://firstpark.com/available-lots/"
   },
   "fnsb-chatanika-otc": {
    "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases.",

@@ -1071,6 +1071,28 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+
+    def test_firstpark_requires_available_marker_and_matching_sale_detail(self):
+        def lot_marker(number, status, buildable="5.4"):
+            return (f'<g class="interactive lot-group" data-status="{status}" data-name="Lot {number}" '
+                    f'data-total="10.4" data-buildable="{buildable}" data-road="FirstPark Drive" '
+                    f'data-url="/available-lots/firstpark-lot-{number}/"></g>')
+
+        directory = adapters.FIRSTPARK_ME
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = {
+            directory: lot_marker(4, "available") + lot_marker(5, "available") + lot_marker(6, "sold"),
+            directory + "firstpark-lot-4/": "<h1>FirstPark Lot 4</h1><p>For Sale or Build to Suit</p>",
+            directory + "firstpark-lot-5/": "<h1>FirstPark Lot 50</h1><p>For Sale or Build to Suit</p>",
+        }.__getitem__
+        rows, info = adapters.firstpark_me_lots(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["id"], row["acres"], row["price"]),
+                         (3, "me-firstpark-lot-4", 10.4, None))
+        self.assertIn("5.4 buildable acres in the authority’s lot directory",
+                      [fact["value"] for fact in row["facts"]])
+        self.assertIsNone(row["geometry"])
+
     def test_certified_site_requires_current_public_sale_and_preserves_rate(self):
         from lando.pages import price_line
 

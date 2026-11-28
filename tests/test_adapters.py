@@ -2355,6 +2355,7 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             rows, info = adapters.new_castle_de_sheriff(fetch, NOW, self.fail)
             row, = rows
             self.assertEqual((row["apn"], row["price"], row["deadline"]), (pins[0], None, "2026-12-08T14:00:00Z"))
+            self.assertEqual(row["status"], "auction_terms")
             self.assertEqual(info["upstream_total"], 2)
             self.assertTrue(row["geometry"])
             self.assertNotIn("PRIVATE PERSON", repr(row))

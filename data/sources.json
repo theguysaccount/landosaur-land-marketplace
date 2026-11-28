@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T12:15:57Z",
+ "checked": "2026-11-28T12:20:54Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -2153,8 +2153,8 @@
    "complete": true,
    "count": 2,
    "failures": 0,
-   "last_attempt": "2026-11-28T12:15:57Z",
-   "last_success": "2026-11-28T12:15:57Z",
+   "last_attempt": "2026-11-28T12:20:54Z",
+   "last_success": "2026-11-28T12:20:54Z",
    "message": "",
    "name": "New Castle County December sheriff sale vacant land",
    "notes": [],

@@ -425,10 +425,23 @@ try {
         })()`);
         if (tableOverflow) bad.push(p + " county values require horizontal scrolling");
       }
-      if (p === "/tax-sales/") await page.waitFor("document.querySelector('#tax-tbody tr')");
+      if (p === "/tax-sales/") {
+        const taxRulesOverflow = await page.eval(`(() => {
+          const frame = document.querySelector(".tax-rules").parentElement;
+          return frame.scrollWidth > frame.clientWidth;
+        })()`);
+        if (taxRulesOverflow) bad.push(p + " rules require horizontal scrolling");
+      }
       const w = await page.eval("document.documentElement.scrollWidth");
       if (w > 375) bad.push(p + " is " + w + "px wide");
     }
+    await page.goto(base + "/tax-sales/#state-WY");
+    await page.waitFor(`(() => {
+      const row = document.getElementById("state-WY").getBoundingClientRect();
+      const header = document.querySelector("header").getBoundingClientRect();
+      const concierge = document.querySelector("#state-WY .chip-link").getBoundingClientRect();
+      return row.top >= header.bottom && concierge.right <= innerWidth && concierge.bottom <= innerHeight;
+    })()`);
     await page.goto(base + "/land/ks-snco-0973604015014000/");
     assert(await page.eval(`(() => {
       const bar = document.querySelector(".mobile-land-agent"), links = document.querySelector(".dossier-metrics .benchmark-pill");

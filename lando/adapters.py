@@ -13462,6 +13462,12 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("Maine Department of Economic and Community Development property catalog",
+     "https://www.selectmainesites.com/maine/property/Industrial-Drive-East-Millinocket-Maine/F6724927-BB55-47F8-B106-C2A5B737E6C9",
+     "The catalog’s robots.txt disallows the East Millinocket property page."),
+    ("East Millinocket meeting records and tax maps",
+     "https://www.eastmillinocket.org/board-of-selectmen.aspx",
+     "The file host linked by the town disallows its meeting documents and tax-map paths in robots.txt."),
     ("U.S. Treasury seized real property auction directory",
      "https://www.treasury.gov/auctions/treasury/rp/index.shtml",
      "The auction host did not return a plain-text robots policy."),

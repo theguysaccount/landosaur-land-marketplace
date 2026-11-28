@@ -1339,14 +1339,14 @@ class Site(object):
                 inventory = '<a href="%s">Benchmarks →</a>' % esc(self.u("/land-prices/" + slug + "/"))
             concierge_url = esc(self.u("/services/?service=auction_proxy&state=" + code))
             table_rows.append(
-                '<tr id="state-%s">'
-                '<th scope="row"><strong>%s</strong> <span class="sub">%s</span></th>'
-                '<td data-label="Sale Type"><span class="%s">%s</span></td>'
-                '<td data-label="Redemption">%s</td>'
-                '<td data-label="Rate / Penalty">%s</td>'
-                '<td data-label="Live Inventory">%s</td>'
-                '<td data-label="Rules Summary" class="small">%s</td>'
-                '<td data-label="Land Agent"><a class="chip-btn chip-link" href="%s">Bid Concierge ($20)</a></td>'
+                '<tr id="state-%s" role="row">'
+                '<th scope="row" role="rowheader"><strong>%s</strong> <span class="sub">%s</span></th>'
+                '<td data-label="Sale Type" role="cell"><span class="%s">%s</span></td>'
+                '<td data-label="Redemption" role="cell">%s</td>'
+                '<td data-label="Rate / Penalty" role="cell">%s</td>'
+                '<td data-label="Live Inventory" role="cell">%s</td>'
+                '<td data-label="Rules Summary" role="cell" class="small">%s</td>'
+                '<td data-label="Land Agent" role="cell"><a class="chip-btn chip-link" href="%s">Bid Concierge ($20)</a></td>'
                 '</tr>' % (
                     code, esc(name), code, badge_class, esc(state["mode_label"]), esc(state["redemption"]),
                     esc(state["interest"]), inventory, esc(state["notes"]), concierge_url,
@@ -1396,13 +1396,15 @@ class Site(object):
             '</section>' % (n_deed, n_lien, n_red),
 
             '<section style="margin-top:24px">'
-            '<h2>Complete 50-State Tax-Sale Rules &amp; Live Inventory Directory</h2>'
+            '<h2 id="tax-directory">Complete 50-State Tax-Sale Rules &amp; Live Inventory Directory</h2>'
             '<p id="tax-count" class="small">Showing 50 of 50 U.S. states</p>'
-            '<div class="scroll"><table class="data"><thead><tr>'
-            '<th scope="col">State</th><th scope="col">Sale Type</th><th scope="col">Statutory Redemption</th>'
-            '<th scope="col">Rate / Penalty</th><th scope="col">Live Landosaur Parcels</th>'
-            '<th scope="col">Key Statutory Notes</th><th scope="col">Concierge</th>'
-            '</tr></thead><tbody id="tax-tbody">%s</tbody></table></div>'
+            '<div class="scroll"><table class="data tax-rules" role="table" aria-labelledby="tax-directory">'
+            '<thead role="rowgroup"><tr role="row">'
+            '<th scope="col" role="columnheader">State</th><th scope="col" role="columnheader">Sale Type</th>'
+            '<th scope="col" role="columnheader">Statutory Redemption</th><th scope="col" role="columnheader">Rate / Penalty</th>'
+            '<th scope="col" role="columnheader">Live Landosaur Parcels</th><th scope="col" role="columnheader">Key Statutory Notes</th>'
+            '<th scope="col" role="columnheader">Concierge</th>'
+            '</tr></thead><tbody id="tax-tbody" role="rowgroup">%s</tbody></table></div>'
             '<p class="notice" style="margin-top:14px">Statutory summaries are for educational research only and are not legal or tax advice. County treasurers, sheriffs, and municipal charters may apply local procedures, recent post-<em>Tyler v. Hennepin</em> equity-auction reforms, and strict registration deadlines—always verify directly with the county or consult a licensed real-estate attorney.</p>'
             '</section>' % "".join(table_rows),
 

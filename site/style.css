@@ -1241,6 +1241,7 @@ footer p { margin: 0 0 9px; }
 .acquisition-brief { grid-column: 1 / -1; margin-top: 0; }
 .acquisition-brief h3 { margin-top: 0; }
 .brief-target { font-weight: 650; overflow-wrap: anywhere; }
+html:has(#start-land-agent:target, #track-order:target) { scroll-behavior: auto; }
 #start-land-agent, #track-order { scroll-margin-top: 5.5rem; }
 .order-progress {
   padding: 0;

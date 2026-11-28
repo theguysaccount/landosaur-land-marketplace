@@ -13,6 +13,7 @@ import hashlib
 from functools import lru_cache
 import html
 import json
+import multiprocessing
 import os
 import re
 import sys
@@ -24,7 +25,7 @@ from lando import config  # noqa: E402
 from lando.model import Catalog  # noqa: E402
 from lando.pages import listing_is_indexable  # noqa: E402
 
-HREF = re.compile(r'(?:href|src)="([^"]+)"')
+LINK_ATTRIBUTES = (re.compile(r'href="([^"]+)"'), re.compile(r'src="([^"]+)"'))
 OFFICIAL = {
     "mohave.gov", "co.cowlitz.wa.us", "cowlitzinfo.net", "ci.missoula.mt.us", "salesweb.civilview.com", "jeffco.us", "parkcountyco.gov",
     "douglascountywa.gov", "co.chelan.wa.us", "franklintownshipnj.org", "townofgreybull.com", "washingtoncountytn.org", "tnecd.com",
@@ -70,8 +71,9 @@ TITLE = re.compile(r"<title>(.*?)</title>", re.S)
 DESCRIPTION = re.compile(r'<meta name="description" content="[^"]{20,}"')
 ROBOTS = re.compile(r'<meta name="robots" content="([^"]+)"')
 JSON_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
-TAGS = re.compile(r"<[^>]+>")
 OWNER = re.compile(r"\bOwner\b")
+# Only these numeric references can conceal letters in the forbidden field name.
+OWNER_ENTITY = re.compile(r"&#(?:0*(?:79|119|110|101|114)(?![0-9])|[xX]0*(?:4[fF]|77|6[eE]|65|72)(?![0-9a-fA-F]))")
 OFFICIAL_LINK = re.compile(r'<a[^>]*data-official-source="1"[^>]*href="([^"]+)"')
 
 
@@ -101,6 +103,16 @@ def official_source(link):
     except ValueError:
         return False
     return url.scheme == "https" and official_host(host)
+
+
+def document_links(doc):
+    for attribute in LINK_ATTRIBUTES:
+        yield from attribute.findall(doc)
+
+
+def mentions_owner(doc):
+    return bool(("Owner" in doc and OWNER.search(doc))
+                or (OWNER_ENTITY.search(doc) and OWNER.search(html.unescape(doc))))
 
 
 def init_worker(dist, files, base):
@@ -138,12 +150,12 @@ def validate_doc(rel, doc):
             json.loads(block)
         except ValueError as exc:
             problems.append("bad JSON-LD (%s)" % exc)
-    for url in HREF.findall(doc):
+    for url in document_links(doc):
         target = resolve(_base, url)
         if target and target not in _files:
             problems.append("broken internal link %s" % url)
     if rel.startswith("land/") and rel.count("/") == 2:
-        if ("Owner" in doc or "&#" in doc) and OWNER.search(html.unescape(TAGS.sub(" ", doc))):
+        if mentions_owner(doc):
             problems.append("mentions an owner field")
         official_link = OFFICIAL_LINK.search(doc)
         if not official_link or not official_source(official_link.group(1)):
@@ -189,29 +201,44 @@ def validate_archive(bucket):
     return results
 
 
+def dist_files(dist):
+    pending = [(dist, "")]
+    while pending:
+        directory, prefix = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                relative = prefix + entry.name
+                if entry.is_dir():
+                    if not entry.is_symlink():
+                        pending.append((entry.path, relative + "/"))
+                else:
+                    yield relative
+
+
 def main(dist, data_dir=None):
     dist = os.path.abspath(dist)
     base = config.base_path()
     problems, titles, indexable = [], {}, set()
-    files = set()
-    for dirpath, _, names in os.walk(dist):
-        prefix = dirpath[len(dist) + 1:]
-        files.update(os.path.join(prefix, name) for name in names)
+    files = set(dist_files(dist))
     pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
     buckets = archive_files(dist)
     archive_paths = archive_listing_paths(buckets)
     for duplicate in sorted(archive_paths & files):
         problems.append("listing has both a static page and an archived page: %s" % duplicate)
     files.update(archive_paths)
-    with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 6), initializer=init_worker,
+    context = multiprocessing.get_context("fork") if os.name == "posix" else None
+    with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 6), mp_context=context, initializer=init_worker,
                              initargs=(dist, files, base)) as pool:
-        for rel, (title, index, issues) in zip(pages, pool.map(validate, pages, chunksize=128)):
+        static_results = pool.map(validate, pages, chunksize=128)
+        archived_results = pool.map(validate_archive, buckets)
+        cat = Catalog(data_dir)
+        for rel, (title, index, issues) in zip(pages, static_results):
             problems.extend("%s: %s" % (rel, issue) for issue in issues)
             if title:
                 titles.setdefault(title, []).append(rel)
             if index:
                 indexable.add("/" + rel.removesuffix("index.html"))
-        for batch in pool.map(validate_archive, buckets):
+        for batch in archived_results:
             for rel, title, index, issues in batch:
                 problems.extend("%s: %s" % (rel, issue) for issue in issues)
                 if title:
@@ -260,7 +287,6 @@ def main(dist, data_dir=None):
     elif os.path.exists(smap) or "Disallow: /" not in robots_txt:
         problems.append("staged copy must have robots.txt Disallow: / and no sitemap")
 
-    cat = Catalog(data_dir)
     active_parcels = {}
     for row in cat.current():
         county = re.sub(r"[^a-z0-9]", "", re.sub(r" county$", "", row["county"].lower()))

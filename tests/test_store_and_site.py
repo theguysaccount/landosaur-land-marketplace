@@ -11,6 +11,7 @@ from unittest.mock import patch
 from lando import adapters, build, config, refresh, research, store
 from lando.model import Catalog
 from lando.pages import Site
+from scripts import check_dist
 
 NOW = datetime.datetime(2026, 11, 26, 12, 0, tzinfo=datetime.timezone.utc)
 
@@ -68,6 +69,14 @@ class RotatingUrlTest(unittest.TestCase):
 
 
 class RefreshAndBuildTest(unittest.TestCase):
+    def test_validator_checks_links_and_owner_words_in_the_entire_dossier(self):
+        document = '<link href="/site.css"><img src="/parcel.png"><a href="/land/">Land</a>'
+        self.assertCountEqual(check_dist.document_links(document), ["/site.css", "/land/", "/parcel.png"])
+        for content in ('<p>Owner</p>', '<meta content="Prior Owner">', "&#79;wner", "O&#x77;ne&#114;"):
+            self.assertTrue(check_dist.mentions_owner(content), content)
+        for content in ("&#9744; Parcel card", "HomeOwnership", "landowner", "&#112;arcel"):
+            self.assertFalse(check_dist.mentions_owner(content), content)
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.data = os.path.join(self.tmp, "data")

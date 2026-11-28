@@ -415,9 +415,12 @@ try {
       const bar = document.querySelector(".mobile-land-agent"), links = document.querySelector(".dossier-metrics .benchmark-pill");
       return bar && getComputedStyle(bar).position === "fixed" && bar.getBoundingClientRect().right <= 375 && !!links;
     })()`), "mobile acquisition bar or county benchmark pill missing");
-    await page.goto(base + "/services/#start-land-agent");
-    await page.waitFor("document.getElementById('start-land-agent').getBoundingClientRect().top < innerHeight");
-    assert(await page.eval("document.getElementById('start-land-agent').getBoundingClientRect().top >= document.querySelector('header').getBoundingClientRect().bottom"),
+    await page.goto(base + "/services/?parcel=ks-snco-0973604015014000#start-land-agent");
+    await page.waitFor("document.querySelector('#selected-parcel-banner[aria-busy=false] h3')");
+    assert(await page.eval(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const top = document.getElementById('start-land-agent').getBoundingClientRect().top;
+      resolve(top >= document.querySelector('header').getBoundingClientRect().bottom && top < innerHeight);
+    })))`),
       "sticky navigation obscures the Land Agent form heading");
     assert(!bad.length, bad.join("; "));
   });

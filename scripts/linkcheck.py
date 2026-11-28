@@ -55,7 +55,7 @@ def main(base):
 
 def local_links(dist):
     """Verify all internal URLs in the release's buyer hubs and state guides."""
-    from check_dist import HREF, archive_files, archive_listing_paths, resolve
+    from check_dist import archive_files, archive_listing_paths, document_links, resolve
     from pathlib import Path
     root = Path(dist)
     archived = archive_listing_paths(archive_files(dist))
@@ -66,7 +66,7 @@ def local_links(dist):
         if not page.is_file():
             bad.append("Missing page %s" % page.relative_to(root))
             continue
-        for raw in HREF.findall(page.read_text(encoding="utf-8")):
+        for raw in document_links(page.read_text(encoding="utf-8")):
             target = resolve(config.base_path(), raw)
             if target and target not in checked:
                 checked.add(target)

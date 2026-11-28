@@ -2392,7 +2392,7 @@ class Site(object):
         if r.get("apn"):
             kv.append(("Parcel", esc(r["apn"])))
         if r.get("deadline"):
-            kv.append(("Deadline", esc(r["deadline"][:16].replace("T", " ") + " UTC")))
+            kv.append(("Deadline", esc(r["deadline_display"])))
         kv.append(("Source", '<a href="%s" rel="noopener">%s</a>' % (esc(src.get("url", r["url"])), esc(src.get("agency", r["source"])))))
         kv.append(("Last read", esc(r["checked"] or "unknown")))
         if r.get("first_seen"):

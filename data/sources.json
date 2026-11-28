@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T13:40:05Z",
+ "checked": "2026-11-28T13:48:34Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1948,6 +1948,24 @@
    "state": "GA",
    "upstream_total": 14,
    "url": "https://metroatlantalandbank.org/fee-simple-vacant-lots/"
+  },
+  "milford-de-corporate-center": {
+   "about": "Individually platted lots in the city\u2019s sale program, verified against the Kent County parcel roll and boundaries.",
+   "agency": "City of Milford Economic Development, Delaware",
+   "complete": true,
+   "count": 27,
+   "failures": 0,
+   "last_attempt": "2026-11-28T13:48:34Z",
+   "last_success": "2026-11-28T13:48:34Z",
+   "message": "",
+   "name": "Milford Corporate Center vacant development lots",
+   "notes": [],
+   "ok": true,
+   "read": 27,
+   "seconds": 4,
+   "state": "DE",
+   "upstream_total": 31,
+   "url": "https://growinmilford.com/news/2026/09/02/industrial-park/milford-corporate-center-s-first-infrastructure-phase-nearly-done/"
   },
   "mille-lacs-mn": {
    "about": "Saleable vacant tax-forfeited parcels in Mille Lacs County with GIS outlines, zoning, and waterfront indicators.",

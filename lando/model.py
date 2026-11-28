@@ -76,6 +76,7 @@ class Catalog(object):
                 deadline = parse_time(r.get("deadline"))
                 deadline_local = deadline.astimezone(sale_zone) if deadline and sale_zone else deadline
                 r["deadline_date"] = deadline_local.date().isoformat() if deadline_local else (r.get("deadline") or "")[:10]
+                r["deadline_display"] = deadline_local.strftime("%Y-%m-%d %H:%M %Z") if deadline_local else r["deadline_date"]
                 cutoff = deadline if r["status"] in ("auction_open", "auction_terms", "proposal_open") else None
                 offer_day = r.get("offer_close_date")
                 auction_day = r.get("auction_day")

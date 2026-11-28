@@ -1930,6 +1930,29 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("Private prior holder", repr(row))
         self.assertEqual(pdf.call_count, 3)
 
+    def test_milford_matches_marketed_lots_and_excludes_infrastructure_and_buildings(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = "<h1>Milford Corporate Center</h1><p>The city is now marketing 27 available lots.</p>"
+        approval = "ORDINANCE 2024-04 Final Major Subdivision Plan of Milford Corporate Center MD-16-173.00-01-01.00"
+        ring = [[-75.46, 38.927], [-75.459, 38.927], [-75.459, 38.928], [-75.46, 38.927]]
+        parcels = []
+        for lot, improvements in ((1, 0), (2, 20000), (27, 0), (28, 0), (29, 0)):
+            attrs = {"Lot_Number": str(lot), "Name": f"5-16-17301-01-{lot:02d}00-00001", "IMPROVE": improvements,
+                     "Parent": adapters.MILFORD_DE_PARENT, "Plat_Book": "PB 161-37", "PropertyUse": "Office - Vacant Land",
+                     "YearBuilt": 0, "DEEDACREAGE": 5.3, "LOCATION": "INNOVATION WAY"}
+            parcels.append({"attributes": attrs, "geometry": {"rings": [ring]}})
+        with patch.object(adapters, "pdf_text", return_value=approval), \
+                patch.object(adapters, "arcgis_query", return_value=("https://assessor.example", parcels)) as assessor:
+            rows, _ = adapters.milford_de_corporate_center(fetch, NOW, self.fail)
+            self.assertEqual([row["id"] for row in rows], ["de-milford-corporate-center-lot-1", "de-milford-corporate-center-lot-27"])
+            self.assertEqual((rows[0]["acres"], rows[0]["price"], rows[0]["status"]), (5.3, None, "listed"))
+            self.assertTrue(rows[0]["geometry"])
+            self.assertIn("UPPER(OWNERNAME)", assessor.call_args.args[2])
+            self.assertNotIn("owner", assessor.call_args.args[3].lower())
+            fetch.text.return_value = "The city has sold all Corporate Center lots."
+            with self.assertRaises(adapters.StructureError):
+                adapters.milford_de_corporate_center(fetch, NOW, self.fail)
+
     def test_sheridan_publishes_one_current_proposal_after_matching_both_vacant_tracts(self):
         from lando.adapters import SHERIDAN_WY_AGENCY, SHERIDAN_WY_CLOSE, SHERIDAN_WY_OPEN, SHERIDAN_WY_TERMS
 

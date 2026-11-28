@@ -224,6 +224,8 @@ def outline_url(listing):
         return one_parcel_url(CT_CAMA_PARCELS, f"Town_Name='Windham' AND Parcel_ID='{listing['apn']}'", "Parcel_ID,Location_1")
     if listing["source"] == "wy-osli-sheridan-rfp":
         return SHERIDAN_WY_SALE_MAP
+    if listing["source"] == "milford-de-corporate-center" and re.fullmatch(r"5-16-17301-01-\d{4}-00001", listing["apn"]):
+        return one_parcel_url(MILFORD_DE_PARCELS, f"Name='{listing['apn']}'", MILFORD_DE_FIELDS)
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -7433,6 +7435,59 @@ def salem_nj_offers(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(roster)}
 
 
+MILFORD_DE_SALES = ("https://growinmilford.com/news/2026/09/02/industrial-park/"
+                    "milford-corporate-center-s-first-infrastructure-phase-nearly-done/")
+MILFORD_DE_PLAT = "https://www.cityofmilford.com/Archive/ViewFile/Item/5252"
+MILFORD_DE_PARCELS = "https://gis.kentcountyde.gov/server/rest/services/Parcels/Parcels/FeatureServer/0/query"
+MILFORD_DE_PARENT = "5-16-17300-01-0100-00001"
+MILFORD_DE_FIELDS = "Name,Lot_Number,LOCATION,Parent,Plat_Book,DEEDACREAGE,IMPROVE,YearBuilt,PropertyUse"
+
+
+def milford_de_corporate_center(fetch, now, warn):
+    marketing = clean(fetch.text(MILFORD_DE_SALES))
+    if "Milford Corporate Center" not in marketing or "now marketing 27 available lots" not in marketing:
+        raise StructureError("Milford’s published offer for the Corporate Center lots changed")
+    plat = clean(pdf_text(fetch, MILFORD_DE_PLAT, extraction_mode="plain"))
+    if ("ORDINANCE 2024-04" not in plat or "Final Major Subdivision Plan of Milford Corporate Center" not in plat
+            or "MD-16-173.00-01-01.00" not in plat):
+        raise StructureError("Milford Corporate Center’s subdivision approval changed")
+
+    where = (f"Parent='{MILFORD_DE_PARENT}' AND Plat_Book='PB 161-37' "
+             "AND UPPER(OWNERNAME) LIKE '%MILFORD%' AND UPPER(OWNERNAME) LIKE '%CITY%'")
+    _, parcels = arcgis_query(fetch, MILFORD_DE_PARCELS, where, MILFORD_DE_FIELDS)
+    by_lot = Counter(clean(feature["attributes"].get("Lot_Number")) for feature in parcels)
+    rows = []
+    for feature in parcels:
+        attr = feature["attributes"]
+        lot = clean(attr.get("Lot_Number"))
+        # Only the 27 marketed lots. The other recorded parcels serve utilities or open space.
+        if not re.fullmatch(r"[1-9]|1\d|2[0-7]", lot) or by_lot[lot] != 1:
+            continue
+        pin = attr.get("Name")
+        acres = number(attr.get("DEEDACREAGE"))
+        addr = clean(attr.get("LOCATION")).title()
+        if (pin != f"5-16-17301-01-{int(lot):02d}00-00001" or attr.get("Parent") != MILFORD_DE_PARENT
+                or attr.get("Plat_Book") != "PB 161-37" or attr.get("PropertyUse") != "Office - Vacant Land"
+                or attr.get("IMPROVE") != 0 or attr.get("YearBuilt") != 0 or not acres or not addr):
+            continue
+        outline = one_parcel_url(MILFORD_DE_PARCELS, f"Name='{pin}'", MILFORD_DE_FIELDS)
+        row = {
+            "id": f"de-milford-corporate-center-lot-{lot}", "source": "milford-de-corporate-center",
+            "title": f"Milford Corporate Center lot {lot} ({addr})", "state": "DE", "county": "Kent",
+            "locality": "Milford", "address": addr, "apn": pin, "acres": acres, "price": None,
+            "price_kind": "none", "offering": "offer", "status": "listed", "deadline": None,
+            "url": MILFORD_DE_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Development lot marketed for sale by the city through NAI Emory Hill.", "="),
+                      fact("acreage", f"{acres:g} deed acres in the Kent County assessment record", outline),
+                      fact("parcel_number", f"Lot {lot}, Kent County Plat Book 161, page 37", outline),
+                      fact("sale_terms", "The city approved the subdivision. Confirm current purchase terms, deed restrictions and site readiness with the city’s broker.", MILFORD_DE_PLAT)],
+            "tags": ["city development land", "industrial park"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), outline, "Kent County")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(parcels)}
+
+
 DELDOT_AUCTIONS = "https://deldot.gov/Business/auctions/"
 # The vacancy is visible in the sale notice's official aerial and survey, not stated in its text.
 DELDOT_K303_SHA256 = "93435aa46f4c83a1ff0050b324d084bed18ae2102ed3740e187622b8f71e5180"
@@ -12794,6 +12849,10 @@ SOURCES = [
      "agency": SHERIDAN_WY_AGENCY, "url": SHERIDAN_WY_RFP, "state": "WY", "timezone": "America/Denver",
      "run": sheridan_wy_rfp, "requires_sale_match": True,
      "about": "The state invites competitive purchase, lease or exchange proposals for two vacant tracts as one offering."},
+    {"id": "milford-de-corporate-center", "name": "Milford Corporate Center vacant development lots",
+     "agency": "City of Milford Economic Development, Delaware", "url": MILFORD_DE_SALES, "state": "DE",
+     "run": milford_de_corporate_center, "requires_sale_match": True,
+     "about": "Individually platted lots in the city’s sale program, verified against the Kent County parcel roll and boundaries."},
     {"id": "riverton-wy-industrial", "name": "Riverton vacant industrial lots on Piper Drive",
      "agency": "City of Riverton, Wyoming", "url": RIVERTON_WY_DOCS["terms"][0], "state": "WY",
      "run": riverton_wy_industrial, "requires_sale_match": True,
@@ -12991,6 +13050,8 @@ NOT_CARRIED = [
      "The official meeting vendor disallows access to the older packet index and agenda routes in robots.txt."),
     ("Wyoming Sheridan RFP raw PDF download", "https://drive.google.com/uc?export=download&id=1xq6MKz8XOGB1ihchTkcdUfjxgbuDWRWe",
      "Drive disallows its automated download paths. The state’s announcement, public solicitation catalog and county assessment are carried."),
+    ("Milford Corporate Center separate marketing microsite", "https://milfordcorporatecenter.com/",
+     "The microsite could not serve a verifiable robots.txt over TLS. The city’s own sale publication and county parcel roll are carried."),
     ("Connecticut CTsource Bid Board", "https://webprocure.proactiscloud.com/wp-web-public/en/",
      "The state procurement vendor returned HTML in place of robots.txt. Windham’s separate town bid notice is carried."),
     ("Arkansas GeoStor statewide assessor portal", "https://geostor.arkansas.gov/",

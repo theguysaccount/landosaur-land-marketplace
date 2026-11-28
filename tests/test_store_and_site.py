@@ -119,6 +119,7 @@ class RefreshAndBuildTest(unittest.TestCase):
         cutoff = datetime.datetime(2026, 12, 16, tzinfo=datetime.timezone.utc)
         active, = Catalog(self.data, now=cutoff - datetime.timedelta(seconds=1)).current()
         self.assertEqual(active["deadline_date"], "2026-12-15")
+        self.assertEqual(active["deadline_display"], "2026-12-15 17:00 MST")
         self.assertEqual(active["deadline"], row["deadline"])
         self.assertEqual(active["closes_at_ms"], int(cutoff.timestamp() * 1000))
         self.assertEqual(Catalog(self.data, now=cutoff).current(), [])

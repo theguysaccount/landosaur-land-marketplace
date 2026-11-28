@@ -1305,6 +1305,7 @@ class Site(object):
             cur_by_state[r["state"]] = cur_by_state.get(r["state"], 0) + 1
 
         enriched = []
+        table_rows = []
         n_deed = n_lien = n_red = 0
         for row in tax_sales_mod.TAX_SALE_STATES:
             code = row["code"]
@@ -1317,7 +1318,7 @@ class Site(object):
                 n_lien += 1
             else:
                 n_red += 1
-            enriched.append({
+            state = {
                 "code": code,
                 "name": name,
                 "slug": slug,
@@ -1328,7 +1329,29 @@ class Site(object):
                 "notes": row["notes"],
                 "live_count": cur_by_state.get(code, 0),
                 "state_path": cat.state_path(st_obj) if st_obj else "",
-            })
+            }
+            enriched.append(state)
+            badge_class = {"deed": "badge ok", "redeemable_deed": "badge auction"}.get(state["mode"], "badge")
+            if state["state_path"]:
+                inventory = '<a href="%s"><strong>%s active →</strong></a>' % (
+                    esc(self.u(state["state_path"])), "{:,}".format(state["live_count"]))
+            else:
+                inventory = '<a href="%s">Benchmarks →</a>' % esc(self.u("/land-prices/" + slug + "/"))
+            concierge_url = esc(self.u("/services/?service=auction_proxy&state=" + code))
+            table_rows.append(
+                '<tr id="state-%s">'
+                '<th scope="row"><strong>%s</strong> <span class="sub">%s</span></th>'
+                '<td data-label="Sale Type"><span class="%s">%s</span></td>'
+                '<td data-label="Redemption">%s</td>'
+                '<td data-label="Rate / Penalty">%s</td>'
+                '<td data-label="Live Inventory">%s</td>'
+                '<td data-label="Rules Summary" class="small">%s</td>'
+                '<td data-label="Land Agent"><a class="chip-btn chip-link" href="%s">Bid Concierge ($20)</a></td>'
+                '</tr>' % (
+                    code, esc(name), code, badge_class, esc(state["mode_label"]), esc(state["redemption"]),
+                    esc(state["interest"]), inventory, esc(state["notes"]), concierge_url,
+                )
+            )
 
         faqs = [
             ("What is the difference between a Tax Deed state and a Tax Lien state?",
@@ -1379,9 +1402,9 @@ class Site(object):
             '<th scope="col">State</th><th scope="col">Sale Type</th><th scope="col">Statutory Redemption</th>'
             '<th scope="col">Rate / Penalty</th><th scope="col">Live Landosaur Parcels</th>'
             '<th scope="col">Key Statutory Notes</th><th scope="col">Concierge</th>'
-            '</tr></thead><tbody id="tax-tbody"></tbody></table></div>'
+            '</tr></thead><tbody id="tax-tbody">%s</tbody></table></div>'
             '<p class="notice" style="margin-top:14px">Statutory summaries are for educational research only and are not legal or tax advice. County treasurers, sheriffs, and municipal charters may apply local procedures, recent post-<em>Tyler v. Hennepin</em> equity-auction reforms, and strict registration deadlines—always verify directly with the county or consult a licensed real-estate attorney.</p>'
-            '</section>',
+            '</section>' % "".join(table_rows),
 
             self.faq_block(faqs, "Tax-sale & redemption frequently asked questions"),
             '<script id="tax-sales-data" type="application/json">%s</script>' % json.dumps(enriched, separators=(",", ":")).replace("</", "<\\/"),

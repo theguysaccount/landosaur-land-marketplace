@@ -235,9 +235,28 @@ try {
   await step("Below-Market /deals/, 50-State /tax-sales/ Atlas, and /api/alerts/ load cleanly", async () => {
     await page.goto(base + "/deals/");
     assert(await page.eval("document.querySelectorAll('#below-benchmark tbody tr').length >= 10 && document.body.innerText.includes('Land Agent ($20)')"), "missing below-market deals rows");
-    await page.goto(base + "/tax-sales/");
+    await page.goto(base + "/tax-sales/#state-WY");
     await page.waitFor("document.querySelectorAll('#tax-cartogram a.us-tile').length === 50", 12000);
     assert(await page.eval("document.querySelectorAll('#tax-tbody tr').length === 50"), "expected 50 rows on /tax-sales/");
+    await page.waitFor(`(() => {
+      const row = document.getElementById("state-WY").getBoundingClientRect();
+      return row.top >= 0 && row.top < innerHeight;
+    })()`);
+    const stateFilters = await page.eval(`(() => {
+      const state = document.getElementById("state-WY");
+      const search = document.getElementById("tax-search");
+      document.querySelector('[data-tax-mode=deed]').click();
+      search.value = "Hawaii";
+      search.dispatchEvent(new Event("input"));
+      const filtered = state.hidden && state.getClientRects().length === 0;
+      document.querySelector('[data-ts-code=WY] strong').click();
+      return [filtered, !state.hidden, search.value, location.hash,
+              document.querySelector('[data-tax-mode=all]').getAttribute("aria-pressed"),
+              document.getElementById("tax-count").textContent];
+    })()`);
+    assert(stateFilters[0] && stateFilters[1] && !stateFilters[2] && stateFilters[3] === "#state-WY" &&
+           stateFilters[4] === "true" && stateFilters[5] === "Showing 50 of 50 U.S. states",
+           "cartogram did not restore the linked row after filtering");
     if (!isLocal) {
       const alertOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/alerts/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.ok && d.storage_configured === true))`);
       assert(alertOk, "live /api/alerts/ metadata check failed");

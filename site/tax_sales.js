@@ -3,7 +3,6 @@
   "use strict";
   var root = document.getElementById("tax-sales-app");
   if (!root) return;
-  var base = document.body.getAttribute("data-base") || "";
   var dataEl = document.getElementById("tax-sales-data");
   if (!dataEl) return;
   var STATES = [];
@@ -33,7 +32,6 @@
   var searchQ = "";
   var gridEl = document.getElementById("tax-cartogram");
   var tipEl = document.getElementById("tax-tip");
-  var tbody = document.getElementById("tax-tbody");
   var countEl = document.getElementById("tax-count");
   var qInput = document.getElementById("tax-search");
   var modeBtns = Array.prototype.slice.call(document.querySelectorAll("[data-tax-mode]"));
@@ -54,9 +52,8 @@
           continue;
         }
         var pal = MODE_COLORS[found.mode] || MODE_COLORS.deed;
-        var dimmed = activeMode !== "all" && found.mode !== activeMode;
         html.push(
-          "<a class='us-tile' data-ts-code='" + found.code + "' href='#state-" + found.code + "' style='background:" + pal.bg + ";color:" + pal.fg + ";opacity:" + (dimmed ? "0.24" : "1") + "' title='" + esc(found.name + ": " + found.mode_label + " · Redemption: " + found.redemption) + "'>" +
+          "<a class='us-tile' data-ts-code='" + found.code + "' href='#state-" + found.code + "' style='background:" + pal.bg + ";color:" + pal.fg + "' title='" + esc(found.name + ": " + found.mode_label + " · Redemption: " + found.redemption) + "'>" +
           "<strong>" + found.code + "</strong><span>" + (found.live_count > 0 ? found.live_count.toLocaleString("en-US") : pal.label.split(" ")[1] || found.mode) + "</span></a>"
         );
       }
@@ -74,49 +71,59 @@
   }
 
   function renderTable() {
-    if (!tbody) return;
-    var rows = STATES.filter(function (s) {
-      if (activeMode !== "all" && s.mode !== activeMode) return false;
-      if (searchQ && (s.name + " " + s.code + " " + s.mode_label + " " + s.redemption + " " + s.notes).toLowerCase().indexOf(searchQ) < 0) return false;
-      return true;
+    var visibleCount = 0;
+    STATES.forEach(function (s) {
+      var row = document.getElementById("state-" + s.code);
+      var matchesMode = activeMode === "all" || s.mode === activeMode;
+      var searchText = (s.name + " " + s.code + " " + s.mode_label + " " + s.redemption + " " + s.notes).toLowerCase();
+      row.hidden = !matchesMode || !searchText.includes(searchQ);
+      if (!row.hidden) visibleCount++;
     });
-    if (countEl) countEl.textContent = "Showing " + rows.length + " of 50 U.S. states";
-    tbody.innerHTML = rows.map(function (s) {
-      var badgeCls = s.mode === "deed" ? "ok" : (s.mode === "redeemable_deed" ? "auction" : "");
-      var liveLink = s.state_path
-        ? "<a href='" + esc(base + s.state_path) + "'><strong>" + s.live_count.toLocaleString("en-US") + " active →</strong></a>"
-        : "<a href='" + esc(base + "/land-prices/" + s.slug + "/") + "'>Benchmarks →</a>";
-      var agentHref = base + "/services/?service=auction_proxy&state=" + encodeURIComponent(s.code);
-      return (
-        "<tr id='state-" + s.code + "'>" +
-        "<th scope='row'><strong>" + esc(s.name) + "</strong> <span class='sub'>" + s.code + "</span></th>" +
-        "<td data-label='Sale Type'><span class='badge " + badgeCls + "'>" + esc(s.mode_label) + "</span></td>" +
-        "<td data-label='Redemption'>" + esc(s.redemption) + "</td>" +
-        "<td data-label='Rate / Penalty'>" + esc(s.interest) + "</td>" +
-        "<td data-label='Live Inventory'>" + liveLink + "</td>" +
-        "<td data-label='Rules Summary' class='small'>" + esc(s.notes) + "</td>" +
-        "<td data-label='Land Agent'><a class='chip-btn chip-link' href='" + esc(agentHref) + "'>Bid Concierge ($20)</a></td>" +
-        "</tr>"
-      );
-    }).join("");
+    countEl.textContent = "Showing " + visibleCount + " of 50 U.S. states";
+  }
+
+  function setMode(mode) {
+    activeMode = mode;
+    modeBtns.forEach(function (btn) {
+      var selected = btn.getAttribute("data-tax-mode") === mode;
+      btn.classList.toggle("active", selected);
+      btn.setAttribute("aria-pressed", String(selected));
+    });
+    STATES.forEach(function (s) {
+      var tile = gridEl.querySelector('[data-ts-code="' + s.code + '"]');
+      tile.style.opacity = mode === "all" || s.mode === mode ? "" : "0.24";
+    });
+    renderTable();
+  }
+
+  function revealLinkedState(hash) {
+    if (!/^#state-[A-Z]{2}$/.test(hash)) return;
+    var row = document.getElementById(hash.slice(1));
+    if (!row || !row.hidden) return;
+    searchQ = "";
+    qInput.value = "";
+    setMode("all");
+    row.scrollIntoView();
   }
 
   modeBtns.forEach(function (btn) {
     btn.addEventListener("click", function () {
-      activeMode = btn.getAttribute("data-tax-mode") || "all";
-      modeBtns.forEach(function (b) { b.classList.toggle("active", b === btn); });
-      renderCartogram();
-      renderTable();
+      setMode(btn.getAttribute("data-tax-mode"));
     });
   });
 
-  if (qInput) {
-    qInput.addEventListener("input", function () {
-      searchQ = qInput.value.trim().toLowerCase();
-      renderTable();
-    });
-  }
+  qInput.addEventListener("input", function () {
+    searchQ = qInput.value.trim().toLowerCase();
+    renderTable();
+  });
+  gridEl.addEventListener("click", function (event) {
+    var tile = event.target.closest("[data-ts-code]");
+    if (tile && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+      revealLinkedState(tile.hash);
+    }
+  });
+  window.addEventListener("hashchange", function () { revealLinkedState(location.hash); });
 
   renderCartogram();
-  renderTable();
+  setMode("all");
 })();

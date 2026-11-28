@@ -1069,6 +1069,29 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_chelan_tax_auction_checks_improvements_and_keeps_balance_out_of_price(self):
+        schedule = ('<p>Online sale will be held Dec. 7, 2026, through Dec. 9, 2026.</p>'
+                    '<table><tr><td>26258</td><td>PRIVATE PERSON</td><td>$5,123.00</td>'
+                    '<td>UNASSIGNED</td><td>WENATCHEE WA</td></tr>'
+                    '<tr><td>43034</td><td>PRIVATE PERSON</td><td>$181.92</td>'
+                    '<td>103 N PARK (TIMESHARE UNIT)</td><td>CHELAN WA</td></tr></table>')
+        assessor = ('Year 2026 - 2027 Property ID: 26258 Geographic ID: 232033110220 Land Use Code 11 '
+                    'Legal Acres: 0.8800 Improvement Homesite Value: + $0 Improvement Non-Homesite Value: + $0')
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [schedule, assessor]
+        rings = [[[-120.31, 47.42], [-120.31, 47.421], [-120.309, 47.421],
+                  [-120.309, 47.42], [-120.31, 47.42]]]
+        gis = [{"attributes": {"ORIG_PARCEL_ID": "232033110220", "VALUE_BLDG": 0}, "geometry": {"rings": rings}}]
+        with patch.object(adapters, "_arcgis_query", return_value=gis):
+            rows, info = adapters.chelan_wa_auction(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual(info["upstream_total"], 1)
+        self.assertEqual((row["apn"], row["price"], row["acres"], row["auction_day"]),
+                         ("232033110220", None, .88, "2026-12-09"))
+        self.assertNotIn("PRIVATE PERSON", repr(row))
+        improved = assessor.replace("Improvement Homesite Value: + $0", "Improvement Homesite Value: + $5,000")
+        self.assertIsNone(adapters.parse_chelan_wa_assessment(improved, "26258", 2026))
+
     def test_douglas_tax_title_uses_current_minimum_and_preserves_access_restriction(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = '<a href="/current.pdf">Douglas County - Tax Title Properties</a>'

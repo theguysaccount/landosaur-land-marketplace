@@ -8445,7 +8445,7 @@ def nevada_ca_tax_sale(fetch, now, warn):
 
 
 DOUGLAS_WA_TAX_TITLE = "https://www.douglascountywa.gov/163/Tax-Foreclosure-Information"
-DOUGLAS_WA_PARCELS = "https://services.arcgis.com/jsIt88o09Q0r1j8h/ArcGIS/rest/services/Current_Parcels/FeatureServer/0/query"
+WASHINGTON_STATE_PARCELS = "https://services.arcgis.com/jsIt88o09Q0r1j8h/ArcGIS/rest/services/Current_Parcels/FeatureServer/0/query"
 DOUGLAS_WA_NO_ACCESS = "Parcel by water – no land access without acquiring easement"
 
 
@@ -8478,7 +8478,7 @@ def douglas_wa_tax_title(fetch, now, warn):
     if not offers:
         return [], {"complete": True, "upstream_total": 0}
     where = "FIPS_NR='017' AND ORIG_PARCEL_ID IN (%s)" % quote_list(sorted(offers))
-    features = _arcgis_query(fetch, DOUGLAS_WA_PARCELS, where,
+    features = _arcgis_query(fetch, WASHINGTON_STATE_PARCELS, where,
                              "ORIG_PARCEL_ID,LANDUSE_CD,VALUE_BLDG,VALUE_LAND")
     pins = [feature["attributes"].get("ORIG_PARCEL_ID") for feature in features]
     if len(pins) != len(offers) or set(pins) != set(offers):
@@ -8505,8 +8505,98 @@ def douglas_wa_tax_title(fetch, now, warn):
         }
         if no_access:
             row["facts"].append(fact("access", DOUGLAS_WA_NO_ACCESS, url))
-        apply_geometry(row, rings, DOUGLAS_WA_PARCELS, "Washington State Parcels Project")
+        apply_geometry(row, rings, WASHINGTON_STATE_PARCELS, "Washington State Parcels Project")
         rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
+
+
+CHELAN_WA_AUCTION = "https://www.co.chelan.wa.us/treasurer/pages/real-property-foreclosure-sales"
+CHELAN_WA_ASSESSMENT = "https://pacs.co.chelan.wa.us/PropertyAccess/Property.aspx?cid=90&prop_id={}&year={}"
+CHELAN_WA_LAND_CLASSES = {11: "Residential land", 83: "Agricultural current-use land",
+                          91: "Undeveloped land", 92: "Noncommercial forest land"}
+
+
+def parse_chelan_wa_auction(page):
+    dates = re.search(r"Online sale will be held\s+([A-Za-z]+)\.? (\d{1,2}), (\d{4}),?\s+through\s+"
+                      r"([A-Za-z]+)\.? (\d{1,2}), (\d{4})", clean(page), re.I)
+    if not dates:
+        raise StructureError("Chelan County’s online auction dates could not be read")
+    def date(month, day, year):
+        return datetime.datetime.strptime(f"{month[:3]} {day} {year}", "%b %d %Y").date()
+
+    starts, ends = date(*dates.groups()[:3]), date(*dates.groups()[3:])
+    if ends < starts:
+        raise StructureError("Chelan County’s auction dates are reversed")
+    offers = {}
+    for line in re.findall(r"<tr\b[^>]*>(.*?)</tr>", page, re.I | re.S):
+        cells = [clean(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", line, re.I | re.S)]
+        if len(cells) != 5 or not re.fullmatch(r"\d{4,8}", cells[0]):
+            continue
+        prop_id, _, amount_due, situs, city = cells
+        if not re.fullmatch(r"\$[\d,]+\.\d{2}", amount_due) or re.search(r"timeshare|redeemed|withdrawn", situs, re.I):
+            continue
+        if prop_id in offers:
+            raise StructureError("Chelan County’s current auction contains duplicate property IDs")
+        offers[prop_id] = ("" if situs.upper() == "UNASSIGNED" else situs.title(), re.sub(r"\s+WA$", "", city).title())
+    return starts, ends, offers
+
+
+def parse_chelan_wa_assessment(page, prop_id, year):
+    if not re.search(rf"\bProperty ID: {prop_id}\b", page) or not re.search(rf"\bYear {year}\b", page):
+        raise StructureError("Chelan County’s property search did not return the auction parcel and assessment year")
+    pin = re.search(r"\bGeographic ID: (\d{12})\b", page)
+    land_class = re.search(r"\bLand Use Code (\d+)\b", page)
+    acres = re.search(r"\bLegal Acres: ([\d,.]+)\b", page)
+    values = re.findall(r"\bImprovement (?:Non-)?Homesite Value:\s*\+?\s*\$([\d,.]+)", page)
+    if not pin or not land_class or len(values) != 2:
+        raise StructureError("Chelan County’s assessment record is missing parcel or improvement fields")
+    if int(land_class[1]) not in CHELAN_WA_LAND_CLASSES or any(number(value) for value in values):
+        return None
+    return pin[1], int(land_class[1]), number(acres[1]) if acres else None
+
+
+def chelan_wa_auction(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    starts, ends, offers = parse_chelan_wa_auction(fetch.text(CHELAN_WA_AUCTION))
+    if ends <= now.astimezone(ZoneInfo("America/Los_Angeles")).date() or not offers:
+        return [], {"complete": True, "upstream_total": 0}
+    assessments = {}
+    for prop_id, (situs, locality) in offers.items():
+        url = CHELAN_WA_ASSESSMENT.format(prop_id, starts.year)
+        assessment = parse_chelan_wa_assessment(clean(fetch.text(url)), prop_id, starts.year)
+        if assessment:
+            pin, land_class, acres = assessment
+            if pin in assessments:
+                raise StructureError("Chelan County’s auction assessments repeat a geographic parcel ID")
+            assessments[pin] = (url, land_class, acres, situs, locality)
+    if not assessments:
+        return [], {"complete": True, "upstream_total": len(offers)}
+    where = "FIPS_NR='007' AND ORIG_PARCEL_ID IN (%s)" % quote_list(sorted(assessments))
+    features = _arcgis_query(fetch, WASHINGTON_STATE_PARCELS, where, "ORIG_PARCEL_ID,VALUE_BLDG")
+    counts = Counter(f["attributes"].get("ORIG_PARCEL_ID") for f in features)
+    rows = []
+    for feature in features:
+        info = feature["attributes"]
+        pin = info.get("ORIG_PARCEL_ID")
+        if pin not in assessments or counts[pin] != 1 or info.get("VALUE_BLDG") != 0:
+            continue
+        assessor_url, land_class, acres, situs, locality = assessments[pin]
+        row = {
+            "id": "wa-chelan-auction-" + pin, "source": "chelan-wa-auction",
+            "title": "Parcel %s (Chelan County vacant land auction)" % pin,
+            "state": "WA", "county": "Chelan", "locality": locality, "address": situs, "apn": pin,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+            "deadline": None, "auction_day": ends.isoformat(), "url": CHELAN_WA_AUCTION,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county treasurer lists this parcel in its online auction.", CHELAN_WA_AUCTION),
+                      fact("auction_window", f"{starts:%B %d, %Y} through {ends:%B %d, %Y}", CHELAN_WA_AUCTION),
+                      fact("land_use", CHELAN_WA_LAND_CLASSES[land_class] + " with zero assessed improvements.", assessor_url)],
+            "tags": ["tax deed auction", "registration required"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), WASHINGTON_STATE_PARCELS, "Washington State Parcels Project")
+        if row["geometry"]:
+            rows.append(row)
     return rows, {"complete": True, "upstream_total": len(offers)}
 
 
@@ -8984,6 +9074,10 @@ SOURCES = [
      "agency": "Douglas County Treasurer, Washington", "url": DOUGLAS_WA_TAX_TITLE, "state": "WA",
      "run": douglas_wa_tax_title, "requires_sale_match": True,
      "about": "Vacant parcels on the county’s current tax-title purchase list with published minimum bids and access notes."},
+    {"id": "chelan-wa-auction", "name": "Chelan County vacant tax-deed auction land",
+     "agency": "Chelan County Treasurer, Washington", "url": CHELAN_WA_AUCTION, "state": "WA",
+     "run": chelan_wa_auction, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Currently scheduled auction parcels matched to county improvement records and state parcel boundaries."},
 ]
 NOT_CARRIED = [
     ("Snohomish County current foreclosure auction", "https://snohomishcountywa.gov/220/Tax-Foreclosures",

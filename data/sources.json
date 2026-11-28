@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T04:59:28Z",
+ "checked": "2026-11-28T05:06:21Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -434,6 +434,24 @@
    "state": "NC",
    "upstream_total": 200,
    "url": "https://www.charlottenc.gov/"
+  },
+  "chelan-wa-auction": {
+   "about": "Currently scheduled auction parcels matched to county improvement records and state parcel boundaries.",
+   "agency": "Chelan County Treasurer, Washington",
+   "complete": true,
+   "count": 5,
+   "failures": 0,
+   "last_attempt": "2026-11-28T05:06:21Z",
+   "last_success": "2026-11-28T05:06:21Z",
+   "message": "",
+   "name": "Chelan County vacant tax-deed auction land",
+   "notes": [],
+   "ok": true,
+   "read": 5,
+   "seconds": 14,
+   "state": "WA",
+   "upstream_total": 7,
+   "url": "https://www.co.chelan.wa.us/treasurer/pages/real-property-foreclosure-sales"
   },
   "cherry-hill-nj": {
    "about": "Township-owned vacant lots in Camden County, New Jersey with GIS outlines and block/lot IDs.",

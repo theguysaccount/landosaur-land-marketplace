@@ -10921,6 +10921,13 @@ CT_CAMA_PARCELS = ("https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/se
                    "Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0/query")
 CT_CAMA_FIELDS = ("Town_Name,Parcel_ID,Parcel_Collection_Year,Location_1,State_Use_Description,Appraised_Land,"
                   "Appraised_Building,Appraised_Outbuilding,Living_Area,Land_Acres")
+SUFFIELD_CT_ASSESSOR = "https://suffield.mapxpress.net/ags_map/detail_AGS.asp?UNIQUE_ID="
+SUFFIELD_CT_AUCTIONS = {
+    "10 METACOMET LANE": ("See Suffield Assessor Map 6 Block 11 Lot 58-B-2", (("6-11-58-B-2", "R92117"),)),
+    "0 SECOND STREET": ("See Suffield Assessor’s Map 75 H, Block 45, Lot 80", (("75H-45-80", "R75589"),)),
+    "0 PILGRIM LANE AND 0 PLYMOUTH LANE": ("See Suffield Assessor Map 8H Block 3 Lots 27 and 42",
+                                          (("8H-3-42", "R08523"), ("8H-3-27", "R08511"))),
+}
 
 
 def parse_ct_municipal_tax_sales(page):
@@ -10987,6 +10994,69 @@ def bethlehem_ct_munger_auction(fetch, url, time, date, start, year):
     }
 
 
+def suffield_ct_vacant_auctions(fetch, notices, time, date, start, year):
+    town = "Town_Name='Suffield'"
+    entries = [(address, notices.pop(address), boundary, maps)
+               for address, (boundary, maps) in SUFFIELD_CT_AUCTIONS.items() if address in notices]
+    if not entries:
+        return []
+    pins = [pin for _, _, _, maps in entries for _, pin in maps]
+    features = _arcgis_query(fetch, CT_CAMA_PARCELS, f"{town} AND Parcel_ID IN ({quote_list(pins)})",
+                             CT_CAMA_FIELDS, count=len(pins) + 1, post=True)
+    by_pin = {feature["attributes"].get("Parcel_ID"): feature for feature in features}
+    if len(by_pin) != len(features):
+        raise StructureError("Connecticut assessment data repeats a Suffield parcel")
+    rows = []
+    for address, url, boundary, maps in entries:
+        notice = clean(pdf_text(fetch, url, extraction_mode="plain"))
+        if ("LEVYING MUNICIPALITY: Town of Suffield" not in notice
+                or f"ADDRESS OF REAL ESTATE: {address}, SUFFIELD CT" not in notice.upper()
+                or boundary not in notice or f"{time} on {date}" not in notice or "slated it for public auction" not in notice):
+            continue
+        parcels = []
+        for map_id, pin in maps:
+            feature = by_pin.get(pin, {})
+            attr = feature.get("attributes", {})
+            if (attr.get("Town_Name") != "Suffield" or clean(attr.get("Parcel_Collection_Year")) not in {str(year), str(year - 1)}
+                    or not number(attr.get("Appraised_Land")) or attr.get("Appraised_Building") != 0
+                    or attr.get("Appraised_Outbuilding") != 0 or attr.get("Living_Area") != 0):
+                break
+            assessor_url = SUFFIELD_CT_ASSESSOR + pin
+            assessor = clean(fetch.text(assessor_url))
+            area = re.search(r"\bGIS Acres (\d+(?:\.\d+)?)\b", assessor)
+            if (not re.search(rf"\bParcel ID Unique ID {re.escape(map_id)} {pin}\b", assessor)
+                    or "Land Use Residential Vacant Land" not in assessor
+                    or not re.search(r"\bBuildings 0 0\b", assessor) or not area or not number(area[1])):
+                break
+            parcels.append((map_id, number(area[1]), assessor_url, feature))
+        if len(parcels) != len(maps):
+            continue
+        grouped = len(parcels) > 1
+        map_ids = [part[0] for part in parcels]
+        label = re.sub(r"\b0 ", "", address.title()).replace(" And ", " and ")
+        parcel_facts = [fact("parcel_map", f"Suffield assessment parcel {map_id} · {area:g} GIS acres · vacant land", assessor)
+                        for map_id, area, assessor, _ in parcels]
+        row = {
+            "id": "ct-suffield-tax-deed-" + "-and-".join(slug(map_id) for map_id in map_ids),
+            "source": "ct-municipal-vacant-tax-deed", "title": f"{label}, Suffield (vacant municipal tax deed)",
+            "state": "CT", "county": "Hartford", "locality": "Suffield", "apn": " / ".join(map_ids), "address": label,
+            "acres": None if grouped else parcels[0][1], "price": None, "price_kind": "none",
+            "offering": "auction", "status": "auction_terms",
+            "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("auction_start", f"{date} at {time} Eastern", "="),
+                      *([fact("availability", "The notice offers two separately assessed parcels together.", "=")] if grouped else []),
+                      fact("sale_terms", "Read the current auction notice for the deposit, registration and redemption terms.", "="),
+                      *parcel_facts],
+            "tags": ["vacant land", "tax deed auction"],
+        }
+        if not grouped:
+            rings = (parcels[0][3].get("geometry") or {}).get("rings", [])
+            apply_geometry(row, rings, CT_CAMA_PARCELS, "Connecticut GIS Office")
+        rows.append(row)
+    return rows
+
+
 def ct_municipal_tax_sales(fetch, now, warn):
     from zoneinfo import ZoneInfo
 
@@ -11001,6 +11071,8 @@ def ct_municipal_tax_sales(fetch, now, warn):
         if town == "Bethlehem" and (group_url := notices.pop("0 AND 0 MUNGER LANE", None)):
             if group := bethlehem_ct_munger_auction(fetch, group_url, time, date, start, now.year):
                 rows.append(group)
+        if town == "Suffield":
+            rows.extend(suffield_ct_vacant_auctions(fetch, notices, time, date, start, now.year))
         if not notices:
             continue
         where = f"Town_Name IN ({quote_list([town])}) AND UPPER(Location_1) IN ({quote_list(notices)})"
@@ -12072,7 +12144,7 @@ SOURCES = [
     {"id": "ct-municipal-vacant-tax-deed", "name": "Connecticut municipal vacant land tax deeds",
      "agency": "Participating Connecticut Municipal Tax Collectors", "url": CT_MUNICIPAL_TAX_SALE, "state": "CT",
      "run": ct_municipal_tax_sales, "requires_sale_match": True, "timezone": "America/New_York",
-     "about": "Current municipal auction notices from the towns’ appointed administrator, matched against state assessment records."},
+     "about": "Current municipal auction notices from the towns’ appointed administrator, matched to state and available local assessment records."},
     {"id": "jefferson-tx-sheriff-deed", "name": "Jefferson County Sheriff vacant land tax deeds",
      "agency": "Jefferson County Sheriff, Texas", "url": JEFFERSON_TX_SALE, "state": "TX",
      "run": jefferson_tx_sheriff_sale, "requires_sale_match": True, "timezone": "America/Chicago",
@@ -12812,9 +12884,17 @@ NOT_CARRIED = [
     ("Hawaii Awards & Notices Data System", "https://hands.ehawaii.gov/hands/opportunities",
      "The state procurement portal returned HTML in place of robots.txt."),
     ("Town of Suffield tax-sale news article and assessor map", "https://www.suffieldct.gov/our-town/news/town-news-default/~board/town-news/post/town-of-suffield-tax-sale-1790963357528",
-     "The town disallows the article path, and the linked assessor map service disallows parcel queries in robots.txt."),
+     "The town disallows the article path, and the linked GIS service disallows parcel queries. Separately published town assessor reports and appointed auction notices verify the carried parcels."),
     ("Suffield linked assessor property cards", "https://www.propertyrecordcards.com/SearchMaster.aspx?towncode=139",
      "The assessor vendor disallows its property search path in robots.txt."),
+    ("Oakland, Maine assessor GIS vendor", "https://www.axisgis.com/oaklandme",
+     "The assessor map vendor disallows the town’s map path. The development authority’s current sale pages are carried."),
+    ("Fremont County, Colorado designated legal classifieds", "https://canoncityclassifieds.com/AdEverywhere/SI/PR/CA/VACG/?cgi=0&cgname=Legals&s=canoncityclassifieds",
+     "The county’s designated newspaper classified ads path is disallowed by robots.txt. The county site has yet to post the separate parcel notices."),
+    ("Colorado Press Association public notices directory", "https://www.publicnoticecolorado.com/Terms-of-Use.aspx",
+     "The directory license limits use to personal or internal purposes and does not permit republishing or reuse of its data."),
+    ("Navajo County legacy board-of-supervisors packet index", "https://public.destinyhosted.com/navajdocs/",
+     "The official meeting vendor disallows access to the older packet index and agenda routes in robots.txt."),
     ("Connecticut CTsource Bid Board", "https://webprocure.proactiscloud.com/wp-web-public/en/",
      "The state procurement vendor returned HTML in place of robots.txt. Windham’s separate town bid notice is carried."),
     ("Arkansas GeoStor statewide assessor portal", "https://geostor.arkansas.gov/",

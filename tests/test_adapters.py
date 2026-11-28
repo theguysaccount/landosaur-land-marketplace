@@ -464,6 +464,41 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
             features[1]["attributes"]["Appraised_Building"] = 600
             self.assertEqual(adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)[0], [])
 
+    def test_suffield_joins_exact_assessor_maps_and_checks_every_parcel(self):
+        href = "/wp-content/uploads/2026/11/pilgrim-plymouth.pdf"
+        directory = ('<h1>Upcoming Tax Sales</h1><p>MUNICIPALITY: Town of Suffield<br>'
+                     'AUCTION DATE: 2:00 p.m. on December 10, 2026<br>LOCATION: Town Hall</p>'
+                     f'<a href="{href}">0 Pilgrim Lane and 0 Plymouth Lane, Suffield CT</a>')
+        notice = ("slated it for public auction LEVYING MUNICIPALITY: Town of Suffield "
+                  "ADDRESS OF REAL ESTATE: 0 Pilgrim Lane and 0 Plymouth Lane, Suffield CT "
+                  "See Suffield Assessor Map 8H Block 3 Lots 27 and 42 2:00 p.m. on December 10, 2026 "
+                  "TOTAL AMOUNT DUE: $1,200 PRIVATE NAME")
+        report = ("<table><tr><td>Parcel ID</td><td>Unique ID</td></tr><tr><td>{map_id}</td><td>{pin}</td></tr>"
+                  "<tr><td>Buildings</td><td>0</td><td>0</td></tr><tr><td>GIS Acres</td><td>{area}</td></tr>"
+                  "<tr><td>Land Use</td><td>Residential Vacant Land</td></tr></table>")
+        pages = {adapters.CT_MUNICIPAL_TAX_SALE: directory}
+        features = []
+        for map_id, pin, area in (("8H-3-42", "R08523", 0.09), ("8H-3-27", "R08511", 0.1)):
+            pages[adapters.SUFFIELD_CT_ASSESSOR + pin] = report.format(map_id=map_id, pin=pin, area=area)
+            features.append({"attributes": {"Town_Name": "Suffield", "Parcel_ID": pin, "Parcel_Collection_Year": "2026",
+                                           "Appraised_Land": 600, "Appraised_Building": 0, "Appraised_Outbuilding": 0,
+                                           "Living_Area": 0}})
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = pages.__getitem__
+        with patch.object(adapters, "pdf_text", return_value=notice) as pdf, \
+                patch.object(adapters, "_arcgis_query", return_value=features):
+            rows, _ = adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual(row["apn"], "8H-3-42 / 8H-3-27")
+            self.assertEqual((row["price"], row["deadline"], row["geometry"]), (None, "2026-12-10T19:00:00Z", None))
+            self.assertEqual(len([part for part in row["facts"] if part["topic"] == "parcel_map"]), 2)
+            self.assertNotIn("PRIVATE NAME", json.dumps(row))
+            pdf.return_value = notice.replace("Lots 27 and 42", "Lots 27 and 45")
+            self.assertEqual(adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)[0], [])
+            pdf.return_value = notice
+            pages[adapters.SUFFIELD_CT_ASSESSOR + "R08511"] = report.format(map_id="8H-3-28", pin="R08511", area=0.1)
+            self.assertEqual(adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)[0], [])
+
     def test_windham_requires_matching_current_bid_and_uses_state_outline(self):
         directory = adapters.WINDHAM_CT_BIDS
         detail = "https://www.windhamct.gov/bids.aspx?bidID=55"

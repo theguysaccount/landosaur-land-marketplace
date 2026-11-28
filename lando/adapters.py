@@ -7291,16 +7291,20 @@ def conrad_mt_industrial_park(fetch, now, warn):
         raise StructureError("Conrad's advertised Industrial Park plat could not be confirmed")
     if hashlib.sha256(fetch.bytes(url)).hexdigest() != CONRAD_MT_PLAT_SHA256:
         raise StructureError("Conrad's new plat requires review of the availability markings")
-    where = "PARCELID IN (%s)" % quote_list([v[0] for v in CONRAD_MT_AVAILABLE_LOTS.values()])
-    features = _arcgis_query(fetch, MT_COMPOSITE_PARCELS, where, "PARCELID,TotalAcres,TotalBuildingValue,Subdivision")
+    where = ("PARCELID IN (%s) AND UPPER(OwnerName) IN ('CITY OF CONRAD','CONRAD CITY OF')"
+             % quote_list(v[0] for v in CONRAD_MT_AVAILABLE_LOTS.values()))
+    fields = "PARCELID,TaxYear,TotalAcres,TotalBuildingValue,TotalLandValue,Subdivision"
+    features = _arcgis_query(fetch, MT_COMPOSITE_PARCELS, where, fields, post=True)
+    seen = Counter(x["attributes"].get("PARCELID") for x in features)
     parcels = {x["attributes"].get("PARCELID"): x for x in features}
     rows = []
     for lot, (pin, acres, price) in CONRAD_MT_AVAILABLE_LOTS.items():
         parcel = parcels.get(pin, {})
         attrs = parcel.get("attributes", {})
         rings = (parcel.get("geometry") or {}).get("rings")
-        if (not rings or attrs.get("Subdivision") != "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"
-                or attrs.get("TotalBuildingValue") != 0 or number(attrs.get("TotalAcres")) != acres):
+        if (not rings or seen[pin] != 1 or attrs.get("Subdivision") != "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"
+                or attrs.get("TaxYear") != now.year or attrs.get("TotalBuildingValue") != 0
+                or not number(attrs.get("TotalLandValue")) or number(attrs.get("TotalAcres")) != acres):
             continue
         row = {
             "id": "mt-conrad-east-industrial-park-%s" % lot, "source": "conrad-mt-industrial-park",
@@ -7308,7 +7312,8 @@ def conrad_mt_industrial_park(fetch, now, warn):
             "apn": pin, "address": "", "acres": acres, "price": price, "price_kind": "asking", "offering": "sale",
             "status": "listed", "deadline": None, "url": CONRAD_MT_SALE, "lat": None, "lon": None, "geometry": None,
             "facts": [fact("availability", "Available on the city’s annotated industrial park plat", url),
-                      fact("lot", "Lot %s of Conrad East Industrial Park Subdivision" % lot, url)],
+                      fact("lot", "Lot %s of Conrad East Industrial Park Subdivision" % lot, url),
+                      fact("sale_terms", "Contact the City of Conrad Industrial Park Committee for purchase terms.", CONRAD_MT_SALE)],
             "tags": ["city-owned land", "industrial park"],
         }
         apply_geometry(row, rings, one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % pin), "Montana parcel GIS")
@@ -7316,7 +7321,7 @@ def conrad_mt_industrial_park(fetch, now, warn):
             rows.append(row)
     if not rows:
         raise StructureError("Conrad's advertised lots did not match the state parcel layer")
-    return rows, {"complete": True, "upstream_total": len(rows)}
+    return rows, {"complete": True, "upstream_total": len(CONRAD_MT_AVAILABLE_LOTS)}
 
 
 NORTHUMBERLAND_PA_REPO = "https://www.northumberlandcountypa.gov/htdocs/index.php/repository-sale/"
@@ -9750,6 +9755,44 @@ def palmer_ma_land_auction(fetch, now, warn):
     return [row], {"complete": True, "upstream_total": 1}
 
 
+BELCHERTOWN_MA_SALE = "https://www.belchertown.org/m/newsflash/Home/Detail/215"
+
+
+def belchertown_ma_tax_title(fetch, now, warn):
+    import zoneinfo
+
+    text = clean(fetch.text(BELCHERTOWN_MA_SALE))
+    sale = re.search(
+        r"Tax Title Custodian will sell a parcel on Laurel Ridge Drive \(Assessors' Parcel (254-23\.2)\) "
+        r"by sealed-bid public auction on \w+, (\w+ \d{1,2}, \d{4}), at (\d{1,2}:\d{2} [AP]M), at Town Hall",
+        text, re.I,
+    )
+    area = re.search(r"According to Assessors' records, the parcel is ([\d.]+)± acres of vacant land", text, re.I)
+    cancelled = re.search(r"\b(?:auction|sale) (?:has been |was |is )?(?:cancelled|canceled|postponed|withdrawn)\b", text, re.I)
+    if not sale or not area or cancelled:
+        return [], {"complete": True, "upstream_total": 0}
+    pin, date, clock = sale.groups()
+    when = datetime.datetime.strptime(f"{date} {clock}", "%B %d, %Y %I:%M %p").replace(
+        tzinfo=zoneinfo.ZoneInfo("America/New_York"),
+    )
+    if when <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    acres = number(area[1])
+    row = {
+        "id": "ma-belchertown-tax-title-" + slug(pin), "source": "belchertown-ma-tax-title",
+        "title": "Laurel Ridge Drive, Belchertown (town tax-title land auction)", "state": "MA",
+        "county": "Hampshire", "locality": "Belchertown", "address": "Laurel Ridge Drive", "apn": pin,
+        "acres": acres, "price": None, "price_kind": "none", "offering": "auction", "status": "auction_open",
+        "deadline": when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": BELCHERTOWN_MA_SALE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The town is soliciting sealed bids for this vacant tax-title parcel.", "="),
+                  fact("acreage", f"{area[1]} acres, approximately, in the town notice.", "="),
+                  fact("auction_terms", "See the town notice for the bid deposit, closing charges and fair-value requirement.", "=")],
+        "tags": ["vacant land", "tax-title auction", "sealed bid"],
+    }
+    return [row], {"complete": True, "upstream_total": 1}
+
+
 def fulton_ga_tax_deed(fetch, now, warn):
     cutoff = datetime.datetime(2026, 12, 1, 15, tzinfo=datetime.timezone.utc)
     absent = [], {"complete": True, "upstream_total": 0}
@@ -10572,60 +10615,11 @@ def blue_hill_ne_sweezys_lots(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(BLUE_HILL_NE_LOTS)}
 
 
-CONRAD_MT_SALES = "https://www.cityofconrad.com/industrial-park-committee"
-CONRAD_MT_PLAT = "https://www.cityofconrad.com/_files/ugd/984806_9a43c34aa90147978eb6e0dd6dd4e963.pdf"
-CONRAD_MT_PLAT_SHA = "42d75f85df5fa34955e41c8b669a392bc1822cff9abad734f50c09f12c938563"
-CONRAD_MT_CAD = "https://gisservice.mt.gov/ArcGIS/rest/services/msdi_cadastral_map_v1/MapServer/1/query"
-# Open lots and current handwritten prices from the city’s marked sale plat.
-CONRAD_MT_AVAILABLE = {"1": (3.02, 90600), "3": (5.64, 197400), "6": (5.83, 233200)}
-
-
-def conrad_mt_industrial_lots(fetch, now, warn):
-    primary = fetch.text(CONRAD_MT_SALES)
-    if ("Industrial Park lots available for sale" not in clean(primary)
-            or urllib.parse.urlsplit(CONRAD_MT_PLAT).path not in primary):
-        return [], {"complete": True, "upstream_total": 0}
-    if hashlib.sha256(fetch.bytes(CONRAD_MT_PLAT)).hexdigest() != CONRAD_MT_PLAT_SHA:
-        warn("The city changed its industrial sale plat. Its available lots and prices need review.")
-        return [], {"complete": True, "upstream_total": 0}
-    subdivision = "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"
-    where = f"Subdivision='{subdivision}' AND UPPER(OwnerName) IN ('CITY OF CONRAD','CONRAD CITY OF')"
-    fields = "PARCELID,TaxYear,LegalDescriptionShort,TotalBuildingValue,TotalLandValue"
-    features = _arcgis_query(fetch, CONRAD_MT_CAD, where, fields, post=True)
-    rows = []
-    seen = Counter(item["attributes"].get("PARCELID") for item in features)
-    for item in features:
-        a = item["attributes"]
-        pin = a.get("PARCELID")
-        match = re.fullmatch(subdivision + r", S13, T28 N, R03 W, ACRES ([\d.]+), LOT (\d) LOCATED IN PT OF COS 312880 OF NW4",
-                             clean(a.get("LegalDescriptionShort")))
-        if (not match or match[2] not in CONRAD_MT_AVAILABLE or not pin or seen[pin] != 1
-                or a.get("TaxYear") != now.year or a.get("TotalBuildingValue") != 0 or not number(a.get("TotalLandValue"))):
-            continue
-        lot = match[2]
-        acres, price = CONRAD_MT_AVAILABLE[lot]
-        if number(match[1]) != acres:
-            continue
-        row = {
-            "id": "mt-conrad-industrial-" + slug(pin), "source": "conrad-mt-industrial-lots", "state": "MT",
-            "county": "Pondera", "locality": "Conrad", "address": "", "apn": pin,
-            "title": f"Conrad East Industrial Park, Lot {lot}, Conrad", "acres": acres, "price": price,
-            "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
-            "url": CONRAD_MT_PLAT, "lat": None, "lon": None, "geometry": None,
-            "facts": [fact("availability", "The city’s official sale plat still marks this lot available.", CONRAD_MT_PLAT),
-                      fact("sale_terms", "Contact the City of Conrad Industrial Park Committee for purchase terms.", CONRAD_MT_SALES)],
-            "tags": ["vacant land", "industrial land", "city development"],
-        }
-        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), CONRAD_MT_CAD, "Montana State Library")
-        rows.append(row)
-    return rows, {"complete": True, "upstream_total": len(CONRAD_MT_AVAILABLE)}
-
-
 SOURCES = [
-    {"id": "conrad-mt-industrial-lots", "name": "Conrad East Industrial Park vacant lots",
-     "agency": "City of Conrad, Montana", "url": CONRAD_MT_SALES, "state": "MT",
-     "run": conrad_mt_industrial_lots, "requires_sale_match": True,
-     "about": "Individually priced and available city lots checked against the Montana State Library’s current parcel data."},
+    {"id": "belchertown-ma-tax-title", "name": "Belchertown vacant tax-title land auction",
+     "agency": "Town of Belchertown, Massachusetts", "url": BELCHERTOWN_MA_SALE, "state": "MA",
+     "run": belchertown_ma_tax_title, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Vacant land expressly identified by parcel number in the town’s dated sealed-bid auction notice."},
     {"id": "blue-hill-ne-homesites", "name": "Blue Hill Sweezy’s Second Subdivision",
      "agency": "City of Blue Hill Community Redevelopment Authority, Nebraska", "url": BLUE_HILL_NE_SALES, "state": "NE",
      "run": blue_hill_ne_sweezys_lots, "requires_sale_match": True,
@@ -11209,6 +11203,10 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("MassGIS Belchertown municipal parcel download", "https://download.massgis.digital.mass.gov/",
+     "The official download host did not serve a verifiable robots.txt. The town’s sale notice carries the legal parcel number and acreage."),
+    ("Willow Lake Logan Addition availability map", "https://static.wixstatic.com/",
+     "The linked map host returns HTTP 403 for robots.txt. The program page does not identify individual open lots."),
     ("Pondera Port Authority sale catalog",
      "https://www.ponderaportauthority.com/opportunitites.htm",
      "The authority’s TLS certificate was expired during the robots.txt check. The independently published city sale plat and state assessor layer are carried."),
@@ -11306,8 +11304,6 @@ NOT_CARRIED = [
      "The county's GIS host did not serve a verifiable TLS certificate for robots.txt. The county's separate current sale notice is carried."),
     ("Baltimore City open-bid vacant parcels", "https://geodata.baltimorecity.gov/egis/rest/services/Housing/dmxLandTransactions/MapServer/4",
      "The open-bid GIS hosts timed out on robots.txt, and the linked DHCD site returned HTTP 403 for robots.txt."),
-    ("Pondera Port Authority Conrad industrial park offers", "https://www.ponderaportauthority.com/opportunitites.htm",
-     "The port authority's robots.txt endpoint did not serve a valid TLS certificate."),
     ("Alamosa County legacy treasurer host", "https://alamosacounty.colorado.gov/departments/treasurer",
      "This hostname did not complete a verified TLS connection for robots.txt. The county’s current alamosacounty.org site publishes the auction calendar and notices."),
     ("Cambria County, Pennsylvania tax claim sales", "https://www.cambriacountypa.gov/tax-claim/",

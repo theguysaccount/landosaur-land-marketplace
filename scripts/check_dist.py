@@ -30,7 +30,7 @@ OFFICIAL = {
     "firstpark.com", "cms2.revize.com", "alamosacounty.org", "denaliborough.org", "metroatlantalandbank.org",
     "fultoncountyga.gov", "townofpalmer.com", "ci.florence.or.us", "co.lincoln.or.us", "alaska.edu", "kgbak.us", "sjgov.org",
     "jeffcotax.com", "cttaxsales.com", "gary.gov", "shastacounty.gov", "albanyga.gov",
-    "beatrice.ne.gov", "cityofgregorysd.gov", "mindennebraska.org", "bluehillne.com", "cityofconrad.com",
+    "belchertown.org", "beatrice.ne.gov", "cityofgregorysd.gov", "mindennebraska.org", "bluehillne.com", "cityofconrad.com",
     "stlouis-mo.gov", "cosl.org", "wisconsin.gov", "alaskamentalhealthtrust.org",
     "alaska.gov", "buildingdetroit.org", "kclandbank.org", "dgs.ca.gov",
     "chicago.gov", "pghlandbank.org", "louisvilleky.gov", "lucascountylandbank.org",
@@ -259,6 +259,16 @@ def main(dist, data_dir=None):
         problems.append("staged copy must have robots.txt Disallow: / and no sitemap")
 
     cat = Catalog(data_dir)
+    active_parcels = {}
+    for row in cat.current():
+        county = re.sub(r"[^a-z0-9]", "", re.sub(r" county$", "", row["county"].lower()))
+        apn = re.sub(r"[^a-z0-9]", "", row.get("apn", "").lower())
+        if not county or not apn:
+            continue
+        key = (row["state"], county, apn)
+        first = active_parcels.setdefault(key, row)
+        if first["source"] != row["source"]:
+            problems.append("same active parcel offered by more than one feed: %s and %s" % (first["id"], row["id"]))
     for r in cat.listings:
         rel = os.path.join("land", r["slug"], "index.html")
         if rel not in files:

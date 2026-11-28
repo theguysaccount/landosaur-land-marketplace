@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T08:49:03Z",
+ "checked": "2026-11-28T08:57:57Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -254,6 +254,24 @@
    "state": "NE",
    "upstream_total": 34,
    "url": "https://www.beatrice.ne.gov/business-development/available-real-estate/"
+  },
+  "belchertown-ma-tax-title": {
+   "about": "Vacant land expressly identified by parcel number in the town\u2019s dated sealed-bid auction notice.",
+   "agency": "Town of Belchertown, Massachusetts",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T08:57:57Z",
+   "last_success": "2026-11-28T08:57:57Z",
+   "message": "",
+   "name": "Belchertown vacant tax-title land auction",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 1,
+   "state": "MA",
+   "upstream_total": 1,
+   "url": "https://www.belchertown.org/m/newsflash/Home/Detail/215"
   },
   "beltrami-mn-otc": {
    "about": "Unimproved parcels available from the county at board-approved prices, plus separate taxes and fees.",
@@ -723,32 +741,14 @@
    "upstream_total": 2,
    "url": "https://portal.ct.gov/dot/properties/active-public-bids"
   },
-  "conrad-mt-industrial-lots": {
-   "about": "Individually priced and available city lots checked against the Montana State Library\u2019s current parcel data.",
-   "agency": "City of Conrad, Montana",
-   "complete": true,
-   "count": 3,
-   "failures": 0,
-   "last_attempt": "2026-11-28T08:49:03Z",
-   "last_success": "2026-11-28T08:49:03Z",
-   "message": "",
-   "name": "Conrad East Industrial Park vacant lots",
-   "notes": [],
-   "ok": true,
-   "read": 3,
-   "seconds": 4,
-   "state": "MT",
-   "upstream_total": 3,
-   "url": "https://www.cityofconrad.com/industrial-park-committee"
-  },
   "conrad-mt-industrial-park": {
    "about": "Vacant lots shown for sale on the city\u2019s industrial park map, with its published asking prices.",
    "agency": "City of Conrad, Montana",
    "complete": true,
    "count": 3,
    "failures": 0,
-   "last_attempt": "2026-11-28T01:45:06Z",
-   "last_success": "2026-11-28T01:45:06Z",
+   "last_attempt": "2026-11-28T08:57:57Z",
+   "last_success": "2026-11-28T08:57:57Z",
    "message": "",
    "name": "Conrad East Industrial Park vacant lots",
    "notes": [],

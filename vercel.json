@@ -41,6 +41,9 @@
     { "source": "/land/:parcel/", "destination": "/api/parcel/?parcel=:parcel" }
   ],
   "redirects": [
+    { "source": "/land/mt-conrad-industrial-26398713201100000/", "destination": "/land/mt-conrad-east-industrial-park-1/", "permanent": true },
+    { "source": "/land/mt-conrad-industrial-26398713201120000/", "destination": "/land/mt-conrad-east-industrial-park-3/", "permanent": true },
+    { "source": "/land/mt-conrad-industrial-26398713201150000/", "destination": "/land/mt-conrad-east-industrial-park-6/", "permanent": true },
     { "source": "/buying-help", "destination": "/research/buying-land/", "permanent": true },
     { "source": "/buying-help/", "destination": "/research/buying-land/", "permanent": true },
     { "source": "/opportunities", "destination": "/closing-soon/", "permanent": true },

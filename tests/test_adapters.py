@@ -45,20 +45,19 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
-    def test_conrad_adopts_the_city_asking_price_and_excludes_reserved_lots(self):
+    def test_belchertown_requires_vacancy_and_does_not_use_the_deposit_as_the_price(self):
         fetch = unittest.mock.Mock()
-        fetch.text.return_value = 'Industrial Park lots available for sale <a href="' + adapters.CONRAD_MT_PLAT + '">Map</a>'
-        fetch.bytes.return_value = b"checked city plat"
-        legal = "CONRAD EAST INDUSTRIAL PARK SUBDIVISION, S13, T28 N, R03 W, ACRES %s, LOT %s LOCATED IN PT OF COS 312880 OF NW4"
-        open_lot = {"PARCELID": "26398713201120000", "TaxYear": NOW.year, "TotalBuildingValue": 0,
-                    "TotalLandValue": 343, "LegalDescriptionShort": legal % ("5.64", "3")}
-        reserved = dict(open_lot, PARCELID="26398713201160000", LegalDescriptionShort=legal % ("5.72", "7"))
-        with patch.object(adapters, "CONRAD_MT_PLAT_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
-            adapters, "_arcgis_query", return_value=[{"attributes": item} for item in (open_lot, reserved)]
-        ):
-            rows, _ = adapters.conrad_mt_industrial_lots(fetch, NOW, self.fail)
-        row, = rows
-        self.assertEqual((row["apn"], row["price"], row["acres"]), ("26398713201120000", 197400, 5.64))
+        fetch.text.return_value = (
+            "Tax Title Custodian will sell a parcel on Laurel Ridge Drive (Assessors' Parcel 254-23.2) "
+            "by sealed-bid public auction on Wednesday, December 9, 2026, at 10:00 AM, at Town Hall. "
+            "According to Assessors' records, the parcel is 1.13± acres of vacant land. "
+            "Each bid must include a $1,500 deposit."
+        )
+        row, = adapters.belchertown_ma_tax_title(fetch, NOW, self.fail)[0]
+        self.assertEqual((row["apn"], row["price"], row["acres"], row["deadline"]),
+                         ("254-23.2", None, 1.13, "2026-12-09T15:00:00Z"))
+        fetch.text.return_value += " The auction was cancelled."
+        self.assertEqual(adapters.belchertown_ma_tax_title(fetch, NOW, self.fail)[0], [])
 
     def test_blue_hill_requires_current_free_offer_and_matching_vacant_plat(self):
         fetch = unittest.mock.Mock()
@@ -1391,14 +1390,15 @@ class RegionalVacantOffersTest(unittest.TestCase):
             adapters.conrad_mt_industrial_park(CityPage(), NOW, None)
         digest = adapters.hashlib.sha256(b"reviewed map fixture").hexdigest()
         rings = [[[-111.8, 48.1], [-111.799, 48.1], [-111.8, 48.101], [-111.8, 48.1]]]
-        features = [{"attributes": {"PARCELID": pin, "TotalAcres": acres, "TotalBuildingValue": 0,
-                                    "Subdivision": "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"},
+        features = [{"attributes": {"PARCELID": pin, "TaxYear": NOW.year, "TotalAcres": acres, "TotalBuildingValue": 0,
+                                    "TotalLandValue": 1, "Subdivision": "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"},
                      "geometry": {"rings": rings}}
                     for pin, acres in [("26398713201100000", 3.02), ("26398713201120000", 5.64), ("26398713201150000", 5.83),
                                        ("26398713201160000", 5.72)]]
         with patch.object(adapters, "CONRAD_MT_PLAT_SHA256", digest), patch.object(adapters, "_arcgis_query", return_value=features):
             rows, info = adapters.conrad_mt_industrial_park(CityPage(), NOW, None)
         self.assertTrue(info["complete"])
+        self.assertEqual([r["id"] for r in rows], ["mt-conrad-east-industrial-park-" + lot for lot in ("1", "3", "6")])
         self.assertEqual([(r["facts"][1]["value"], r["price"]) for r in rows], [
             ("Lot 1 of Conrad East Industrial Park Subdivision", 90600),
             ("Lot 3 of Conrad East Industrial Park Subdivision", 197400),

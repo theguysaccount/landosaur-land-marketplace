@@ -159,6 +159,7 @@ def compute_benchmarks(cat):
             "last_read": (status_entry.get("last_success") or updated)[:10],
         })
     agencies.sort(key=lambda a: (-a["active_count"], a["agency"]))
+    agency_count = len({agency["agency"] for agency in agencies})
 
     # Top 10 counties / jurisdictions by active listing count
     all_counties = []
@@ -438,7 +439,7 @@ def compute_benchmarks(cat):
             "Exactly %s active listings publish parcel area, totaling %s acres; agencies that omit acreage on subdivision tax lots are excluded from acreage totals rather than estimated." % (
                 updated, "{:,}".format(active_count), len(states), "state" if len(states) == 1 else "states",
                 county_total, "county or jurisdiction" if county_total == 1 else "counties and jurisdictions",
-                len(agencies), "{:,}".format(len(with_acres)), fmt_acres(total_acres),
+                agency_count, "{:,}".format(len(with_acres)), fmt_acres(total_acres),
             ),
         ),
         (
@@ -478,7 +479,7 @@ def compute_benchmarks(cat):
             "What government and auction land listings does Landosaur track?",
             "Landosaur maps %s active public-agency land offerings across %d U.S. %s (%s) from %d official government agencies as of %s—including rural state trust acreage, county tax-forfeited auction parcels, state redevelopment proposals, and municipal land-bank lots. Filter by state, price, acreage, or map area, inspect GIS outlines and FEMA flood overlays, compare county USDA/FHFA benchmarks, and open each agency's official listing directly." % (
                 "{:,}".format(active_count), len(states), "state" if len(states) == 1 else "states",
-                state_list_text, len(agencies), updated,
+                state_list_text, agency_count, updated,
             ),
         ),
         (
@@ -521,7 +522,7 @@ def compute_benchmarks(cat):
         "total_tracked": total_tracked,
         "state_count": len(states),
         "county_count": county_total,
-        "agency_count": len(agencies),
+        "agency_count": agency_count,
         "acres_reported_count": len(with_acres),
         "acres_missing_count": active_count - len(with_acres),
         "total_acres": total_acres,

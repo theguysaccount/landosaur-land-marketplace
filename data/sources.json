@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T00:08:56Z",
+ "checked": "2026-11-28T00:26:32Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -146,6 +146,24 @@
    "state": "LA",
    "upstream_total": 500,
    "url": "https://www.brla.gov/"
+  },
+  "beltrami-mn-otc": {
+   "about": "Unimproved parcels available from the county at board-approved prices, plus separate taxes and fees.",
+   "agency": "Beltrami County Natural Resource Management",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T00:26:32Z",
+   "last_success": "2026-11-28T00:26:32Z",
+   "message": "",
+   "name": "Beltrami County, Minnesota available over-the-counter land",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 3,
+   "state": "MN",
+   "upstream_total": 3,
+   "url": "https://www.beltramicountymn.gov/business-development/tax-forfeited-land-sales/"
   },
   "big-spring-tx": {
    "about": "City-owned vacant land parcels in Howard County, Texas with GIS parcel outlines, acreage, and legal descriptions.",
@@ -542,6 +560,24 @@
    "state": "GA",
    "upstream_total": 2,
    "url": "https://www.gblba.org/properties"
+  },
+  "gorham-me-west-campus": {
+   "about": "Town-owned industrial lots in the town-hosted Cyr Drive Extension sale brochure, with published asking prices.",
+   "agency": "Town of Gorham Economic Development Division",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T00:26:32Z",
+   "last_success": "2026-11-28T00:26:32Z",
+   "message": "",
+   "name": "Gorham, Maine West Campus development land",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 3,
+   "state": "ME",
+   "upstream_total": 3,
+   "url": "https://gorhammaine.org/about/gorham-industrial-park/"
   },
   "greenburgh-ny-auctions": {
    "about": "Vacant residential land in the town's linked auction catalog with published starting bids and individual closing times.",

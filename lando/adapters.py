@@ -4639,7 +4639,7 @@ def parse_wsdot_property(page, county, reference, url):
     if not price:
         return None
     location = fields.get("location and size", "")
-    size = re.search(r"(\d[\d,.]*)\s*(?:[+±]\s*/?\s*[-−]?\s*)?acres?\b", location, re.I)
+    size = re.search(r"(?<![0-9.])(\d*\.\d+|\d[\d,]*)\s*(?:[+±]\s*/?\s*[-−]?\s*)?acres?\b", location, re.I)
     acres = number(size[1]) if size else None
     return {
         "id": "wa-wsdot-%s" % slug(reference), "source": "wsdot-surplus", "state": "WA", "county": county,
@@ -6038,6 +6038,83 @@ def connecticut_dot_land(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+GORHAM_ME_PARK = "https://gorhammaine.org/about/gorham-industrial-park/"
+GORHAM_ME_BROCHURE = "https://gorhammaine.org/wp-content/uploads/2025/08/Gorham-Industrial-Park-Brochure_CYR-Dr-Ext.pdf"
+
+
+def parse_gorham_west_lots(report, url):
+    if not re.search(r"Town-owned lots .+?ready for development", report) or "SUBDIVISION LOTS" not in report:
+        raise StructureError("Gorham industrial site's marketed lot schedule is missing")
+    table = report.split("SUBDIVISION LOTS", 1)[1].split("LOT INFORMATION", 1)[0]
+    rows = []
+    for match in re.finditer(r"(?m)^\s*(\d+)\s+([\d.]+)\s+AC\s+[\d,]+\s*±?\s*SF\s+\$([\d,.]+)\s*$", table):
+        lot, acres, price = match.groups()
+        rows.append({
+            "id": "me-gorham-cyr-" + lot, "source": "gorham-me-west-campus",
+            "title": "Cyr Drive Extension lot %s, Gorham (industrial development land)" % lot,
+            "state": "ME", "county": "Cumberland", "locality": "Gorham", "apn": "",
+            "address": "Cyr Drive Extension lot " + lot, "acres": number(acres),
+            "price": number(price), "price_kind": "asking", "offering": "sale", "status": "listed",
+            "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", "West Campus subdivision lot " + lot, "="),
+                      fact("zoning", "Industrial District", "="),
+                      fact("development", "Town site plan review and applicable approvals are required", "="),
+                      fact("availability", "Marketed through the broker identified by the Town of Gorham", GORHAM_ME_PARK)],
+            "tags": ["municipal surplus", "industrial development"],
+        })
+    return rows
+
+
+def gorham_me_west_campus(fetch, now, warn):
+    page = clean(fetch.text(GORHAM_ME_PARK))
+    if "Cyr Drive" not in page or "Malone Commercial Brokers" not in page:
+        raise StructureError("Gorham's official West Campus sale program changed")
+    rows = parse_gorham_west_lots(pdf_text(fetch, GORHAM_ME_BROCHURE, extraction_mode="plain"), GORHAM_ME_BROCHURE)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+BELTRAMI_MN_SALE = "https://www.beltramicountymn.gov/business-development/tax-forfeited-land-sales/"
+
+
+def parse_beltrami_otc(report, url):
+    if "OVER-THE-COUNTER PURCHASE" not in report or "Purchase Price" not in report:
+        raise StructureError("Beltrami County's over-the-counter list changed")
+    blocks = re.split(r"(?m)^\s*(\d{2}\.\d{5}\.\d{2})[ \t]{2,}", report)
+    rows = []
+    for pid, text in zip(blocks[1::2], blocks[2::2]):
+        if "No Improvements" not in text:
+            continue
+        price = re.search(r"Purchase Price:\s*\$([\d,.]+)", text)
+        area = re.search(r"Map acres:\s*([\d,.]+)", text)
+        place = re.search(r"\s{2,}(City of [A-Za-z ]+?|[A-Za-z ]+? Township)\s{2,}(?:Est\.|Before assessments)", text)
+        if not price or not area or not place:
+            raise StructureError("incomplete unimproved Beltrami County offer: " + pid)
+        locality = place[1].strip().removeprefix("City of ")
+        rows.append({
+            "id": "mn-beltrami-" + slug(pid), "source": "beltrami-mn-otc",
+            "title": "%s parcel %s (county over-the-counter land)" % (locality, pid),
+            "state": "MN", "county": "Beltrami", "locality": locality, "apn": pid,
+            "address": "", "acres": number(area[1]), "price": number(price[1]), "price_kind": "cash",
+            "offering": "sale", "status": "listed", "deadline": None,
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "County's over-the-counter list reports no improvements", "="),
+                      fact("sale_program", "Prices were set by the County Board. Taxes and fees are separate.", "=")],
+            "tags": ["tax-forfeited land", "over the counter"],
+        })
+    return rows
+
+
+def beltrami_mn_otc(fetch, now, warn):
+    page = fetch.text(BELTRAMI_MN_SALE)
+    link = next((path for path, label in re.findall(r'\bhref="(/media/[^"<>]+\.pdf)"[^>]*>(.*?)</a>', page, re.I | re.S)
+                 if clean(label) == "Over the Counter Land Sale Parcels"), None)
+    if not link:
+        raise StructureError("Beltrami County's current over-the-counter list link is missing")
+    url = urllib.parse.urljoin(BELTRAMI_MN_SALE, link)
+    rows = parse_beltrami_otc(pdf_text(fetch, url), url)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -6332,8 +6409,18 @@ SOURCES = [
      "agency": "Connecticut Department of Transportation", "url": CTDOT_SALE, "state": "CT",
      "run": connecticut_dot_land, "requires_sale_match": True,
      "about": "Explicitly vacant sites accepting public bids on the state transportation department’s active and scheduled notices."},
+    {"id": "gorham-me-west-campus", "name": "Gorham, Maine West Campus development land",
+     "agency": "Town of Gorham Economic Development Division", "url": GORHAM_ME_PARK, "state": "ME",
+     "run": gorham_me_west_campus, "requires_sale_match": True,
+     "about": "Town-owned industrial lots in the town-hosted Cyr Drive Extension sale brochure, with published asking prices."},
+    {"id": "beltrami-mn-otc", "name": "Beltrami County, Minnesota available over-the-counter land",
+     "agency": "Beltrami County Natural Resource Management", "url": BELTRAMI_MN_SALE, "state": "MN",
+     "run": beltrami_mn_otc, "requires_sale_match": True,
+     "about": "Unimproved parcels available from the county at board-approved prices, plus separate taxes and fees."},
 ]
 NOT_CARRIED = [
+    ("Newark New Jersey municipal and land bank sale catalogs", "https://www.newarknj.gov/184/Division-of-Property-Management",
+     "The city's and its Land Bank listing portal's robots.txt endpoints returned HTTP 403."),
     ("West Des Moines sealed-bid real estate", "https://www.wdm.iowa.gov/home/showpublisheddocument/46357",
      "The city's robots.txt endpoint returned HTTP 403 and its linked sourcing portal disallows the listing path."),
     ("Delaware County, Pennsylvania tax repository", "https://delcopa.gov/treasurer/repositorysale",

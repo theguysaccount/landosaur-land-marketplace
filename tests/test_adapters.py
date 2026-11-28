@@ -314,6 +314,26 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertIsNone(adapters.parse_ctdot_bid(page.replace("vacant land", "vacant land improved with a tower"),
                                                   adapters.CTDOT_SALE, NOW))
 
+    def test_gorham_lot_schedule_preserves_ask_and_skips_unavailable(self):
+        brochure = ("Town-owned lots approximately 3 acres ready for development\nSUBDIVISION LOTS\n"
+                    "Lot # Acres Buildable SF* Price\n1 15.5 AC 85,000± SF SOLD\n"
+                    "2 4.5 AC 25,000± SF Under Contract\n3 6 AC 20,000± SF $425,000\n"
+                    "LOT INFORMATION\n")
+        rows = adapters.parse_gorham_west_lots(brochure, adapters.GORHAM_ME_BROCHURE)
+        self.assertEqual([(r["id"], r["acres"], r["price"], r["price_kind"]) for r in rows],
+                         [("me-gorham-cyr-3", 6, 425000, "asking")])
+
+    def test_beltrami_otc_excludes_improved_land_and_uses_board_price(self):
+        report = ("PARCELS AVAILABLE for OVER-THE-COUNTER PURCHASE\n"
+                  "80.01360.00  Example Lot                City of Bemidji      Before assessments: $2,000\n"
+                  "No Improvements                         Map acres: 0.08     Est. Market Value: $4,000\n"
+                  "                                                            Purchase Price: $9,460.02\n"
+                  "49.00109.00  Separate Site              Waskish Township    Est. Market Value: $84,900\n"
+                  "House / Outbuilding                     Map acres: 4.00     Purchase Price: $84,900\n")
+        rows = adapters.parse_beltrami_otc(report, adapters.BELTRAMI_MN_SALE)
+        self.assertEqual([(r["apn"], r["acres"], r["price"], r["locality"]) for r in rows],
+                         [("80.01360.00", 0.08, 9460.02, "Bemidji")])
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,
@@ -767,6 +787,10 @@ class CurrentOfferingsTest(unittest.TestCase):
                 '<h2>Improvements</h2><p>None</p><h2>Terms</h2>')
         row = adapters.parse_wsdot_property(page, county, reference, url)
         self.assertEqual((row["county"], row["price"], row["acres"]), ("Pierce", 350000, 2.85))
+        small = adapters.parse_wsdot_property(page.replace("2.85 +/- acre", ".079+/- acre"), county, reference, url)
+        self.assertAlmostEqual(small["acres"], 0.079)
+        med = adapters.parse_wsdot_property(page.replace("2.85 +/- acre", ".69 +/- acre"), county, reference, url)
+        self.assertAlmostEqual(med["acres"], 0.69)
         self.assertIsNone(adapters.parse_wsdot_property(page.replace(">None<", ">House<"), county, reference, url))
 
     def test_itasca_uses_unimproved_section_and_preserves_parcel_prices(self):

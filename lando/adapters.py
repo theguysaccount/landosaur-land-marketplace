@@ -216,6 +216,9 @@ def outline_url(listing):
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
         return one_parcel_url(RIO_GRANDE_CO_PARCELS, f"GIS_Parcel_Number='{RIO_GRANDE_CO_APN}'", RIO_GRANDE_CO_FIELDS)
+    if listing["source"] == "cumberland-md-surplus" and listing["apn"] in CUMBERLAND_MD_OFFERS:
+        account = listing["apn"].replace("-", "")
+        return one_parcel_url(DORCHESTER_MD_PARCELS, f"ACCTID='01{account}'", CUMBERLAND_MD_FIELDS)
     return ""
 
 
@@ -8450,6 +8453,87 @@ def dorchester_md_real_property(fetch, now, warn):
     return list(rows.values()), {"complete": True, "upstream_total": upstream_total}
 
 
+CUMBERLAND_MD_SALE = "https://www.cumberlandmd.gov/622/Ongoing-Surplus-Sale"
+CUMBERLAND_MD_OFFERS = {
+    "22-005367": "318-324 Estelle Street",
+    "22-010689": "331 Fort Hill Avenue",
+    "05-017319": "404 Chestnut Street",
+    "04-008065": "414 Grand Avenue",
+}
+CUMBERLAND_MD_EVIDENCE = {
+    "05-017319": (
+        "https://www.cumberlandmd.gov/ImageRepository/Document?documentID=6050",
+        "80919234411056904cb1a08492ea31412739d95069b1bdf000d8138d363c090a",
+        "The city's sale photograph shows the cleared site.",
+    ),
+    "04-008065": (
+        "https://www.cumberlandmd.gov/DocumentCenter/View/6594/ORDINANCE-NO-4059",
+        "92ab77a880fb1397fa95503c45b996512ef7836054c45e5779c31fb9d9cd12f4",
+        "Ordinance 4059 canceled the previous bid award. The current city roster invites new bids.",
+    ),
+}
+CUMBERLAND_MD_FIELDS = ("ACCTID,EXCLASS,LU,PREMCITY,NFMLNDVL,NFMIMPVL,NFMTTLVL,ACRES," +
+                        ",".join(DORCHESTER_MD_IMPROVEMENTS))
+
+
+def cumberland_md_surplus(fetch, now, warn):
+    page = fetch.text(CUMBERLAND_MD_SALE)
+    if "Bids for the properties on this page are accepted at any time" not in clean(page):
+        raise StructureError("Cumberland’s ongoing-bid invitation changed")
+    offers = {}
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", page, re.I | re.S):
+        cells = {column: clean(value) for column, value in
+                 re.findall(r'<td\b[^>]*data-th="([^"]+)"[^>]*>(.*?)</td>', row, re.I | re.S)}
+        pin = cells.get("Parcel Number", "")
+        if pin in CUMBERLAND_MD_OFFERS and cells.get("Property Address") == CUMBERLAND_MD_OFFERS[pin]:
+            if pin in offers:
+                raise StructureError("Cumberland’s sale roster repeats a reviewed parcel")
+            offers[pin] = cells
+    if not offers and 'data-th="Parcel Number"' not in page:
+        raise StructureError("Cumberland’s sale roster lacks the parcel number column")
+    current = {f"01{pin.replace('-', '')}": pin for pin, cells in offers.items()
+               if cells.get("Property Available") == "Immediately" and cells.get("Proposed Use of Lot") == "Buildable (Residential)"}
+    if not current:
+        return [], {"complete": True, "upstream_total": len(offers)}
+
+    where = f"JURSCODE='ALLE' AND ACCTID IN ({quote_list(current)})"
+    _, features = arcgis_query(fetch, DORCHESTER_MD_PARCELS, where, CUMBERLAND_MD_FIELDS)
+    counts = Counter(feature["attributes"].get("ACCTID") for feature in features)
+    rows = []
+    for feature in features:
+        parcel = feature["attributes"]
+        key = parcel.get("ACCTID")
+        pin = current.get(key)
+        if (not pin or counts[key] != 1 or parcel.get("EXCLASS") not in ("650", "670")
+                or parcel.get("LU") != "E" or parcel.get("PREMCITY") != "CUMBERLAND"
+                or not number(parcel.get("NFMLNDVL")) or parcel.get("NFMIMPVL") not in (None, 0)
+                or parcel.get("NFMLNDVL") != parcel.get("NFMTTLVL")
+                or any(parcel.get(field) not in (None, 0, "") for field in DORCHESTER_MD_IMPROVEMENTS)):
+            continue
+        address = CUMBERLAND_MD_OFFERS[pin]
+        item = {
+            "id": "md-cumberland-" + pin, "source": "cumberland-md-surplus",
+            "title": f"{address}, Cumberland (city surplus land)", "state": "MD", "county": "Allegany",
+            "locality": "Cumberland", "address": address, "apn": pin, "acres": number(parcel.get("ACRES")),
+            "price": None, "price_kind": "none", "offering": "offer", "status": "proposal_open", "deadline": None,
+            "url": CUMBERLAND_MD_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city lists the vacant residential lot as available for immediate purchase proposals.", "="),
+                      fact("sale_terms", "The city reviews intended use, bid amount and bidder qualifications.", "=")],
+            "tags": ["city surplus", "residential lot"],
+        }
+        rings = (feature.get("geometry") or {}).get("rings") or []
+        apply_geometry(item, rings, outline_url(item), "Maryland Department of Planning")
+        if not item["geometry"]:
+            continue
+        if pin in CUMBERLAND_MD_EVIDENCE:
+            url, digest, description = CUMBERLAND_MD_EVIDENCE[pin]
+            if hashlib.sha256(fetch.bytes(url)).hexdigest() != digest:
+                continue
+            item["facts"].append(fact("verification", description, url))
+        rows.append(item)
+    return sorted(rows, key=lambda item: item["apn"]), {"complete": True, "upstream_total": len(offers)}
+
+
 TODD_MN_LAND = "https://www.toddcountymn.gov/government/departments/auditor_and_treasurer/tax_forfeited_land.php"
 
 
@@ -11841,6 +11925,10 @@ SOURCES = [
      "agency": "Dorchester County Council", "url": DORCHESTER_MD_BIDS, "state": "MD",
      "run": dorchester_md_real_property, "requires_sale_match": True, "timezone": "America/New_York",
      "about": "Open county property sale notices cross-matched to vacant tracts in the Maryland state parcel cadastre."},
+    {"id": "cumberland-md-surplus", "name": "Cumberland ongoing municipal vacant land sale",
+     "agency": "City of Cumberland, Maryland", "url": CUMBERLAND_MD_SALE, "state": "MD",
+     "run": cumberland_md_surplus, "requires_sale_match": True,
+     "about": "Residential lots accepting purchase proposals in the city’s ongoing surplus sale, verified against Maryland parcel records."},
     {"id": "todd-mn-tax-forfeit", "name": "Todd County vacant tax-forfeited land",
      "agency": "Todd County Auditor-Treasurer", "url": TODD_MN_LAND, "state": "MN", "timezone": "America/Chicago",
      "run": todd_mn_tax_forfeit, "requires_sale_match": True,
@@ -11947,6 +12035,8 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Utah Press Association legal notice database", "https://www.utahlegals.com/",
+     "The publisher’s terms prohibit automated collection, database incorporation and commercial reuse."),
     ("Cochise County Board tax-deed award exhibits", "https://public.destinyhosted.com/26244/agenda/",
      "The agenda portal disallows crawling, and the separate video agenda attachments return HTTP 403 for robots.txt. The November 24 Board recording confirms three groups remained, but does not identify them. The original sale roster still shows awarded units."),
     ("Oakridge city industrial park sale materials", "https://www.ci.oakridge.or.us/media/22486",

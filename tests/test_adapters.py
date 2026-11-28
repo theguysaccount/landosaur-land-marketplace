@@ -2223,6 +2223,33 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertEqual((row["apn"], row["price"], row["deadline"]), ("07179588", None, "2026-12-01T18:59:00Z"))
         self.assertEqual(fetch.text.call_count, 2)
 
+    def test_cumberland_keeps_only_reviewed_active_unimproved_municipal_lots(self):
+        fetch = unittest.mock.Mock()
+        entries = (("318-324 Estelle Street", "22-005367", "Immediately"),
+                   ("331 Fort Hill Avenue", "22-010689", "Under contract"),
+                   ("404 Chestnut Street", "05-017319", "Immediately"),
+                   ("Unreviewed Avenue", "01-012345", "Immediately"))
+        fetch.text.return_value = "<p>Bids for the properties on this page are accepted at any time.</p>" + "".join(
+            f'<tr><td data-th="Property Address">{address}</td><td data-th="Parcel Number">{pin}</td>'
+            f'<td data-th="Property Available">{status}</td><td data-th="Proposed Use of Lot">Buildable (Residential)</td></tr>'
+            for address, pin, status in entries
+        )
+        rings = [[[-78.77, 39.65], [-78.769, 39.65], [-78.769, 39.651], [-78.77, 39.65]]]
+        common = {"EXCLASS": "670", "LU": "E", "PREMCITY": "CUMBERLAND", "ACRES": .16,
+                  "NFMLNDVL": 3900, "NFMTTLVL": 3900, "NFMIMPVL": 0}
+        fetch.json.return_value = {"features": [
+            {"attributes": {**common, "ACCTID": "0122005367"}, "geometry": {"rings": rings}},
+            {"attributes": {**common, "ACCTID": "0105017319", "SQFTSTRC": 1120}, "geometry": {"rings": rings}},
+        ]}
+        rows, info = adapters.cumberland_md_surplus(fetch, NOW, self.fail)
+        self.assertEqual(info, {"complete": True, "upstream_total": 3})
+        self.assertEqual([(row["apn"], row["price"], row["status"]) for row in rows],
+                         [("22-005367", None, "proposal_open")])
+        self.assertTrue(rows[0]["geometry"])
+        self.assertIn("0122005367", fetch.json.call_args.args[0])
+        self.assertNotIn("0122010689", fetch.json.call_args.args[0])
+        fetch.bytes.assert_not_called()
+
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
         attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,
                  "Subdivisio": "MEADOW LAKE SUBDIVISION", "Lot": "12", "Situs": "",

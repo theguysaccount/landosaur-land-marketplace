@@ -1953,6 +1953,41 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             with self.assertRaises(adapters.StructureError):
                 adapters.milford_de_corporate_center(fetch, NOW, self.fail)
 
+    def test_idaho_falls_requires_active_listing_city_price_and_no_building(self):
+        fetch = unittest.mock.Mock()
+        page = ('<title>610 Water Avenue IDAHO FALLS ID 83402 | MLS #2189448</title>'
+                '<span id="rover_status">Active</span><div class="prop-price">$65,000</div>')
+        fetch.text.return_value = page
+        city = "City-owned property at 610 Water Avenue. The property remains listed at $65,000. It is an unused parking lot."
+        ring = [[-112.0343, 43.4933], [-112.0346, 43.4933], [-112.0346, 43.4934],
+                [-112.0343, 43.4934], [-112.0343, 43.4933]]
+        attrs = {"pin": adapters.IDAHO_FALLS_WATER_PIN, "parceladdr": "610 N WATER AVE", "parcelcity": "IDAHO FALLS",
+                 "parcelnumb_12": None, "animprovem": None, "yearbuilto": None, "valueofabo": None}
+        feature = {"attributes": attrs, "geometry": {"rings": [ring]}}
+        with patch.object(adapters, "pdf_text", return_value=city), \
+                patch.object(adapters, "_arcgis_query", return_value=[feature]) as assessor:
+            rows, _ = adapters.idaho_falls_water_avenue(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["price_kind"], row["status"]),
+                             (adapters.IDAHO_FALLS_WATER_PIN, 65000, "asking", "listed"))
+            self.assertTrue(row["geometry"])
+            self.assertNotIn("owner", assessor.call_args.args[3].lower())
+            attrs["yearbuilto"] = 1980
+            self.assertEqual(adapters.idaho_falls_water_avenue(fetch, NOW, self.fail)[0], [])
+            fetch.text.return_value = page.replace("$65,000", "$54,000")
+            with self.assertRaises(adapters.StructureError):
+                adapters.idaho_falls_water_avenue(fetch, NOW, self.fail)
+            fetch.text.return_value = page.replace(">Active<", ">Pending<")
+            self.assertEqual(adapters.idaho_falls_water_avenue(fetch, NOW, self.fail)[0], [])
+
+    def test_small_parcel_centroid_stays_inside_the_recorded_boundary(self):
+        ring = [[-112.034323, 43.493396], [-112.034414, 43.493276], [-112.034644, 43.493369],
+                [-112.034552, 43.493489], [-112.034323, 43.493396]]
+        lon, lat = adapters.ring_centroid(ring)
+        self.assertAlmostEqual(lon, -112.034483, places=6)
+        self.assertAlmostEqual(lat, 43.493382, places=6)
+        self.assertAlmostEqual(adapters.rings_acres([ring]), .08, places=3)
+
     def test_sheridan_publishes_one_current_proposal_after_matching_both_vacant_tracts(self):
         from lando.adapters import SHERIDAN_WY_AGENCY, SHERIDAN_WY_CLOSE, SHERIDAN_WY_OPEN, SHERIDAN_WY_TERMS
 

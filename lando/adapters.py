@@ -226,6 +226,8 @@ def outline_url(listing):
         return SHERIDAN_WY_SALE_MAP
     if listing["source"] == "milford-de-corporate-center" and re.fullmatch(r"5-16-17301-01-\d{4}-00001", listing["apn"]):
         return one_parcel_url(MILFORD_DE_PARCELS, f"Name='{listing['apn']}'", MILFORD_DE_FIELDS)
+    if listing["source"] == "idaho-falls-water-avenue" and listing["apn"] == IDAHO_FALLS_WATER_PIN:
+        return one_parcel_url(IDAHO_FALLS_WATER_PARCELS, f"pin='{IDAHO_FALLS_WATER_PIN}'", IDAHO_FALLS_WATER_FIELDS)
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -247,8 +249,9 @@ def rings_acres(rings):
             continue
         lat0 = math.radians(sum(p[1] for p in ring) / len(ring))
         cos_lat = math.cos(lat0)
-        xs = [math.radians(p[0]) * R * cos_lat for p in ring]
-        ys = [math.radians(p[1]) * R for p in ring]
+        lon_ref, lat_ref = ring[0]
+        xs = [math.radians(p[0] - lon_ref) * R * cos_lat for p in ring]
+        ys = [math.radians(p[1] - lat_ref) * R for p in ring]
         a = abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(zip(xs, ys), list(zip(xs, ys))[1:] + [(xs[0], ys[0])]))) / 2.0
         total_m2 += a if idx == 0 else -a
     ac = abs(total_m2) / 4046.8564224
@@ -261,19 +264,27 @@ def slug(text):
 
 def ring_centroid(ring):
     """Area-weighted centroid of a closed lon/lat ring; falls back to the vertex mean."""
+    # Work near zero so multiplication of full longitude and latitude cannot swamp a small parcel's area.
+    lon_ref, lat_ref = ring[0]
     a = cx = cy = 0.0
     for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+        x0, y0 = x0 - lon_ref, y0 - lat_ref
+        x1, y1 = x1 - lon_ref, y1 - lat_ref
         cross = x0 * y1 - x1 * y0
         a += cross
         cx += (x0 + x1) * cross
         cy += (y0 + y1) * cross
     if abs(a) < 1e-14:
         return (sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring))
-    return (cx / (3 * a), cy / (3 * a))
+    return (lon_ref + cx / (3 * a), lat_ref + cy / (3 * a))
 
 
 def ring_area(ring):
-    return abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]))) / 2.0
+    if not ring:
+        return 0.0
+    lon_ref, lat_ref = ring[0]
+    return abs(sum((x0 - lon_ref) * (y1 - lat_ref) - (x1 - lon_ref) * (y0 - lat_ref)
+                   for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]))) / 2.0
 
 
 def simplify(rings, max_points=240):
@@ -7488,6 +7499,64 @@ def milford_de_corporate_center(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(parcels)}
 
 
+IDAHO_FALLS_WATER_SALE = "https://www.idahofallsidaho.gov/AgendaCenter/ViewFile/Minutes/_09212026-2184"
+IDAHO_FALLS_WATER_CONDITION = "https://www.idahofallsidaho.gov/AgendaCenter/ViewFile/Minutes/_04232026-2126"
+IDAHO_FALLS_WATER_MLS = "https://www.snakerivermls.com/id/idaho-falls/original-townsite/610-water-avenue/2189448/"
+IDAHO_FALLS_WATER_PARCELS = ("https://services2.arcgis.com/Xd5SMhLZ1h9t0F3b/arcgis/rest/services/"
+                            "Parcel_Viewer/FeatureServer/0/query")
+IDAHO_FALLS_WATER_PIN = "RPA1740031006A"
+IDAHO_FALLS_WATER_FIELDS = "pin,parceladdr,parcelcity,parcelnumb_12,animprovem,yearbuilto,valueofabo"
+
+
+def idaho_falls_water_avenue(fetch, now, warn):
+    page = fetch.text(IDAHO_FALLS_WATER_MLS)
+    title = re.search(r"<title>(.*?)</title>", page, re.I | re.S)
+    if not title or clean(title[1]).casefold() != "610 water avenue idaho falls id 83402 | mls #2189448":
+        raise StructureError("The Water Avenue listing no longer identifies the city’s lot")
+    status = re.search(r'<span id="rover_status">([^<]+)</span>', page)
+    if not status:
+        raise StructureError("The Water Avenue listing no longer shows its sale status")
+    if clean(status[1]).casefold() != "active":
+        return [], {"complete": True, "upstream_total": 0}
+    minutes = clean(pdf_text(fetch, IDAHO_FALLS_WATER_SALE))
+    condition = clean(pdf_text(fetch, IDAHO_FALLS_WATER_CONDITION, extraction_mode="plain")).lower()
+    price = re.search(r"\bthe property remains listed at \$([\d,]+)", minutes, re.I)
+    advertised = re.search(r'<div class="prop-price">\$([\d,]+)</div>', page)
+    asking = number(price[1]) if price else None
+    if ("City-owned property at 610 Water Avenue" not in minutes or not asking or not advertised
+            or asking != number(advertised[1]) or "610 water avenue" not in condition
+            or "unused parking lot" not in condition):
+        raise StructureError("The Idaho Falls record no longer confirms the listing price and site condition")
+
+    where = f"pin='{IDAHO_FALLS_WATER_PIN}' AND UPPER(owner) LIKE '%CITY%'"
+    features = _arcgis_query(fetch, IDAHO_FALLS_WATER_PARCELS, where, IDAHO_FALLS_WATER_FIELDS)
+    if len(features) != 1:
+        return [], {"complete": True, "upstream_total": len(features)}
+    feature, = features
+    attr = feature["attributes"]
+    rings = (feature.get("geometry") or {}).get("rings", [])
+    acres = rings_acres(rings)
+    if (attr.get("pin") != IDAHO_FALLS_WATER_PIN or attr.get("parceladdr") != "610 N WATER AVE"
+            or attr.get("parcelcity") != "IDAHO FALLS" or not acres
+            or any(attr.get(key) for key in ("parcelnumb_12", "animprovem", "yearbuilto", "valueofabo"))):
+        return [], {"complete": True, "upstream_total": 1}
+    outline = one_parcel_url(IDAHO_FALLS_WATER_PARCELS, f"pin='{IDAHO_FALLS_WATER_PIN}'", IDAHO_FALLS_WATER_FIELDS)
+    row = {
+        "id": "id-idaho-falls-610-water-avenue", "source": "idaho-falls-water-avenue",
+        "title": "610 Water Avenue (Idaho Falls municipal land)", "state": "ID", "county": "Bonneville",
+        "locality": "Idaho Falls", "address": "610 Water Avenue", "apn": IDAHO_FALLS_WATER_PIN,
+        "acres": round(acres, 2), "price": asking, "price_kind": "asking", "offering": "sale",
+        "status": "listed", "deadline": None, "url": IDAHO_FALLS_WATER_SALE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The city's listing is active through the regional MLS under number 2189448.", IDAHO_FALLS_WATER_MLS),
+                  fact("condition", "The city described the parcel as an unused parking lot.", IDAHO_FALLS_WATER_CONDITION),
+                  fact("utilities", "The city installed a sewer stub and meter pit in September 2026.", "="),
+                  fact("acreage", "Approximate area measured from the Bonneville County parcel outline.", outline)],
+        "tags": ["city-owned land"],
+    }
+    apply_geometry(row, rings, outline, "Bonneville County parcel")
+    return ([row] if row["geometry"] else []), {"complete": True, "upstream_total": 1}
+
+
 DELDOT_AUCTIONS = "https://deldot.gov/Business/auctions/"
 # The vacancy is visible in the sale notice's official aerial and survey, not stated in its text.
 DELDOT_K303_SHA256 = "93435aa46f4c83a1ff0050b324d084bed18ae2102ed3740e187622b8f71e5180"
@@ -12853,6 +12922,10 @@ SOURCES = [
      "agency": "City of Milford Economic Development, Delaware", "url": MILFORD_DE_SALES, "state": "DE",
      "run": milford_de_corporate_center, "requires_sale_match": True,
      "about": "Individually platted lots in the city’s sale program, verified against the Kent County parcel roll and boundaries."},
+    {"id": "idaho-falls-water-avenue", "name": "Idaho Falls Water Avenue municipal land",
+     "agency": "City of Idaho Falls", "url": IDAHO_FALLS_WATER_SALE, "state": "ID",
+     "run": idaho_falls_water_avenue, "requires_sale_match": True,
+     "about": "City sale terms matched to the current authorized listing and the Bonneville County parcel record."},
     {"id": "riverton-wy-industrial", "name": "Riverton vacant industrial lots on Piper Drive",
      "agency": "City of Riverton, Wyoming", "url": RIVERTON_WY_DOCS["terms"][0], "state": "WY",
      "run": riverton_wy_industrial, "requires_sale_match": True,

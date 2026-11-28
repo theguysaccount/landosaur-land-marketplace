@@ -1889,6 +1889,42 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
                       [fact["value"] for fact in row["facts"]])
         self.assertIsNone(row["geometry"])
 
+    def test_hampden_requires_published_offer_municipal_title_and_vacancy(self):
+        adapter = adapters.hampden_me_business_park
+        sale = adapters.HAMPDEN_ME_PARK
+        assessments = adapters.HAMPDEN_ME_COMMITMENTS
+        prices_url = "https://www.hampdenmaine.gov/docs/prices.pdf"
+        current_url = "https://www.hampdenmaine.gov/docs/current.pdf"
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = {
+            sale: f'<a href="{prices_url}">Hampden Business Park Pricing</a>',
+            assessments: (f'<a href="{current_url}">2026-2027 RE Commitment Book</a>'
+                          '<a href="old.pdf">2025-2026 RE Commitment Book</a>'),
+        }.__getitem__
+        prices = ("LAND FOR SALE\nHAMPDEN BUSINESS & COMMERCE PARK\nTown of Hampden\n"
+                  "Available Lots\nLot Acre Price\n         10   2.8   $175,000\n       11   2.1   SOLD\n"
+                  "         17   2.3   $98,300\n         24   3.1   $140,000\n")
+        book = ("Hampden Real Estate Tax Commitment Book\n2027 TAX COMMITMENT\n"
+                "  3513  TOWN OF HAMPDEN   187,200   0   187,200   0   0.00\n"
+                "           CAREY DRIVE       Acres   2.78\n           10-B-010\n"
+                "  3520  TOWN OF HAMPDEN   189,600   4100   193,700   0   0.00\n"
+                "           CAREY DRIVE       Acres   2.30\n           10-B-017\n"
+                "  3521  EXAMPLE PRIVATE ENTITY   175,000   0   0   175,000   100.00\n"
+                "           CAREY DRIVE       Acres   3.10\n           10-B-024\n")
+        pins = ("10-B-010", "10-B-011", "10-B-017", "10-B-024")
+        features = [{"attributes": {"ParcelNumber": pin, "CamaFullNumber": pin,
+                                   "PropertyStreet": "CAREY DR", "Zone": "Industrial Park (IP)"}}
+                    for pin in pins]
+        with patch.object(adapters, "pdf_text", side_effect=[prices, book]) as pdf, \
+                patch.object(adapters, "_arcgis_query", return_value=features) as gis:
+            rows, info = adapter(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["apn"], row["price"], row["acres"]), (4, "10-B-010", 175000, 2.8))
+        self.assertIn("2.78 acres in the assessment record", [fact["value"] for fact in row["facts"]])
+        self.assertEqual(pdf.call_args.args[1], current_url)
+        self.assertTrue(gis.call_args.args[2].endswith("('10-B-010')"))
+        self.assertNotIn("OwnerName", gis.call_args.args[3])
+
     def test_certified_site_requires_current_public_sale_and_preserves_rate(self):
         from lando.pages import price_line
 

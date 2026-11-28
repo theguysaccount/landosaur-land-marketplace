@@ -5210,14 +5210,14 @@ def wsdot_surplus(fetch, now, warn):
 ITASCA_URL = "https://www.itascacountymn.gov/304/Real-Estate"
 
 
-def pdf_text(fetch, url, *, extraction_mode="layout", checked_sha256=None):
+def pdf_text(fetch, url, *, extraction_mode="layout", checked_sha256=None, max_pages=60):
     from pypdf import PdfReader
 
     body = fetch.bytes(url)
     if checked_sha256 and hashlib.sha256(body).hexdigest() != checked_sha256:
         raise StructureError("The PDF changed and its site photographs need renewed verification")
     reader = PdfReader(io.BytesIO(body))
-    if not 1 <= len(reader.pages) <= 60:
+    if not 1 <= len(reader.pages) <= max_pages:
         raise StructureError("Unexpected page count for county sale PDF")
     return "\n".join(page.extract_text(extraction_mode=extraction_mode) for page in reader.pages)
 
@@ -10244,6 +10244,108 @@ def firstpark_me_lots(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(markers)}
 
 
+HAMPDEN_ME_PARK = "https://www.hampdenmaine.gov/businessandcommerce"
+HAMPDEN_ME_COMMITMENTS = "https://www.hampdenmaine.gov/tax-commitment"
+HAMPDEN_ME_PARCELS = ("https://services6.arcgis.com/LPbn007C4SUI0Z1s/arcgis/rest/services/"
+                      "AxisGISDataSync/FeatureServer/0/query")
+
+
+def hampden_me_pdf(fetch, url, label):
+    documents = []
+    for href, name in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', fetch.text(url), re.I | re.S):
+        if match := re.fullmatch(label, clean(name)):
+            link = urllib.parse.urljoin(url, html.unescape(href).strip())
+            target = urllib.parse.urlsplit(link)
+            if target.netloc == "www.hampdenmaine.gov" and target.path.lower().endswith(".pdf"):
+                documents.append((match[1] if match.groups() else "", link))
+    if not documents or len(set(documents)) != len(documents):
+        raise StructureError("Hampden’s current municipal PDF links changed")
+    year, link = max(documents)
+    if sum(entry[0] == year for entry in documents) != 1:
+        raise StructureError("Hampden has competing links for the same municipal PDF")
+    return year, link
+
+
+def parse_hampden_me_assessments(report, year, parcel_numbers):
+    cover = report[:700]
+    if (not re.search(r"Hampden\s+Real Estate Tax Commitment Book", cover)
+            or not re.search(rf"\b{re.escape(year)} TAX COMMITMENT\b", cover)):
+        raise StructureError("Hampden’s assessment book does not match the advertised tax year")
+    heading = r"^[ \t]*\d+ +(.+?) {2,}([\d,]+) +([\d,]+) +[\d,]+ +[\d,]+ +[\d,.]+ *$"
+    entries = re.split(heading, report, flags=re.M)
+    if len(entries) < 5:
+        raise StructureError("Hampden’s assessment book has no recognizable records")
+    seen = set()
+    vacant = {}
+    for holder, land, building, body in zip(entries[1::4], entries[2::4], entries[3::4], entries[4::4]):
+        parcel = re.findall(r"(?m)^ *10-B-\d{3} *$", body)
+        if len(parcel) != 1 or (pin := parcel[0].strip()) not in parcel_numbers:
+            continue
+        if pin in seen:
+            raise StructureError("Hampden’s assessment book repeats a marketed parcel")
+        seen.add(pin)
+        if holder != "TOWN OF HAMPDEN" or not number(land) or building != "0":
+            continue
+        acres = re.search(r"\bAcres\s+(\d+\.\d+)\b", body)
+        if acres and number(acres[1]):
+            vacant[pin] = number(acres[1])
+    return vacant
+
+
+def hampden_me_business_park(fetch, now, warn):
+    _, price_url = hampden_me_pdf(fetch, HAMPDEN_ME_PARK, r"Hampden Business Park Pricing")
+    report = pdf_text(fetch, price_url, extraction_mode="plain")
+    description = clean(report)
+    if not all(value in description for value in ("LAND FOR SALE", "HAMPDEN BUSINESS & COMMERCE PARK", "Town of Hampden")):
+        raise StructureError("Hampden’s marketing sheet no longer identifies a municipal land sale")
+    available = report.rpartition("Lot Acre Price")[2]
+    entries = re.findall(r"(?m)^ *([1-9]\d?) +(\d+\.\d+) +(\$[\d,]+|SOLD) *$", available)
+    if not entries or len({lot for lot, _, _ in entries}) != len(entries):
+        raise StructureError("Hampden’s current lot schedule is missing or repeats a lot")
+    offers = {f"10-B-{int(lot):03}": (number(acres), number(price)) for lot, acres, price in entries if price != "SOLD"}
+    if not offers:
+        return [], {"complete": True, "upstream_total": len(entries)}
+    year, book = hampden_me_pdf(fetch, HAMPDEN_ME_COMMITMENTS, r"20\d{2}-(20\d{2}) RE Commitment Book")
+    if int(year) < now.year:
+        raise StructureError("Hampden’s published assessment book is out of date")
+    vacant = parse_hampden_me_assessments(pdf_text(fetch, book, max_pages=850), year, offers)
+    if not vacant:
+        return [], {"complete": True, "upstream_total": len(entries)}
+    where = f"UPPER(OwnerName)='TOWN OF HAMPDEN' AND ParcelNumber IN ({quote_list(vacant)})"
+    features = _arcgis_query(fetch, HAMPDEN_ME_PARCELS, where, "ParcelNumber,CamaFullNumber,PropertyStreet,Zone",
+                             count=len(vacant) + 1)
+    seen = Counter(f["attributes"].get("ParcelNumber") for f in features)
+    rows = []
+    for feature in features:
+        attr = feature["attributes"]
+        pin = attr.get("ParcelNumber")
+        if pin not in vacant or seen[pin] != 1 or attr.get("CamaFullNumber") != pin:
+            continue
+        acres, price = offers[pin]
+        if not acres or not price:
+            raise StructureError("Hampden’s available lot has invalid acreage or price")
+        lot = int(pin.rsplit("-", 1)[1])
+        facts = [fact("availability", "Listed for sale in the town’s published business park price sheet.", price_url),
+                 fact("land_use", "Town parcel with zero building value in the published assessment book.", book)]
+        if vacant[pin] != acres:
+            facts.append(fact("assessment_acreage", f"{vacant[pin]:g} acres in the assessment record", book,
+                              "The town’s sale sheet lists a different acreage. Confirm the lot area with the town."))
+        if zoning := clean(attr.get("Zone")):
+            facts.append(fact("zoning", zoning, HAMPDEN_ME_PARCELS))
+        street = clean(attr.get("PropertyStreet")).title()
+        row = {
+            "id": f"me-hampden-business-park-{lot}", "source": "hampden-me-business-park",
+            "title": f"Hampden Business & Commerce Park lot {lot}", "state": "ME", "county": "Penobscot",
+            "locality": "Hampden", "apn": pin, "address": street, "acres": acres, "price": price,
+            "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
+            "url": HAMPDEN_ME_PARK, "lat": None, "lon": None, "geometry": None,
+            "facts": facts, "tags": ["vacant land", "business park"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), HAMPDEN_ME_PARCELS, "Town of Hampden GIS")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(entries)}
+
+
 RIVERTON_WY_DOCS = {
     "terms": (
         "https://cms2.revize.com/revize/rivertonwy25/document_center/City%20Council/2026%20Packets/05-05-26%20Regular%20Council%20Meeting.pdf?t=202605011909480",
@@ -12450,6 +12552,10 @@ SOURCES = [
      "agency": "Kennebec Regional Development Authority, Maine", "url": FIRSTPARK_ME, "state": "ME",
      "run": firstpark_me_lots, "requires_sale_match": True,
      "about": "Available development lots from the authority’s current lot map with published total and buildable acreage."},
+    {"id": "hampden-me-business-park", "name": "Hampden municipal business park lots",
+     "agency": "Town of Hampden, Maine", "url": HAMPDEN_ME_PARK, "state": "ME",
+     "run": hampden_me_business_park, "requires_sale_match": True,
+     "about": "Town-listed development lots with asking prices, checked against the current assessment book and town parcel map."},
     {"id": "alamosa-co-tax-deed", "name": "Alamosa County vacant land treasurer’s deed auctions",
      "agency": "Alamosa County Treasurer, Colorado", "url": ALAMOSA_CO_SCHEDULE, "state": "CO", "timezone": "America/Denver",
      "run": alamosa_co_tax_deed, "requires_sale_match": True,

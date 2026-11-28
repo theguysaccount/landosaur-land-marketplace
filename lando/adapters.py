@@ -8977,6 +8977,70 @@ def firstpark_me_lots(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(markers)}
 
 
+RIVERTON_WY_DOCS = {
+    "terms": (
+        "https://cms2.revize.com/revize/rivertonwy25/document_center/City%20Council/2026%20Packets/05-05-26%20Regular%20Council%20Meeting.pdf?t=202605011909480",
+        "49787c63a4f1e1badc5c177ae8c3c43359ce96eb17d3b19a4c9de81deced227e",
+    ),
+    "approval": (
+        "https://cms2.revize.com/revize/rivertonwy25/document_center/City%20Council/2026%20Packets/05-19-26%20Regular%20Council%20Meeting.pdf?t=202605151923430",
+        "11ca142a85d24fd6e6b21d032b555620817f8d7f99678b1280a30805a0f72257",
+    ),
+}
+RIVERTON_WY_PARCELS = "https://services3.arcgis.com/r0iJ85SKZ4zAzz3P/ArcGIS/rest/services/Wyoming_Parcels_for_2026/FeatureServer/0/query"
+# Vacant-land listings and prices on pages 10 and 16 of the city's broker agreement.
+RIVERTON_WY_OFFERS = {
+    "91141830600100": (1, 38000), "91141830600200": (2, 40000),
+    "91141830600400": (4, 40000), "91141830600500": (5, 45000),
+}
+
+
+def riverton_wy_industrial(fetch, now, warn):
+    if now.date() >= datetime.date(2030, 5, 7):
+        return [], {"complete": True, "upstream_total": 0}
+    for url, digest in RIVERTON_WY_DOCS.values():
+        if hashlib.sha256(fetch.bytes(url)).hexdigest() != digest:
+            raise StructureError("Riverton's approved vacant-land terms or recorded vote changed")
+    where = ("jurisdicti='FREMONT' AND UPPER(ownername1)='RIVERTON CITY OF' "
+             f"AND parcelnb IN ({quote_list(RIVERTON_WY_OFFERS)})")
+    gis_url, features = arcgis_query(fetch, RIVERTON_WY_PARCELS, where,
+                                    "parcelnb,legal,taxyear,landgrossa,locationad")
+    counts = Counter(feature["attributes"].get("parcelnb") for feature in features)
+    terms = RIVERTON_WY_DOCS["terms"][0] + "#page=16"
+    approval = RIVERTON_WY_DOCS["approval"][0] + "#page=5"
+    rows = []
+    for feature in features:
+        parcel = feature["attributes"]
+        apn = parcel.get("parcelnb")
+        if apn not in RIVERTON_WY_OFFERS or counts[apn] != 1:
+            continue
+        lot, price = RIVERTON_WY_OFFERS[apn]
+        acres = number(parcel.get("landgrossa"))
+        if (not acres or parcel.get("taxyear") != "2026" or clean(parcel.get("locationad")) != "PIPER DR" or
+                not re.match(rf"RIW INDUSTRIAL PARK FIRST ADDITION:\s*LOT {lot}\b", clean(parcel.get("legal")))):
+            continue
+        row = {
+            "id": "wy-riverton-" + apn, "source": "riverton-wy-industrial",
+            "title": f"RIW Industrial Park First Addition lot {lot} (Piper Drive)", "state": "WY", "county": "Fremont",
+            "locality": "Riverton", "address": f"Piper Drive, lot {lot}", "apn": apn,
+            "acres": acres, "price": price, "price_kind": "asking", "offering": "offer", "status": "proposal_open",
+            "deadline": None, "url": terms, "lat": None, "lon": None, "geometry": None,
+            "facts": [
+                fact("asking_price", f"${price:,.0f}", terms),
+                fact("acreage", f"{acres:g} acres in the 2026 county parcel roll", gis_url),
+                fact("availability", "The city authorized its broker to market these vacant municipal development lots.", approval),
+                fact("sale_terms", "The city reviews offers under its public notice and disposition procedures.",
+                     RIVERTON_WY_DOCS["terms"][0] + "#page=26"),
+            ],
+            "tags": ["development land", "public sale with city approval"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), gis_url, "Fremont County parcel data")
+        if row["geometry"]:
+            row["facts"][-1]["url"] = gis_url
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(RIVERTON_WY_OFFERS)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9475,6 +9539,10 @@ SOURCES = [
      "agency": "Kennebec Regional Development Authority, Maine", "url": FIRSTPARK_ME, "state": "ME",
      "run": firstpark_me_lots, "requires_sale_match": True,
      "about": "Available development lots from the authority’s current lot map with published total and buildable acreage."},
+    {"id": "riverton-wy-industrial", "name": "Riverton vacant industrial lots on Piper Drive",
+     "agency": "City of Riverton, Wyoming", "url": RIVERTON_WY_DOCS["terms"][0], "state": "WY",
+     "run": riverton_wy_industrial, "requires_sale_match": True,
+     "about": "Vacant city lots with asking prices in the approved broker agreement, matched to parcel numbers and boundaries in the Wyoming official parcel layer."},
 ]
 NOT_CARRIED = [
     ("Wyoming Business Council industrial sites vendor", "https://www.wyomingsites.com/",

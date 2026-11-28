@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T05:53:28Z",
+ "checked": "2026-11-28T06:09:41Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -2074,6 +2074,24 @@
    "state": "VA",
    "upstream_total": 73,
    "url": "https://www.rva.gov/"
+  },
+  "riverton-wy-industrial": {
+   "about": "Vacant city lots with asking prices in the approved broker agreement, matched to parcel numbers and boundaries in the Wyoming official parcel layer.",
+   "agency": "City of Riverton, Wyoming",
+   "complete": true,
+   "count": 4,
+   "failures": 0,
+   "last_attempt": "2026-11-28T06:09:41Z",
+   "last_success": "2026-11-28T06:09:41Z",
+   "message": "",
+   "name": "Riverton vacant industrial lots on Piper Drive",
+   "notes": [],
+   "ok": true,
+   "read": 4,
+   "seconds": 4,
+   "state": "WY",
+   "upstream_total": 4,
+   "url": "https://cms2.revize.com/revize/rivertonwy25/document_center/City%20Council/2026%20Packets/05-05-26%20Regular%20Council%20Meeting.pdf?t=202605011909480"
   },
   "rochester-ny-environmental": {
    "about": "Vacant land in the city's environmental auction with known or suspected contamination. The city's estimated minimum bids are shown in the parcel facts.",

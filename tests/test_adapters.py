@@ -1072,6 +1072,34 @@ Zoning R-1 Single Family Residential
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
 
+    def test_riverton_joins_only_signed_offer_lots_to_the_city_parcel_roll(self):
+        import hashlib
+
+        document = b"reviewed scanned lot prices and approved meeting minutes"
+        digest = hashlib.sha256(document).hexdigest()
+        terms = "https://cms2.revize.com/terms.pdf"
+        approval = "https://cms2.revize.com/approval.pdf"
+        fetch = unittest.mock.Mock()
+        fetch.bytes.return_value = document
+        rings = [[[-108.46, 43.07], [-108.46, 43.071], [-108.459, 43.07], [-108.46, 43.07]]]
+
+        def record(pin, lot, street="PIPER DR"):
+            return {"attributes": {"parcelnb": pin, "legal": f"RIW INDUSTRIAL PARK FIRST ADDITION: LOT {lot}",
+                                   "taxyear": "2026", "landgrossa": 1.2764, "locationad": street},
+                    "geometry": {"rings": rings}}
+
+        records = [record("91141830600100", 1), record("91141830600200", 2, "CESSNA DR"),
+                   record("91141830600300", 3)]
+        with patch.object(adapters, "RIVERTON_WY_DOCS", {"terms": (terms, digest), "approval": (approval, digest)}), \
+                patch.object(adapters, "arcgis_query", return_value=("https://example.com/gis", records)) as gis:
+            rows, info = adapters.riverton_wy_industrial(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["apn"], row["price"], row["acres"], row["price_kind"]),
+                         (4, "91141830600100", 38000, 1.2764, "asking"))
+        self.assertTrue(row["geometry"])
+        self.assertIn("UPPER(ownername1)='RIVERTON CITY OF'", gis.call_args.args[2])
+        self.assertNotIn("ownername", gis.call_args.args[3])
+
     def test_firstpark_requires_available_marker_and_matching_sale_detail(self):
         def lot_marker(number, status, buildable="5.4"):
             return (f'<g class="interactive lot-group" data-status="{status}" data-name="Lot {number}" '

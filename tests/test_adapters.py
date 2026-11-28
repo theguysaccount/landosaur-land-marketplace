@@ -2179,7 +2179,7 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
     def test_port_of_portland_keeps_marketed_vacant_sites_and_sale_packages(self):
         from urllib.parse import parse_qs, urlsplit
 
-        base = adapters.PORT_OF_PORTLAND_OFFERS
+        base = adapters.GREATER_PORTLAND_OFFERS
         sites = adapters.PORT_OF_PORTLAND_SITES
         paths = ["/p/item/" + s["path"] for s in sites]
         pages = {base + p: (f'<h1>{site["name"]}</h1><div class="re-section re-description">'
@@ -2216,6 +2216,34 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertEqual([r["id"] for r in rows], [sites[0]["id"]])
         pages[base + paths[0]] = pages[base + paths[0]].replace("For Sale: Yes", "For Sale: No")
         self.assertEqual(adapters.port_of_portland_or(fetch, None, self.fail)[0], [])
+
+    def test_hillsboro_meek_requires_all_four_unimproved_public_tax_lots(self):
+        site = adapters.HILLSBORO_OR_MEEK_SITE
+        url = adapters.GREATER_PORTLAND_OFFERS + "/p/item/" + site["path"]
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [
+            f'<h1>Featured Real Estate</h1><a href="{url}">Meek</a>',
+            f'<h1>{site["name"]}</h1><div class="re-section re-description">'
+            '<p>Type of space: Vacant Land</p><p>For Sale: Yes</p><p>Max Size: 140 acres</p>'
+            '<p>City of Hillsboro</p></div><h3>Features</h3>',
+        ] * 2
+        features = []
+        for i, (pin, tax_lot) in enumerate(adapters.HILLSBORO_OR_MEEK_PARCELS.items()):
+            west = -122.953 + i * .003
+            ring = [[west, 45.55], [west, 45.554], [west + .003, 45.554], [west + .003, 45.55], [west, 45.55]]
+            features.append({"attributes": {"ACCOUNT": pin, "TLNO": tax_lot,
+                                            "BLDGVAL": 0, "BLDGSQFT": 0, "A_T_ACRES": 35},
+                             "geometry": {"rings": [ring]}})
+        fetch.json.return_value = {"features": features}
+        with patch.object(adapters, "pdf_text",
+                          return_value="Hillsboro Economic Development Council (140 acres). The minimum of 50 acres."):
+            rows, metadata = adapters.hillsboro_or_meek(fetch, None, self.fail)
+            row, = rows
+            self.assertEqual(metadata, {"complete": True, "upstream_total": 1})
+            self.assertEqual((row["acres"], row["price"], len(row["geometry"])), (140, None, 4))
+            self.assertEqual(row["apn"], "R657998 / R659923 / R659905 / R1141909")
+            features.pop()
+            self.assertEqual(adapters.hillsboro_or_meek(fetch, None, self.fail)[0], [])
 
     def test_genesee_merges_confirmed_vacant_bundles_and_excludes_sold_lots(self):
         root = adapters.GENESEE_MI_FEATURED

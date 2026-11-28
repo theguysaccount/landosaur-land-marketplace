@@ -159,6 +159,9 @@ def expand_url(listing, url):
 
 
 def outline_url(listing):
+    if listing["source"] == "hillsboro-or-meek":
+        return one_parcel_url(HILLSBORO_OR_MEEK_GIS, HILLSBORO_OR_MEEK_WHERE,
+                              "ACCOUNT,TLNO,A_T_ACRES,BLDGSQFT")
     if listing["source"] == "port-of-portland-or":
         parcels = listing["apn"].split(" / ")
         return one_parcel_url(PORTLAND_OR_GIS, "RNO IN (%s)" % quote_list(parcels),
@@ -4141,7 +4144,7 @@ def portland_or(fetch, now, warn):
 
 
 # --- Port of Portland marketed industrial lots (OR) ---
-PORT_OF_PORTLAND_OFFERS = "https://www.greaterportlandinc.com/site-selection/featured-real-estate"
+GREATER_PORTLAND_OFFERS = "https://www.greaterportlandinc.com/site-selection/featured-real-estate"
 PORT_OF_PORTLAND_SITES = [
     {
         "id": "or-port-of-portland-gresham-vista-lot-8", "name": "Gresham Vista Business Park Lot 8",
@@ -4158,14 +4161,14 @@ PORT_OF_PORTLAND_SITES = [
 ]
 
 
-def port_of_portland_or(fetch, now, warn):
-    directory = fetch.text(PORT_OF_PORTLAND_OFFERS)
+def greater_portland_sales(fetch, sites, agency):
+    directory = fetch.text(GREATER_PORTLAND_OFFERS)
     if "Featured Real Estate" not in clean(directory):
         raise StructureError("Greater Portland Inc’s featured property directory changed")
 
     available = []
-    for site in PORT_OF_PORTLAND_SITES:
-        url = PORT_OF_PORTLAND_OFFERS + "/p/item/" + site["path"]
+    for site in sites:
+        url = GREATER_PORTLAND_OFFERS + "/p/item/" + site["path"]
         if urllib.parse.urlsplit(url).path not in directory:
             continue
         page = fetch.text(url)
@@ -4175,13 +4178,17 @@ def port_of_portland_or(fetch, now, warn):
         text = clean(description[1])
         if not (re.search(r"\bFor Sale\s*:\s*Yes\b", text, re.I)
                 and re.search(r"\bType of space\s*:\s*Vacant Land\b", text, re.I)
-                and "Port of Portland" in text):
+                and agency in text):
             continue
         size = re.search(r"\bMax Size\s*:\s*([\d.]+)\s+acres\b", text, re.I)
         if not size or not number(size[1]):
             raise StructureError("Greater Portland Inc’s marketed site acreage is missing")
         available.append((site, url, number(size[1])))
+    return available
 
+
+def port_of_portland_or(fetch, now, warn):
+    available = greater_portland_sales(fetch, PORT_OF_PORTLAND_SITES, "Port of Portland")
     if not available:
         return [], {"complete": True, "upstream_total": 0}
     parcels = [pin for site, _, _ in available for pin in site["parcels"]]
@@ -4222,6 +4229,70 @@ def port_of_portland_or(fetch, now, warn):
             apply_geometry(listing, rings, PORTLAND_OR_GIS, "PortlandMaps")
             rows.append(listing)
     return rows, {"complete": True, "upstream_total": len(available)}
+
+
+# --- City of Hillsboro marketed Meek South industrial land (OR) ---
+HILLSBORO_OR_MEEK_SITE = {
+    "name": "Meek Site / Hillsboro Technology Park", "path": "2778/meek-site-hillsboro-technology-park",
+}
+HILLSBORO_OR_MEEK_FLYER = ("https://www.greaterportlandinc.com/media/userfiles/subsite_214/files/"
+                          "Real%20Estate%20Webpage/Meek%20South%20Site%20Flyer%202025%20(1).pdf")
+HILLSBORO_OR_MEEK_GIS = ("https://pappgiswa1.co.washington.or.us/arcgispub/rest/services/"
+                         "Urban_Services_Plan_Framework/Urban_Services_Framework/FeatureServer/151/query")
+HILLSBORO_OR_MEEK_PARCELS = {
+    "R657998": "1N2160000800", "R659923": "1N2210001602",
+    "R659905": "1N2210001600", "R1141909": "1N2210001504",
+}
+HILLSBORO_OR_MEEK_WHERE = (
+    "ACCOUNT IN (%s) AND UPPER(OWNERNAME) LIKE '%%HILLSBORO%%'"
+    " AND (UPPER(OWNERNAME) LIKE '%%CITY%%' OR UPPER(OWNERNAME) LIKE '%%ECON%%DEV%%')"
+    % quote_list(HILLSBORO_OR_MEEK_PARCELS)
+)
+
+
+def hillsboro_or_meek(fetch, now, warn):
+    available = greater_portland_sales(fetch, [HILLSBORO_OR_MEEK_SITE], "City of Hillsboro")
+    if not available:
+        return [], {"complete": True, "upstream_total": 0}
+    _, url, acres = available[0]
+    flyer = clean(pdf_text(fetch, HILLSBORO_OR_MEEK_FLYER, extraction_mode="plain"))
+    if not (re.search(r"Hillsboro Economic Development Council\s*\(140 acres\)", flyer, re.I)
+            and re.search(r"minimum of 50 acres", flyer, re.I)):
+        raise StructureError("Hillsboro’s Meek South ownership or sale boundaries changed")
+
+    fields = "ACCOUNT,TLNO,BLDGVAL,BLDGSQFT,A_T_ACRES"
+    features = _arcgis_query(fetch, HILLSBORO_OR_MEEK_GIS, HILLSBORO_OR_MEEK_WHERE, fields)
+    parcels = {f["attributes"]["ACCOUNT"]: f["attributes"]["TLNO"] for f in features}
+    if len(features) != len(parcels):
+        raise StructureError("Washington County returned duplicate Meek South accounts")
+    if (parcels != HILLSBORO_OR_MEEK_PARCELS
+            or any(f["attributes"]["BLDGVAL"] != 0 or f["attributes"]["BLDGSQFT"] != 0 for f in features)):
+        return [], {"complete": True, "upstream_total": 1}
+    outline_acres = sum(number(f["attributes"]["A_T_ACRES"]) or 0 for f in features)
+    if abs(outline_acres - acres) > 2:
+        raise StructureError("Meek South’s advertised acreage no longer matches the assessed land")
+    rings = [ring for f in features for ring in (f.get("geometry") or {}).get("rings", [])]
+    if len(rings) < len(features):
+        raise StructureError("Washington County did not return a complete Meek South outline")
+
+    apn = " / ".join(HILLSBORO_OR_MEEK_PARCELS)
+    listing = {
+        "id": "or-hillsboro-meek-south-site", "source": "hillsboro-or-meek",
+        "title": "Meek South Site, Hillsboro Technology Park (city industrial land for sale)",
+        "state": "OR", "county": "Washington", "locality": "Hillsboro", "address": "NW Meek Road",
+        "apn": apn, "price": None, "price_kind": "none", "acres": acres,
+        "offering": "sale", "status": "listed", "deadline": None, "url": url,
+        "lat": None, "lon": None, "geometry": None,
+        "facts": [
+            fact("availability", "Greater Portland Inc markets this vacant site for purchase through the City of Hillsboro.", url),
+            fact("acreage", f"Approximately {acres:g} acres of publicly held industrial land as advertised.", HILLSBORO_OR_MEEK_FLYER),
+            fact("sale_terms", "The city’s brochure sets a 50-acre minimum development area.", HILLSBORO_OR_MEEK_FLYER),
+            fact("parcel_number", apn, "@outline"),
+        ],
+        "tags": ["industrial land", "sale inquiry"],
+    }
+    apply_geometry(listing, rings, HILLSBORO_OR_MEEK_GIS, "Washington County")
+    return [listing], {"complete": True, "upstream_total": 1}
 
 
 # --- Maui Vacant Government-Owned Parcels (HI) ---
@@ -13265,9 +13336,13 @@ SOURCES = [
      "run": multnomah_or_tax_title, "requires_sale_match": True,
      "about": "County-classified land matched by account number and minimum bid to the current tax title offering package."},
     {"id": "port-of-portland-or", "name": "Port of Portland vacant industrial sites",
-     "agency": "Port of Portland", "url": PORT_OF_PORTLAND_OFFERS, "state": "OR",
+     "agency": "Port of Portland", "url": GREATER_PORTLAND_OFFERS, "state": "OR",
      "run": port_of_portland_or, "requires_sale_match": True,
      "about": "Sites that the Port’s regional economic development partner markets for purchase, matched to vacant tax lots in PortlandMaps."},
+    {"id": "hillsboro-or-meek", "name": "Hillsboro Technology Park Meek South site",
+     "agency": "Hillsboro Economic Development Council", "url": GREATER_PORTLAND_OFFERS, "state": "OR",
+     "run": hillsboro_or_meek, "requires_sale_match": True,
+     "about": "A city-marketed industrial land offer matched to the four vacant public tax lots shown in its brochure."},
     {"id": "connecticut-dot-land", "name": "Connecticut DOT vacant land public bids",
      "agency": "Connecticut Department of Transportation", "url": CTDOT_SALE, "state": "CT",
      "run": connecticut_dot_land, "requires_sale_match": True,

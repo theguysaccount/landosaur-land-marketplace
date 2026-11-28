@@ -2335,6 +2335,36 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             self.assertFalse(adapters.missoula_mt_west_broadway(fetch, NOW, self.fail)[0])
             query.assert_called_once()
 
+    def test_new_castle_requires_live_scheduled_sale_and_clear_county_parcel(self):
+        fetch = unittest.mock.Mock()
+        directory = 'New Castle County, DE<option value="12/08/2026">December 8</option>'
+        headers = "<th>Status</th><th>Sale Date</th><th>Parcel #</th>"
+        pins = list(adapters.NEW_CASTLE_DE_VACANT)
+        roster = headers
+        for pin in pins:
+            reference, street, locality = adapters.NEW_CASTLE_DE_VACANT[pin]
+            fields = ["Details", "Scheduled", "12/08/2026 09:00 AM", reference, "", "",
+                      pin, "PRIVATE PERSON", f"*0 {street} {locality} DE 19701"]
+            roster += "<tr>" + "".join(f"<td>{value}</td>" for value in fields) + "</tr>"
+        fetch.text.side_effect = [directory, roster]
+        rings = [[[-75.66, 39.76], [-75.66, 39.765], [-75.664, 39.76], [-75.66, 39.76]]]
+        parcels = [{"attributes": {"PRCLID": pin, "LOTSZ": 1.69, "PROPCITY": locality},
+                    "geometry": {"rings": rings}} for pin, (_, _, locality) in adapters.NEW_CASTLE_DE_VACANT.items()]
+        fetch.json.side_effect = [{"count": 0}, {"count": 1}]
+        with patch.object(adapters, "_arcgis_query", return_value=parcels) as query:
+            rows, info = adapters.new_castle_de_sheriff(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["deadline"]), (pins[0], None, "2026-12-08T14:00:00Z"))
+            self.assertEqual(info["upstream_total"], 2)
+            self.assertTrue(row["geometry"])
+            self.assertNotIn("PRIVATE PERSON", repr(row))
+            self.assertNotIn("OWNER", query.call_args.args[3])
+            fetch.text.side_effect = [directory, roster.replace("Scheduled", "Canceled")]
+            self.assertFalse(adapters.new_castle_de_sheriff(fetch, NOW, self.fail)[0])
+            expired = datetime.datetime(2026, 12, 8, 14, tzinfo=datetime.timezone.utc)
+            self.assertFalse(adapters.new_castle_de_sheriff(fetch, expired, self.fail)[0])
+            query.assert_called_once()
+
     def test_cowlitz_checks_roster_and_exact_undeveloped_assessments(self):
         roster = b"Reviewed Cowlitz County auction roster"
         fetch = unittest.mock.Mock()

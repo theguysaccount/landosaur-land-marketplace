@@ -214,6 +214,8 @@ def outline_url(listing):
         return one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "missoula-mt-west-broadway" and listing["apn"] == MISSOULA_MT_PARCEL:
         return one_parcel_url(MT_COMPOSITE_PARCELS, f"PARCELID='{MISSOULA_MT_PARCEL}'", MISSOULA_MT_FIELDS)
+    if listing["source"] == "new-castle-de-sheriff" and listing["apn"] in NEW_CASTLE_DE_VACANT:
+        return one_parcel_url(NEW_CASTLE_DE_PARCELS, f"PRCLID='{listing['apn']}'", NEW_CASTLE_DE_FIELDS)
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -2893,8 +2895,9 @@ def _arcgis_query(fetch, gis_url, where, out_fields, count=500, extra=None, *, p
     params = {
         "f": "json", "where": where, "outFields": out_fields,
         "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6",
-        "resultRecordCount": str(count),
     }
+    if count is not None:
+        params["resultRecordCount"] = str(count)
     if extra:
         params.update(extra)
     data = fetch.json(gis_url, form=params) if post else fetch.json(gis_url + "?" + urllib.parse.urlencode(params))
@@ -7559,6 +7562,96 @@ def missoula_mt_west_broadway(fetch, now, warn):
     }
     apply_geometry(row, rings, outline_url(row), "Montana parcel GIS")
     return ([row] if row["geometry"] else []), {"complete": True, "upstream_total": 1}
+
+
+NEW_CASTLE_DE_SEARCH = "https://salesweb.civilview.com/Sales/SalesSearch"
+NEW_CASTLE_DE_ROSTER = NEW_CASTLE_DE_SEARCH + "?countyId=24"
+NEW_CASTLE_DE_GIS = "https://gis.nccde.org/agsserver/rest/services/BaseMaps/Base_Layers/MapServer"
+NEW_CASTLE_DE_PARCELS = NEW_CASTLE_DE_GIS + "/0/query"
+NEW_CASTLE_DE_STRUCTURES = NEW_CASTLE_DE_GIS + "/6"
+NEW_CASTLE_DE_FIELDS = "PRCLID,LOTSZ,PROPCITY"
+# Only parcels confirmed vacant in the county's 2025 aerial and matched to its December 8 roster.
+NEW_CASTLE_DE_VACANT = {
+    "0802000169": ("26-010660", "Loveville Road", "Wilmington"),
+    "1102810140": ("26-010661", "Rue Madora", "Bear"),
+}
+
+
+def new_castle_de_sheriff(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    local_sale = datetime.datetime(2026, 12, 8, 9, tzinfo=ZoneInfo("America/New_York"))
+    if local_sale <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    sale_day = local_sale.strftime("%m/%d/%Y")
+    sale_time = sale_day + " 09:00 AM"
+    fetch.enable_cookies()
+    directory = fetch.text(NEW_CASTLE_DE_ROSTER)
+    if "New Castle County, DE" not in directory:
+        raise StructureError("New Castle County’s live sheriff sale page changed")
+    if not re.search(r'<option\b[^>]*\bvalue="' + re.escape(sale_day) + '"', directory):
+        return [], {"complete": True, "upstream_total": 0}
+    roster = fetch.text(NEW_CASTLE_DE_SEARCH, form={
+        "IsOpen": "true", "SheriffNumber": "", "PropertyStatusDate": sale_day, "MonthNumber": "0",
+        "PlaintiffTitle": "", "DefendantTitle": "", "Address": "", "CityDesc": "",
+    })
+    if not all(heading in roster for heading in ("<th>Status</th>", "<th>Sale Date</th>", "<th>Parcel #</th>")):
+        raise StructureError("New Castle County’s sheriff sale results changed")
+    offered = set()
+    for tr in re.findall(r'<tr\b[^>]*>(.*?)</tr>', roster, re.S | re.I):
+        cells = re.findall(r'<td\b[^>]*>(.*?)</td>', tr, re.S | re.I)
+        if len(cells) != 9:
+            continue
+        status, scheduled, reference, pin, situs = (clean(cells[i]) for i in (1, 2, 3, 6, 8))
+        if status != "Scheduled" or scheduled != sale_time or pin not in NEW_CASTLE_DE_VACANT:
+            continue
+        sheriff_number, street, locality = NEW_CASTLE_DE_VACANT[pin]
+        if reference == sheriff_number and situs.upper().startswith(f"*0 {street} {locality} DE ".upper()):
+            offered.add(pin)
+    if not offered:
+        return [], {"complete": True, "upstream_total": 0}
+
+    pins = ", ".join(f"'{pin}'" for pin in sorted(offered))
+    parcels = _arcgis_query(fetch, NEW_CASTLE_DE_PARCELS, f"PRCLID IN ({pins})", NEW_CASTLE_DE_FIELDS, count=None)
+    rows = []
+    for parcel in parcels:
+        attrs = parcel["attributes"]
+        pin = attrs.get("PRCLID")
+        if pin not in offered:
+            continue
+        reference, street, locality = NEW_CASTLE_DE_VACANT[pin]
+        acres = number(attrs.get("LOTSZ"))
+        rings = (parcel.get("geometry") or {}).get("rings")
+        if not acres or not rings or clean(attrs.get("PROPCITY")).casefold() != locality.casefold():
+            continue
+        check = urllib.parse.urlencode({
+            "f": "json", "where": "1=1",
+            "geometry": json.dumps({"rings": rings, "spatialReference": {"wkid": 4326}}),
+            "geometryType": "esriGeometryPolygon", "inSR": "4326",
+            "spatialRel": "esriSpatialRelIntersects", "returnCountOnly": "true",
+        })
+        structures = fetch.json(NEW_CASTLE_DE_STRUCTURES + "/query?" + check)
+        if type(structures.get("count")) is not int:
+            raise StructureError("New Castle County’s structure check returned no count")
+        if structures["count"]:
+            continue
+        row = {
+            "id": "de-new-castle-sheriff-" + pin, "source": "new-castle-de-sheriff",
+            "title": f"{street}, {locality} (New Castle County sheriff sale)",
+            "state": "DE", "county": "New Castle", "locality": locality, "address": street,
+            "apn": pin, "acres": acres, "price": None, "price_kind": "none",
+            "offering": "auction", "status": "auction_open",
+            "deadline": local_sale.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": NEW_CASTLE_DE_ROSTER, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", f"The sheriff lists sale {reference} as scheduled. Select December 8 in the official sale directory.", "="),
+                      fact("condition", "The county’s structures layer shows no building on this parcel.", NEW_CASTLE_DE_STRUCTURES),
+                      fact("sale_terms", "Verify bidder prequalification and sale terms with the sheriff. The county can cancel or postpone an auction.", "=")],
+            "tags": ["sheriff sale", "in-person auction"],
+        }
+        apply_geometry(row, rings, outline_url(row), "New Castle County parcel")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offered)}
 
 
 NORTHUMBERLAND_PA_REPO = "https://www.northumberlandcountypa.gov/htdocs/index.php/repository-sale/"
@@ -12230,8 +12323,16 @@ SOURCES = [
      "agency": "City of Missoula, Montana", "url": MISSOULA_MT_SALE, "state": "MT",
      "run": missoula_mt_west_broadway, "requires_sale_match": True,
      "about": "City-owned redevelopment tract at the cleared former Sleepy Inn site, matched to the Montana state parcel map."},
+    {"id": "new-castle-de-sheriff", "name": "New Castle County December sheriff sale vacant land",
+     "agency": "New Castle County Sheriff, Delaware", "url": NEW_CASTLE_DE_ROSTER, "state": "DE",
+     "run": new_castle_de_sheriff, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Two December 8 sheriff sales matched to county parcel boundaries, aerial imagery and building records."},
 ]
 NOT_CARRIED = [
+    ("Brookfield, Massachusetts municipal disposition records", "https://www.brookfieldma.us/event/select-board-22/",
+     "The town website returned HTTP 403 for robots.txt. Its linked meeting vendor returned HTTP 403 for the agenda itself."),
+    ("New Castle County detailed parcel assessment", "https://www3.newcastlede.gov/parcel/search/",
+     "The assessor’s public search path is disallowed by robots.txt. The county’s open parcel and structure layers are carried."),
     ("Montana State Library 2025 provisional aerial imagery", "https://msl.mt.gov/geoinfo/Data/web_services",
      "The imagery service path disallows automated access. Independently published city imagery verified the Missoula site."),
     ("Cowlitz County assessor parcel boundaries", "https://www.co.cowlitz.wa.us/2890/Public-GIS-Datasets",
@@ -12368,7 +12469,7 @@ NOT_CARRIED = [
     ("City of Euclid current land bank roster", "https://www.cityofeuclid.gov/Landbank-Property-Listing-and-Map",
      "The asset host for the city’s parcel-by-parcel inventory returned HTTP 403 for robots.txt."),
     ("New Castle County Sheriff’s real estate sale lists", "https://www.newcastlede.gov/188/Sale-Lists",
-     "The county’s auction host returned HTTP 403 for robots.txt."),
+     "The county’s auction host returned HTTP 403 for robots.txt. The sheriff’s separate CivilView sale directory is carried."),
     ("Provo City surplus property notices", "https://www.provo.gov/272/Property-Management",
      "The city’s property announcements host returned HTTP 403 for robots.txt."),
     ("Hawaii Awards & Notices Data System", "https://hands.ehawaii.gov/hands/opportunities",

@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T16:06:22Z",
+ "checked": "2026-11-28T16:40:52Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -2616,6 +2616,24 @@
    "state": "PA",
    "upstream_total": 2769,
    "url": "https://pghlandbank.org/"
+  },
+  "port-of-portland-or": {
+   "about": "Sites that the Port\u2019s regional economic development partner markets for purchase, matched to vacant tax lots in PortlandMaps.",
+   "agency": "Port of Portland",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T16:40:52Z",
+   "last_success": "2026-11-28T16:40:52Z",
+   "message": "",
+   "name": "Port of Portland vacant industrial sites",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 63,
+   "state": "OR",
+   "upstream_total": 2,
+   "url": "https://www.greaterportlandinc.com/site-selection/featured-real-estate"
   },
   "portland-me": {
    "about": "Municipal land bank and vacant land parcels in Portland, Maine with GIS outlines.",

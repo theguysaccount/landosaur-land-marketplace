@@ -2176,6 +2176,47 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             with self.assertRaisesRegex(adapters.StructureError, "needs renewed verification"):
                 adapters.skowhegan_me_southgate(fetch, None, self.fail)
 
+    def test_port_of_portland_keeps_marketed_vacant_sites_and_sale_packages(self):
+        from urllib.parse import parse_qs, urlsplit
+
+        base = adapters.PORT_OF_PORTLAND_OFFERS
+        sites = adapters.PORT_OF_PORTLAND_SITES
+        paths = ["/p/item/" + s["path"] for s in sites]
+        pages = {base + p: (f'<h1>{site["name"]}</h1><div class="re-section re-description">'
+                            '<div><div>Type of space: Vacant Land</div></div><div>For Sale: Yes</div>'
+                            f'<div>Max Size: {acres} acres</div><div>Company: Port of Portland</div>'
+                            '</div><h3>Features</h3>') for p, site, acres in zip(paths, sites, (19.37, 22))}
+        pages[base] = "<h1>Featured Real Estate</h1>" + "".join(f'<a href="{base}{p}">Details</a>' for p in paths)
+        features = []
+        for i, (pin, tax_lot) in enumerate({**sites[0]["parcels"], **sites[1]["parcels"]}.items()):
+            west = -122.43 + i * .002
+            ring = [[west, 45.52], [west, 45.521], [west + .002, 45.521], [west + .002, 45.52], [west, 45.52]]
+            features.append({"attributes": {"RNO": pin, "STATE_ID": tax_lot.replace(" ", "    "),
+                                            "PRPCD_DESC": "VACANT LAND", "BLDGSQFT": None, "BLDGVAL1": 0},
+                             "geometry": {"rings": [ring]}})
+
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = pages.__getitem__
+
+        def payload(url):
+            args = parse_qs(urlsplit(url).query)
+            self.assertIn("UPPER(OWNER1) LIKE 'PORT OF PORTLAND%'", args["where"][0])
+            self.assertNotIn("OWNER", args["outFields"][0])
+            return {"features": features}
+
+        fetch.json.side_effect = payload
+        rows, metadata = adapters.port_of_portland_or(fetch, None, self.fail)
+        self.assertEqual(metadata, {"complete": True, "upstream_total": 2})
+        self.assertEqual([(r["apn"], r["acres"], r["price"], len(r["geometry"])) for r in rows],
+                         [("R943341590", 19.37, None, 1), ("R843610050 / R843610100", 22, None, 2)])
+        self.assertIn("R843610100", adapters.outline_url(rows[1]))
+
+        features[2]["attributes"]["BLDGVAL1"] = 200
+        rows, _ = adapters.port_of_portland_or(fetch, None, self.fail)
+        self.assertEqual([r["id"] for r in rows], [sites[0]["id"]])
+        pages[base + paths[0]] = pages[base + paths[0]].replace("For Sale: Yes", "For Sale: No")
+        self.assertEqual(adapters.port_of_portland_or(fetch, None, self.fail)[0], [])
+
     def test_genesee_merges_confirmed_vacant_bundles_and_excludes_sold_lots(self):
         root = adapters.GENESEE_MI_FEATURED
         home = "https://www.thelandbank.org/"

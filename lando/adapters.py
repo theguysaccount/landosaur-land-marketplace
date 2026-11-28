@@ -159,6 +159,10 @@ def expand_url(listing, url):
 
 
 def outline_url(listing):
+    if listing["source"] == "port-of-portland-or":
+        parcels = listing["apn"].split(" / ")
+        return one_parcel_url(PORTLAND_OR_GIS, "RNO IN (%s)" % quote_list(parcels),
+                              "RNO,STATE_ID,PRPCD_DESC,A_T_ACRES")
     if listing["source"] == "skowhegan-me-southgate" and listing["apn"] == "14-21-2":
         return one_parcel_url(SKOWHEGAN_ME_GIS, SKOWHEGAN_ME_GIS_MATCH, SKOWHEGAN_ME_GIS_FIELDS)
     if (listing["source"] == "cleveland-landbank" and listing["status"] == "proposal_open"
@@ -4134,6 +4138,90 @@ def portland_or(fetch, now, warn):
     if len(rows) < 5:
         raise StructureError("only %d Portland OR vacant parcels" % len(rows))
     return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+# --- Port of Portland marketed industrial lots (OR) ---
+PORT_OF_PORTLAND_OFFERS = "https://www.greaterportlandinc.com/site-selection/featured-real-estate"
+PORT_OF_PORTLAND_SITES = [
+    {
+        "id": "or-port-of-portland-gresham-vista-lot-8", "name": "Gresham Vista Business Park Lot 8",
+        "path": "2782/gresham-vista-business-park-lot-8", "port_page": "https://www.portofportland.com/greshamvista",
+        "locality": "Gresham", "street": "SE Stark Street",
+        "parcels": {"R943341590": "1N3E34C 503"},
+    },
+    {
+        "id": "or-port-of-portland-troutdale-lots-4-5", "name": "Troutdale Reynolds Industrial Park (TRIP Lot 4/5)",
+        "path": "2771/troutdale-reynolds-industrial-park-trip-lot-45", "port_page": "https://www.portofportland.com/trip",
+        "locality": "Troutdale", "street": "NW Swigert Way",
+        "parcels": {"R843610050": "1N3E24 407", "R843610100": "1N3E24 408"},
+    },
+]
+
+
+def port_of_portland_or(fetch, now, warn):
+    directory = fetch.text(PORT_OF_PORTLAND_OFFERS)
+    if "Featured Real Estate" not in clean(directory):
+        raise StructureError("Greater Portland Inc’s featured property directory changed")
+
+    available = []
+    for site in PORT_OF_PORTLAND_SITES:
+        url = PORT_OF_PORTLAND_OFFERS + "/p/item/" + site["path"]
+        if urllib.parse.urlsplit(url).path not in directory:
+            continue
+        page = fetch.text(url)
+        description = re.search(r'<div class="re-section re-description">(.+?)<h3>\s*Features\s*</h3>', page, re.S)
+        if not description or site["name"] not in clean(page):
+            raise StructureError("Greater Portland Inc’s industrial property page changed")
+        text = clean(description[1])
+        if not (re.search(r"\bFor Sale\s*:\s*Yes\b", text, re.I)
+                and re.search(r"\bType of space\s*:\s*Vacant Land\b", text, re.I)
+                and "Port of Portland" in text):
+            continue
+        size = re.search(r"\bMax Size\s*:\s*([\d.]+)\s+acres\b", text, re.I)
+        if not size or not number(size[1]):
+            raise StructureError("Greater Portland Inc’s marketed site acreage is missing")
+        available.append((site, url, number(size[1])))
+
+    if not available:
+        return [], {"complete": True, "upstream_total": 0}
+    parcels = [pin for site, _, _ in available for pin in site["parcels"]]
+    where = "RNO IN (%s) AND UPPER(OWNER1) LIKE 'PORT OF PORTLAND%%'" % quote_list(parcels)
+    fields = "RNO,STATE_ID,PRPCD_DESC,BLDGSQFT,BLDGVAL1"
+    features = _arcgis_query(fetch, PORTLAND_OR_GIS, where, fields)
+    by_parcel = {f["attributes"]["RNO"]: f for f in features}
+    if len(by_parcel) != len(features):
+        raise StructureError("PortlandMaps returned duplicate Port of Portland accounts")
+
+    rows = []
+    for site, url, acres in available:
+        rings = []
+        for pin, tax_lot in site["parcels"].items():
+            feature = by_parcel.get(pin, {})
+            attr = feature.get("attributes", {})
+            parcel_rings = (feature.get("geometry") or {}).get("rings") or []
+            if (clean(attr.get("STATE_ID")) != tax_lot or attr.get("PRPCD_DESC") != "VACANT LAND"
+                    or attr.get("BLDGSQFT") not in (0, None) or attr.get("BLDGVAL1") not in (0, None)
+                    or not parcel_rings):
+                break
+            rings.extend(parcel_rings)
+        else:
+            listing = {
+                "id": site["id"], "source": "port-of-portland-or", "title": site["name"] + " (Port land for sale)",
+                "state": "OR", "county": "Multnomah", "locality": site["locality"], "address": site["street"],
+                "apn": " / ".join(site["parcels"]), "price": None, "price_kind": "none", "acres": acres,
+                "offering": "sale", "status": "listed", "deadline": None, "url": url,
+                "lat": None, "lon": None, "geometry": None,
+                "facts": [
+                    fact("availability", "Greater Portland Inc markets this vacant site for purchase through the Port of Portland.", url),
+                    fact("acreage", f"{acres:g} acres maximum as advertised. Confirm sale boundaries and acreage with the Port.", url),
+                    fact("parcel_number", " / ".join(site["parcels"]), "@outline"),
+                    fact("sale_program", "Industrial property marketed by the Port of Portland.", site["port_page"]),
+                ],
+                "tags": ["industrial land", "sale inquiry"],
+            }
+            apply_geometry(listing, rings, PORTLAND_OR_GIS, "PortlandMaps")
+            rows.append(listing)
+    return rows, {"complete": True, "upstream_total": len(available)}
 
 
 # --- Maui Vacant Government-Owned Parcels (HI) ---
@@ -13176,6 +13264,10 @@ SOURCES = [
      "agency": "Multnomah County Tax Title", "url": MULTNOMAH_OR_AUCTION, "state": "OR",
      "run": multnomah_or_tax_title, "requires_sale_match": True,
      "about": "County-classified land matched by account number and minimum bid to the current tax title offering package."},
+    {"id": "port-of-portland-or", "name": "Port of Portland vacant industrial sites",
+     "agency": "Port of Portland", "url": PORT_OF_PORTLAND_OFFERS, "state": "OR",
+     "run": port_of_portland_or, "requires_sale_match": True,
+     "about": "Sites that the Port’s regional economic development partner markets for purchase, matched to vacant tax lots in PortlandMaps."},
     {"id": "connecticut-dot-land", "name": "Connecticut DOT vacant land public bids",
      "agency": "Connecticut Department of Transportation", "url": CTDOT_SALE, "state": "CT",
      "run": connecticut_dot_land, "requires_sale_match": True,
@@ -13462,6 +13554,10 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("Port of Portland commercial property exhibits", "https://www.portofportland.com/trip",
+     "The linked document and map host returned HTTP 400 for robots.txt. Greater Portland Inc independently publishes specific purchase listings."),
+    ("Waterbury Land Bank listing portal", "https://waterburylandbank.org/properties",
+     "The designated listing vendor returns HTTP 403 for its public property catalog."),
     ("Maine Department of Economic and Community Development property catalog",
      "https://www.selectmainesites.com/maine/property/Industrial-Drive-East-Millinocket-Maine/F6724927-BB55-47F8-B106-C2A5B737E6C9",
      "The catalog’s robots.txt disallows the East Millinocket property page."),

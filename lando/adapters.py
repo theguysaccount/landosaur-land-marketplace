@@ -198,6 +198,8 @@ def outline_url(listing):
         return one_parcel_url(CHERRYHILL_NJ_GIS, "UNIQUEID='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "salem-nj-offers":
         return one_parcel_url(NJ_COMPOSITE_PARCELS, "PIN_NODUP='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "centerville-sd-harvest-pointe":
+        return one_parcel_url(CENTERVILLE_SD_GIS, "PARCEL='%s'" % listing["apn"].replace("'", "''"), CENTERVILLE_SD_FIELDS)
     if listing["source"] == "conrad-mt-industrial-park":
         return one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "grays-harbor-wa-tax-title":
@@ -269,9 +271,9 @@ def apply_geometry(listing, rings, source_url, source_name):
     listing["facts"].append(fact("parcel_outline", "Outline from the %s GIS, matched by parcel number" % source_name, "@outline", "outline"))
 
 
-def one_parcel_url(endpoint, where):
+def one_parcel_url(endpoint, where, fields="*"):
     """A short query URL for one parcel's outline, so a reader can check it."""
-    return endpoint + "?" + urllib.parse.urlencode({"f": "json", "where": where, "outFields": "*", "outSR": "4326",
+    return endpoint + "?" + urllib.parse.urlencode({"f": "json", "where": where, "outFields": fields, "outSR": "4326",
                                                     "returnGeometry": "true"})
 
 
@@ -10615,7 +10617,68 @@ def blue_hill_ne_sweezys_lots(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(BLUE_HILL_NE_LOTS)}
 
 
+CENTERVILLE_SD_SALES = "https://www.visitcentervillesd.com/harvest-pointe-housing-development"
+CENTERVILLE_SD_MAP = "https://www.visitcentervillesd.com/s/Available-Lots.jpg"
+CENTERVILLE_SD_MAP_SHA = "a653eaea82520b03f39d9f269b1dd3104ce3f6af6ab2b334045b26161e7b58dd"
+CENTERVILLE_SD_GIS = "https://gis.districtiii.org/server/rest/services/TURNER_COUNTY_LAYERS/MapServer/4/query"
+CENTERVILLE_SD_FIELDS = "PARCEL,LEGAL,DEEDED_ACRE,SITE_ADDRESS,VAL_BLD_TTL,VAL_MH_TTL,VAL_LAND_TTL,RES_YR_BLT_1,RES_SF_AREA_1"
+# Current city sale map asking prices, before any qualifying construction incentive.
+# Exclude sold lots, spec homes and parcels advertised for paired townhomes.
+CENTERVILLE_SD_PRICES = {
+    5: 29900, 6: 34900, 7: 42500, 9: 49900, 10: 49900, 11: 49900, 12: 49900,
+    13: 42500, 14: 42500, 15: 34900, 16: 29900, 17: 29900, 18: 42500, 19: 34900, 22: 29900,
+}
+
+
+def centerville_sd_harvest_pointe(fetch, now, warn):
+    page = fetch.text(CENTERVILLE_SD_SALES)
+    if ("Lots now available!" not in clean(page) or 'href="/s/Available-Lots.jpg"' not in page):
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(CENTERVILLE_SD_MAP)).hexdigest() != CENTERVILLE_SD_MAP_SHA:
+        warn("Harvest Pointe's updated map needs review for availability and asking prices.")
+        return [], {"complete": True, "upstream_total": 0}
+    lots = {f"19800-00000-{lot:03d}-00": lot for lot in CENTERVILLE_SD_PRICES}
+    public_holders = ("CENTERVILLE DEVELOPMENT CORP", "CENTERVILLE DEVELOPMENT CORPORATION",
+                      "CENTERVILLE ECONOMIC DEVELOPMENT CORP", "CENTERVILLE ECONOMIC DEVELOPMENT CORPORATION")
+    where = (f"PARCEL IN ({quote_list(lots)}) AND UPPER(OWNERNAME) IN ({quote_list(public_holders)}) "
+             "AND (CONTRACTTO IS NULL OR CONTRACTTO='')")
+    features = _arcgis_query(fetch, CENTERVILLE_SD_GIS, where, CENTERVILLE_SD_FIELDS, post=True)
+    seen = Counter(item["attributes"].get("PARCEL") for item in features)
+    rows = []
+    for item in features:
+        a = item["attributes"]
+        pin = a.get("PARCEL")
+        lot = lots.get(pin)
+        expected = f"LOT {lot} HARVEST POINTE, AN ADDITION TO THE CITY OF CENTERVILLE IN THE NE1/4 27-96-52"
+        acres = number(a.get("DEEDED_ACRE"))
+        if (not lot or seen[pin] != 1 or clean(a.get("LEGAL")).upper() != expected or not acres
+                or str(a.get("VAL_BLD_TTL")) != "0" or str(a.get("VAL_MH_TTL")) != "0"
+                or not number(a.get("VAL_LAND_TTL")) or number(a.get("RES_YR_BLT_1"))
+                or number(a.get("RES_SF_AREA_1"))):
+            continue
+        row = {
+            "id": "sd-centerville-harvest-" + str(lot), "source": "centerville-sd-harvest-pointe",
+            "state": "SD", "county": "Turner", "locality": "Centerville", "address": clean(a.get("SITE_ADDRESS")),
+            "apn": pin, "title": f"Harvest Pointe, Lot {lot}, Centerville", "acres": acres,
+            "price": CENTERVILLE_SD_PRICES[lot], "price_kind": "asking", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CENTERVILLE_SD_SALES,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Available as a vacant homesite on the current Harvest Pointe sale map.", CENTERVILLE_SD_MAP),
+                      fact("acreage", "Deeded acreage from the Turner County parcel record.", one_parcel_url(CENTERVILLE_SD_GIS, f"PARCEL='{pin}'", CENTERVILLE_SD_FIELDS)),
+                      fact("terms", "The map shows the asking price before any development incentive. Confirm eligibility with the development office.", "=")],
+            "tags": ["vacant homesite", "residential development"],
+        }
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), CENTERVILLE_SD_GIS, "Turner County / District III")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(CENTERVILLE_SD_PRICES)}
+
+
 SOURCES = [
+    {"id": "centerville-sd-harvest-pointe", "name": "Centerville Harvest Pointe vacant homesites",
+     "agency": "Centerville Development Corporation, South Dakota", "url": CENTERVILLE_SD_SALES, "state": "SD",
+     "run": centerville_sd_harvest_pointe, "requires_sale_match": True,
+     "about": "Individually priced homesites on the city’s current map, matched to the Turner County vacant parcel roll."},
     {"id": "belchertown-ma-tax-title", "name": "Belchertown vacant tax-title land auction",
      "agency": "Town of Belchertown, Massachusetts", "url": BELCHERTOWN_MA_SALE, "state": "MA",
      "run": belchertown_ma_tax_title, "requires_sale_match": True, "timezone": "America/New_York",
@@ -11203,6 +11266,10 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Vermillion Jolley Addition city sale documents", "https://www.vermillion.us/m/newsflash/home/detail/840",
+     "The city site returns HTTP 403 for robots.txt."),
+    ("Clark County, South Dakota, parcel assessor", "https://clark.sdcounties.org/director-of-equalization/",
+     "The county site returns HTTP 403 for robots.txt."),
     ("MassGIS Belchertown municipal parcel download", "https://download.massgis.digital.mass.gov/",
      "The official download host did not serve a verifiable robots.txt. The town’s sale notice carries the legal parcel number and acreage."),
     ("Willow Lake Logan Addition availability map", "https://static.wixstatic.com/",

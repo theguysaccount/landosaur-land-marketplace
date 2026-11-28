@@ -45,6 +45,28 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_centerville_matches_the_marked_sale_map_to_unimproved_county_lots(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = 'Lots now available! <a href="/s/Available-Lots.jpg">Current map</a>'
+        fetch.bytes.return_value = b"current sale map"
+        parcel = {"DEEDED_ACRE": "0.64", "VAL_BLD_TTL": "0", "VAL_MH_TTL": "0",
+                  "VAL_LAND_TTL": "38000", "SITE_ADDRESS": "1071 THOMAS DRIVE"}
+        features = [
+            {"attributes": dict(parcel, PARCEL=f"19800-00000-{lot:03d}-00",
+                                LEGAL=f"LOT {lot} HARVEST POINTE, AN ADDITION TO THE CITY OF CENTERVILLE IN THE NE1/4 27-96-52",
+                                VAL_BLD_TTL=value),
+             "geometry": {"rings": [[[-97, 43], [-96.9995, 43], [-97, 43.0005], [-97, 43]]]}}
+            for lot, value in ((8, "0"), (10, "0"), (11, "200"), (20, "0"))
+        ]
+        with patch.object(adapters, "CENTERVILLE_SD_MAP_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
+            adapters, "_arcgis_query", return_value=features
+        ):
+            rows, _ = adapters.centerville_sd_harvest_pointe(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["id"], row["apn"], row["price"], row["acres"]),
+                         ("sd-centerville-harvest-10", "19800-00000-010-00", 49900, 0.64))
+        self.assertTrue(row["geometry"])
+
     def test_belchertown_requires_vacancy_and_does_not_use_the_deposit_as_the_price(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = (

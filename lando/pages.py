@@ -10,6 +10,7 @@ import html
 from itertools import islice
 import json
 import os
+import re
 import urllib.parse
 
 from . import adapters, config, guides as guides_mod, market as market_mod, research, tax_sales as tax_sales_mod
@@ -59,6 +60,12 @@ def acres_text(a):
 
 def price_line(r):
     if r["price"] is None:
+        for fact in r.get("facts", []):
+            rate = fact.get("value", "")
+            if fact.get("topic") == "minimum_bid_per_acre":
+                return "Minimum bid " + rate
+            if fact.get("topic") == "asking_price" and re.search(r"\bper\s+acre\b|/\s*acre\b", rate, re.I):
+                return rate
         return "No price published"
     return "%s %s" % (adapters.PRICE_KIND.get(r["price_kind"], "Price"), money(r["price"]))
 

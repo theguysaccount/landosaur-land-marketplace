@@ -1071,6 +1071,34 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_certified_site_requires_current_public_sale_and_preserves_rate(self):
+        from lando.pages import price_line
+
+        fields = {
+            "Site Ownership": "Public", "For sale or lease": "Sale", "County": "Washington",
+            "Site Acreage": "22 acres", "Sale/lease price": "$40,000 /acre",
+        }
+
+        def profile(overrides):
+            return "".join(f'<div class="acf-field-name">{key}</div><div class="acf-field-value">{value}</div>'
+                           for key, value in (fields | overrides).items())
+
+        page = "https://tnecd.com/certifiedsite/test-site/"
+        entry = {"id": 101, "status": "publish", "link": page, "title": {"rendered": "Test industrial site"},
+                 "acf": {"sold": False, "is_sold": "no", "latitude": "36.263925", "longitude": "-82.5598363"}}
+        sold = {**entry, "id": 102, "acf": {**entry["acf"], "sold": True}}
+        fetch = unittest.mock.Mock()
+        fetch.json.return_value = [entry, sold]
+        fetch.text.return_value = profile({})
+        rows, info = adapters.tnecd_certified_sites(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["acres"], row["price"], row["lon"]), (2, 22, None, -82.5598363))
+        self.assertIn("$40,000 /acre", [fact["value"] for fact in row["facts"]])
+        self.assertEqual(price_line(row), "$40,000 /acre")
+        fetch.text.assert_called_once_with(page)
+        for change in ({"For sale or lease": "Lease"}, {"Site Ownership": "Private"}, {"Site Acreage": "22–60 acres"}):
+            self.assertIsNone(adapters.parse_tnecd_certified_detail(entry, profile(change)))
+
     def test_washington_county_joins_current_surplus_to_exact_vacant_records(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = ('<a href="/DocumentCenter/View/1/COUNTY-OWNED-PROPERTY">Roster</a>'

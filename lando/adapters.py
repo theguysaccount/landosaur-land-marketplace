@@ -8845,6 +8845,94 @@ def washington_tn_surplus(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(pins)}
 
 
+TNECD_CERTIFIED = "https://tnecd.com/certified-sites/"
+TNECD_CERTIFIED_API = "https://tnecd.com/wp-json/tnecd-cs/v1/certified-sites?per_page=999"
+TNECD_SITE_FIELD = re.compile(
+    r'<div\s+class="acf-field-name"[^>]*>(.*?)</div>\s*<div\s+class="acf-field-value"[^>]*>(.*?)</div>',
+    re.S,
+)
+
+
+def parse_tnecd_certified_detail(entry, profile):
+    url = entry["link"]
+    title = clean((entry.get("title") or {}).get("rendered"))
+    fields = {clean(label).casefold(): clean(value) for label, value in TNECD_SITE_FIELD.findall(profile)}
+    if not fields:
+        raise StructureError(f"Tennessee certified site changed its detail layout: {url}")
+    holder = fields.get("site ownership", "")
+    public = holder.casefold() == "public" or bool(re.fullmatch(
+        r"(?:City|County|Town) of [A-Za-z .’'-]+|[A-Za-z .’'-]+ County", holder, re.I))
+    deal = fields.get("for sale or lease", "").casefold()
+    if not public or deal not in {"sale", "for sale", "sale or lease", "sale and lease", "sale/lease", "sale & lease"}:
+        return None
+    acreage = fields.get("site acreage", "")
+    county = fields.get("county", "")
+    acres = number(acreage) if re.fullmatch(r"[\d,]+(?:\.\d+)?(?:\s*(?:acres?|ac\.?))?", acreage, re.I) else None
+    if not title or not county or not acres:
+        return None
+    price_label = fields.get("sale/lease price", "")
+    # A rate or a range never becomes a total asking price. The combined sale/lease
+    # field establishes a total price only when the site is offered solely for sale.
+    price = (number(price_label) if deal in {"sale", "for sale"}
+             and re.fullmatch(r"\$\s*[\d,]+(?:\.\d{2})?", price_label) else None)
+    facts = [
+        fact("availability", "The state certifies this industrial development site and publishes it as available for purchase.", url),
+        fact("acreage", f"{acres:g} acres marketed by the state", url),
+    ]
+    if price_label and price_label.casefold() not in {"tbd", "n/a", "none"}:
+        topic = "asking_price" if deal in {"sale", "for sale"} else "sale_or_lease_terms"
+        facts.append(fact(topic, price_label, url))
+    for key, topic in (("developable acreage", "developable_acreage"), ("zoning", "zoning")):
+        if fields.get(key):
+            facts.append(fact(topic, fields[key], url))
+    acf = entry["acf"]
+    lat, lon = number(acf.get("latitude")), acf.get("longitude")
+    try:
+        lon = float(lon)
+    except (TypeError, ValueError):
+        lon = None
+    if not (lat is not None and lon is not None and 34.9 <= lat <= 36.7 and -90.5 <= lon <= -81.5):
+        lat = lon = None
+    return {
+        "id": f"tn-certified-{entry['id']}", "source": "tnecd-certified-sites", "title": title,
+        "state": "TN", "county": re.sub(r"\s+County$", "", county, flags=re.I),
+        "locality": fields.get("city") or county, "address": fields.get("site address", ""),
+        "acres": acres, "price": price, "price_kind": "asking" if price is not None else "none",
+        "offering": "sale" if price is not None else "offer", "status": "listed", "deadline": None,
+        "url": url, "lat": lat, "lon": lon, "geometry": None, "facts": facts,
+        "tags": ["industrial land", "state-certified development site"],
+    }
+
+
+def tnecd_certified_sites(fetch, now, warn):
+    listings = fetch.json(TNECD_CERTIFIED_API)
+    if not isinstance(listings, list) or not listings:
+        raise StructureError("Tennessee’s certified site directory changed")
+    rows = []
+    ids = set()
+    for entry in listings:
+        if (not isinstance(entry, dict) or not isinstance(entry.get("acf"), dict)
+                or not isinstance(entry["acf"].get("sold"), bool) or not isinstance(entry.get("id"), int)
+                or entry["id"] in ids or not isinstance(entry.get("link"), str)):
+            raise StructureError("Tennessee’s certified site directory record changed")
+        ids.add(entry["id"])
+        acf = entry["acf"]
+        if entry.get("status") != "publish" or acf["sold"] or acf.get("is_sold") != "no":
+            continue
+        url = entry["link"]
+        if acf.get("custom_url") or not re.fullmatch(r"https://tnecd\.com/certifiedsite/[a-z0-9-]+/", url):
+            continue
+        try:
+            profile = fetch.text(url)
+        except FetchError as exc:
+            if exc.status in (404, 410):
+                continue
+            raise
+        if row := parse_tnecd_certified_detail(entry, profile):
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(listings)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9335,8 +9423,16 @@ SOURCES = [
      "agency": "Washington County Purchasing Department, Tennessee", "url": WASHINGTON_TN_SALE, "state": "TN",
      "run": washington_tn_surplus, "requires_sale_match": True,
      "about": "County purchase-inquiry parcels from the tax-deed surplus roster, joined to current City of Johnson City GIS and improvement records."},
+    {"id": "tnecd-certified-sites", "name": "Tennessee certified publicly held industrial development sites",
+     "agency": "Tennessee Department of Economic and Community Development", "url": TNECD_CERTIFIED, "state": "TN",
+     "run": tnecd_certified_sites, "requires_sale_match": True,
+     "about": "State-certified development sites listed for purchase on Tennessee’s official directory, matched to published public holdings and offer terms."},
 ]
 NOT_CARRIED = [
+    ("Wyoming Business Council industrial sites vendor", "https://www.wyomingsites.com/",
+     "Robots rules disallow the linked catalog index and industrial property paths on the listing vendor’s host."),
+    ("Guernsey Economic & Tourism Development industrial lot map", "https://www.guernseyeconomicdevelopment.com/lots-for-sale",
+     "The download host disallows the delegated lot-map file. Current lot-level availability needs separate official confirmation."),
     ("Tennessee property assessment website", "https://assessment.cot.tn.gov/tpad/",
      "The host returned HTTP 403 for robots.txt. The independently published Johnson City parcel layer covers the Washington County surplus roster."),
     ("Go Goshen embedded industrial lot maps", "https://gogoshen.com/do-business/economic-development/industrial-real-estate/",

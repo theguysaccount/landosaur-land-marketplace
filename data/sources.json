@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T03:31:28Z",
+ "checked": "2026-11-28T04:59:28Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -812,6 +812,24 @@
    "state": "MD",
    "upstream_total": 5,
    "url": "https://www.dorchestermd.gov/Bids.aspx"
+  },
+  "douglas-wa-tax-title": {
+   "about": "Vacant parcels on the county\u2019s current tax-title purchase list with published minimum bids and access notes.",
+   "agency": "Douglas County Treasurer, Washington",
+   "complete": true,
+   "count": 6,
+   "failures": 0,
+   "last_attempt": "2026-11-28T04:59:28Z",
+   "last_success": "2026-11-28T04:59:28Z",
+   "message": "",
+   "name": "Douglas County tax-title land for purchase",
+   "notes": [],
+   "ok": true,
+   "read": 6,
+   "seconds": 13,
+   "state": "WA",
+   "upstream_total": 8,
+   "url": "https://www.douglascountywa.gov/163/Tax-Foreclosure-Information"
   },
   "elk-pa-repository": {
    "about": "Vacant parcels in the county's live repository index. Consult the county for offer terms and any applicable minimum.",

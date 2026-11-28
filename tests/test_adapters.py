@@ -1069,6 +1069,28 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_douglas_tax_title_uses_current_minimum_and_preserves_access_restriction(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = '<a href="/current.pdf">Douglas County - Tax Title Properties</a>'
+        roster = ('Below is the current list of tax title properties. If you are interested in purchasing:\n'
+                  'Parcel: 01400804000\n'
+                  f'Minimum Bid: $ 747.02 ({adapters.DOUGLAS_WA_NO_ACCESS})\n'
+                  'Parcel: 24 21 18 300 03\nMinimum Bid: $ 243.45 (Parcel completely under water)\n'
+                  'Parcel: 40200005501\nMinimum Bid: $ 1,065.31\n')
+        rings = [[[-119.68, 48.0], [-119.68, 48.001], [-119.679, 48.001],
+                  [-119.679, 48.0], [-119.68, 48.0]]]
+        gis = [{"attributes": {"ORIG_PARCEL_ID": "01400804000", "LANDUSE_CD": 91, "VALUE_BLDG": 0, "VALUE_LAND": 500},
+                "geometry": {"rings": rings}},
+               {"attributes": {"ORIG_PARCEL_ID": "40200005501", "LANDUSE_CD": 45, "VALUE_BLDG": 0, "VALUE_LAND": 500},
+                "geometry": {"rings": rings}}]
+        with patch.object(adapters, "pdf_text", return_value=roster), patch.object(adapters, "_arcgis_query", return_value=gis):
+            rows, info = adapters.douglas_wa_tax_title(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual(info["upstream_total"], 2)
+        self.assertEqual((row["apn"], row["price"], row["price_kind"]), ("01400804000", 747.02, "min_bid"))
+        self.assertIn(adapters.DOUGLAS_WA_NO_ACCESS, [f["value"] for f in row["facts"]])
+        self.assertTrue(row["geometry"])
+
     def test_nevada_county_keeps_open_priced_unimproved_parcels(self):
         schedule = ('<p>Auction Date: January 7, 2027</p>'
                     '<a href="/list.pdf">2026 Auction Property List</a>')

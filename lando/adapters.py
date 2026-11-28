@@ -8444,6 +8444,72 @@ def nevada_ca_tax_sale(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(offers)}
 
 
+DOUGLAS_WA_TAX_TITLE = "https://www.douglascountywa.gov/163/Tax-Foreclosure-Information"
+DOUGLAS_WA_PARCELS = "https://services.arcgis.com/jsIt88o09Q0r1j8h/ArcGIS/rest/services/Current_Parcels/FeatureServer/0/query"
+DOUGLAS_WA_NO_ACCESS = "Parcel by water – no land access without acquiring easement"
+
+
+def parse_douglas_wa_tax_title(text):
+    if "current list of tax title properties" not in text or "interested in purchasing" not in text:
+        raise StructureError("Douglas County’s current tax-title purchase terms could not be verified")
+    offers = {}
+    seen = set()
+    for match in re.finditer(r"^\s*Parcel:[ \t]+([\d ]+)[ \t]*\n[ \t]*Minimum Bid:[ \t]*\$[ \t]*([\d,.]+)[ \t]*(.*?)$", text, re.M):
+        raw_pin, bid, restriction = match.groups()
+        pin = raw_pin.replace(" ", "")
+        if not re.fullmatch(r"\d{11}", pin) or pin in seen:
+            raise StructureError("Douglas County’s tax-title list contains an invalid or repeated parcel number")
+        seen.add(pin)
+        note = restriction.strip()
+        if (not note or note == f"({DOUGLAS_WA_NO_ACCESS})") and number(bid):
+            offers[pin] = (number(bid), bool(note))
+    if not seen:
+        raise StructureError("Douglas County’s tax-title list could not be read")
+    return offers
+
+
+def douglas_wa_tax_title(fetch, now, warn):
+    page = fetch.text(DOUGLAS_WA_TAX_TITLE)
+    link = re.search(r'<a\b[^>]*href="([^"]+)"[^>]*>\s*Douglas County - Tax Title Properties\s*</a>', page, re.I)
+    if not link:
+        raise StructureError("Douglas County removed the link to its tax-title purchase list")
+    url = urllib.parse.urljoin(DOUGLAS_WA_TAX_TITLE, html.unescape(link[1]))
+    offers = parse_douglas_wa_tax_title(pdf_text(fetch, url))
+    if not offers:
+        return [], {"complete": True, "upstream_total": 0}
+    where = "FIPS_NR='017' AND ORIG_PARCEL_ID IN (%s)" % quote_list(sorted(offers))
+    features = _arcgis_query(fetch, DOUGLAS_WA_PARCELS, where,
+                             "ORIG_PARCEL_ID,LANDUSE_CD,VALUE_BLDG,VALUE_LAND")
+    pins = [feature["attributes"].get("ORIG_PARCEL_ID") for feature in features]
+    if len(pins) != len(offers) or set(pins) != set(offers):
+        raise StructureError("Douglas County tax-title parcels did not match the state parcel layer exactly")
+    rows = []
+    for feature in features:
+        info = feature["attributes"]
+        rings = (feature.get("geometry") or {}).get("rings")
+        if (info.get("LANDUSE_CD") != 91 or info.get("VALUE_BLDG") != 0
+                or not number(info.get("VALUE_LAND")) or not (acres := rings_acres(rings or []))):
+            continue
+        pin = info["ORIG_PARCEL_ID"]
+        bid, no_access = offers[pin]
+        row = {
+            "id": "wa-douglas-tax-title-" + pin, "source": "douglas-wa-tax-title",
+            "title": "Parcel %s (Douglas County tax-title land)" % pin,
+            "state": "WA", "county": "Douglas", "locality": "", "address": "", "apn": pin,
+            "acres": acres, "price": bid, "price_kind": "min_bid", "offering": "sale", "status": "listed",
+            "deadline": None, "url": DOUGLAS_WA_TAX_TITLE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county treasurer invites purchase inquiries for this tax-title parcel.", url),
+                      fact("minimum_bid", f"${bid:,.2f}", url),
+                      fact("acreage", "%g acres calculated from the published parcel outline" % acres, url, "gis_area")],
+            "tags": ["tax-title land", "county purchase inquiry"],
+        }
+        if no_access:
+            row["facts"].append(fact("access", DOUGLAS_WA_NO_ACCESS, url))
+        apply_geometry(row, rings, DOUGLAS_WA_PARCELS, "Washington State Parcels Project")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -8914,8 +8980,16 @@ SOURCES = [
      "agency": "Nevada County Treasurer-Tax Collector, California", "url": NEVADA_CA_SALE, "state": "CA",
      "run": nevada_ca_tax_sale, "requires_sale_match": True, "timezone": "America/Los_Angeles",
      "about": "Upcoming vacant auction parcels with published minimum bids, matched to assessor use codes and mapped outlines."},
+    {"id": "douglas-wa-tax-title", "name": "Douglas County tax-title land for purchase",
+     "agency": "Douglas County Treasurer, Washington", "url": DOUGLAS_WA_TAX_TITLE, "state": "WA",
+     "run": douglas_wa_tax_title, "requires_sale_match": True,
+     "about": "Vacant parcels on the county’s current tax-title purchase list with published minimum bids and access notes."},
 ]
 NOT_CARRIED = [
+    ("Snohomish County current foreclosure auction", "https://snohomishcountywa.gov/220/Tax-Foreclosures",
+     "The current sale vendor returned HTTP 403 for robots.txt, and the county payment portal’s search script is disallowed."),
+    ("Pierce County tax-title sale roster", "https://www.piercecountywa.gov/1005/Tax-Title-Properties",
+     "The county host returned HTTP 403 for the public purchase page and parcel list."),
     ("Hawaii state surplus auction portal", "https://auctions.ehawaii.gov/landing.html",
      "The auction portal returned HTML in place of robots.txt."),
     ("Yavapai County tax-deed sales", "https://www.yavapaiaz.gov/Mapping-and-Properties/Property-Taxes/Tax-Deed-Sales",

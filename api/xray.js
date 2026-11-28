@@ -18,6 +18,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { sampleUsgsDem } from "../lib/usgs-dem.mjs";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -171,7 +172,9 @@ async function queryUsgsElevation(lat, lon) {
     ["e2", lat, lon + dLon50 * 2],
     ["w2", lat, lon - dLon50 * 2],
   ];
-  const vals = {};
+  let vals = {};
+  let elevationSource = "USGS 3DEP dynamic elevation service";
+  let elevationSourceUrl = "https://apps.nationalmap.gov/viewer/";
   const sampleParams = new URLSearchParams({
     f: "json",
     geometryType: "esriGeometryMultipoint",
@@ -181,22 +184,36 @@ async function queryUsgsElevation(lat, lon) {
   });
   try {
     const url = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/getSamples?";
-    const body = await fetchJson(url + sampleParams, {}, 4500);
+    const body = await fetchJson(url + sampleParams, {}, 2800);
     for (const point of body.samples || []) {
       const key = pts[point.locationId]?.[0];
       const meters = point.value == null ? NaN : Number(point.value);
       if (key && Number.isFinite(meters) && meters > -420 && meters < 9200) vals[key] = meters / 0.3048;
     }
   } catch {
-    // The EPQS endpoint serves the same USGS elevation data when the image server is unavailable.
+    // Try the official staged rasters when the dynamic imagery service is slow.
   }
   if (vals.c == null || Object.keys(vals).length < 5) {
-    await Promise.allSettled(pts.filter(([key]) => vals[key] == null).map(async ([key, la, lo]) => {
+    const dem = await sampleUsgsDem(pts);
+    if (dem && (vals.c == null || Object.keys(dem.samples).length >= Object.keys(vals).length)) {
+      vals = dem.samples;
+      elevationSource = `USGS 3DEP ${dem.seconds}-arc-second DEM`;
+      elevationSourceUrl = "https://www.usgs.gov/3d-elevation-program/about-3dep-products-services";
+    }
+  }
+  if (vals.c == null || Object.keys(vals).length < 5) {
+    const pointSamples = {};
+    await Promise.allSettled(pts.map(async ([key, la, lo]) => {
       const url = `https://epqs.nationalmap.gov/v1/json?x=${lo.toFixed(6)}&y=${la.toFixed(6)}&wkid=4326&units=Feet`;
-      const body = await fetchJson(url, {}, 6500);
+      const body = await fetchJson(url, {}, 9000);
       const value = body?.value == null ? NaN : Number(body.value);
-      if (Number.isFinite(value) && value > -1400 && value < 30500) vals[key] = value;
+      if (Number.isFinite(value) && value > -1400 && value < 30500) pointSamples[key] = value;
     }));
+    if (pointSamples.c != null && (vals.c == null || Object.keys(pointSamples).length > Object.keys(vals).length)) {
+      vals = pointSamples;
+      elevationSource = "USGS 3DEP Elevation Point Query Service";
+      elevationSourceUrl = "https://epqs.nationalmap.gov/v1/docs/";
+    }
   }
   if (vals.c == null) {
     return { status: "unavailable", source: "USGS 3DEP EPQS" };
@@ -205,7 +222,7 @@ async function queryUsgsElevation(lat, lon) {
   const all = Object.values(vals);
   const minFt = Math.min(...all);
   const maxFt = Math.max(...all);
-  const reliefFt = Math.max(...near) - Math.min(...near);
+  const reliefFt = near.length > 1 ? Math.max(...near) - Math.min(...near) : null;
   let slopePct = null;
   let aspect = null;
   if (vals.n1 != null && vals.s1 != null && vals.e1 != null && vals.w1 != null) {
@@ -256,8 +273,8 @@ async function queryUsgsElevation(lat, lon) {
     aspect,
     profile_we: profileWe,
     profile_sn: profileSn,
-    source: "USGS 3DEP 1m/10m LiDAR",
-    source_url: "https://apps.nationalmap.gov/viewer/",
+    source: elevationSource,
+    source_url: elevationSourceUrl,
   };
 }
 

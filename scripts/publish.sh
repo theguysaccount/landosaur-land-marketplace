@@ -8,6 +8,7 @@
 #   ./scripts/publish.sh --refresh-intelligence --crawl-only  # Refresh EIA-861 and CPI-U
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally
 #   ./scripts/publish.sh --no-deploy --regen-og # Re-render the committed share cards
+#   ./scripts/publish.sh --verify-live changed-urls.txt  # Resume a deployed release after a live check fails
 #   ./scripts/publish.sh --skip-e2e            # Local build only, without browser verification
 set -euo pipefail
 
@@ -23,15 +24,23 @@ NO_DEPLOY=0
 CRAWL_ONLY=0
 REFRESH_INTELLIGENCE=0
 REGEN_OG=0
+VERIFY_LIVE_FILE=""
 SRV_PID=""
 CHANGED=""
+KEEP_CHANGED=0
 
 cleanup() {
   if [ -n "$SRV_PID" ]; then
     kill "$SRV_PID" 2>/dev/null || true
     wait "$SRV_PID" 2>/dev/null || true
   fi
-  if [ -n "$CHANGED" ]; then rm -f "$CHANGED"; fi
+  if [ -n "$CHANGED" ]; then
+    if [ "$KEEP_CHANGED" -eq 1 ]; then
+      echo "Resume the live release checks with ./scripts/publish.sh --verify-live $CHANGED" >&2
+    else
+      rm -f "$CHANGED"
+    fi
+  fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -51,6 +60,14 @@ while [ $# -gt 0 ]; do
       ;;
     --refresh-intelligence) REFRESH_INTELLIGENCE=1 ;;
     --crawl-only) CRAWL_ONLY=1 ;;
+    --verify-live)
+      if [ $# -ne 2 ] || [ -n "$VERIFY_LIVE_FILE" ] || [ ! -f "$2" ]; then
+        echo "--verify-live requires the existing changed-URLs file and no other flags" >&2
+        exit 2
+      fi
+      VERIFY_LIVE_FILE="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+      shift
+      ;;
     --skip-e2e) SKIP_E2E=1 ;;
     --no-deploy) NO_DEPLOY=1 ;;
     --regen-og) REGEN_OG=1 ;;
@@ -59,7 +76,26 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+verify_live() {
+  echo "==> 7/7 Verifying production, then submitting changed pages to IndexNow"
+  node scripts/e2e.mjs "$BASE_URL"
+  node scripts/live-api.mjs "$BASE_URL"
+  python3 scripts/indexnow.py submit "$1" "$BASE_URL"
+  if [ -n "${LANDO_SCREEN_DIR:-}" ]; then
+    node scripts/screens.mjs "$BASE_URL" "$LANDO_SCREEN_DIR"
+  fi
+  echo "==> Landosaur published to $BASE_URL at \$0 GitHub Actions cost."
+}
+
 cd "$ROOT"
+if [ -n "$VERIFY_LIVE_FILE" ]; then
+  if [ "$REFRESH" -ne 0 ] || [ "$REFRESH_INTELLIGENCE" -ne 0 ] || [ "$REGEN_OG" -ne 0 ] || [ "$CRAWL_ONLY" -ne 0 ] || [ "$NO_DEPLOY" -ne 0 ] || [ "$SKIP_E2E" -ne 0 ]; then
+    echo "Use --verify-live by itself" >&2
+    exit 2
+  fi
+  verify_live "$VERIFY_LIVE_FILE"
+  exit 0
+fi
 if [ "$REGEN_OG" -eq 1 ] && [ "$NO_DEPLOY" -ne 1 ]; then
   echo "Use --regen-og with --no-deploy and commit the updated share cards before releasing" >&2
   exit 2
@@ -174,12 +210,6 @@ rsync -a --delete \
   "$ROOT/" "$STAGING/"
 (cd "$STAGING" && "${vercel_cli[@]}" --prod --yes --scope persist-always)
 
-echo "==> 7/7 Verifying production, then submitting changed pages to IndexNow"
-node scripts/e2e.mjs "$BASE_URL"
-node scripts/live-api.mjs "$BASE_URL"
-
-python3 scripts/indexnow.py submit "$CHANGED" "$BASE_URL"
-if [ -n "${LANDO_SCREEN_DIR:-}" ]; then
-  node scripts/screens.mjs "$BASE_URL" "$LANDO_SCREEN_DIR"
-fi
-echo "==> Landosaur published to $BASE_URL at \$0 GitHub Actions cost."
+KEEP_CHANGED=1
+verify_live "$CHANGED"
+KEEP_CHANGED=0

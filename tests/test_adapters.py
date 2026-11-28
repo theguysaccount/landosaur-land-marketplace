@@ -464,6 +464,27 @@ class DetroitAndKcAndCaTest(unittest.TestCase):
         self.assertEqual((rows[0]["state"], rows[0]["county"], rows[0]["price_kind"]), ("MI", "Wayne", "none"))
         self.assertTrue(rows[0]["url"].startswith("https://buildingdetroit.org/"))
 
+    def test_detroit_acreage_requires_an_exact_unimproved_assessor_match(self):
+        def assessment(parcel_id, acreage, improved):
+            return {"attributes": {"parcel_id": parcel_id, "total_acreage": acreage, "is_improved": improved}}
+
+        class Assessor:
+            def json(self, url, *, form):
+                self.query = form
+                return {"features": [assessment("01001587.", 0.157, 0), assessment("01001588.", 0.138, 1),
+                                     assessment("01001689.004", 0.022, 0), assessment("01001689.004", 0.026, 0),
+                                     assessment("01001689.005", 0.4, 0)]}
+
+        fetch = Assessor()
+        rows = [{"apn": parcel_id, "acres": None, "facts": []}
+                for parcel_id in ("01001587", "01001588", "01001689.004", "01001689.001")]
+        adapters.enrich_detroit_assessor_acreage(fetch, rows)
+        self.assertEqual([row["acres"] for row in rows], [0.157, None, None, None])
+        self.assertEqual(rows[0]["facts"][0]["url"], "@detroit_assessor")
+        self.assertIn("'01001587.'", fetch.query["where"])
+        self.assertEqual(fetch.query["outFields"], "parcel_id,total_acreage,is_improved")
+        self.assertEqual(fetch.query["returnGeometry"], "false")
+
     def test_kc_filters_acquired_vacant_land_bank_and_keeps_zoning(self):
         raw = [
             {"parcel_number": "JA28810112600000000", "property_class": "Residential Vacant", "property_status": "Acquired",

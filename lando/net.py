@@ -183,8 +183,9 @@ class Fetcher:
     def bytes(self, url):
         return self._get(url)
 
-    def json(self, url):
+    def json(self, url, *, form=None):
+        body = urllib.parse.urlencode(form).encode() if form is not None else None
         try:
-            return json.loads(self._get(url).decode("utf-8-sig", "replace"))
+            return json.loads(self._get(url, data=body).decode("utf-8-sig", "replace"))
         except ValueError as exc:
             raise FetchError("%s did not return JSON (%s)" % (url, exc)) from exc

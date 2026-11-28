@@ -739,6 +739,7 @@ def alaska_dnr(fetch, now, warn):
 DLBA_GIS = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/DLBA_Owned_Properties/FeatureServer/0/query"
 DLBA_URL = "https://buildingdetroit.org/properties"
 DLBA_NEIGHBORHOOD_URL = "https://buildingdetroit.org/sidelots/index/neighborhood/"
+DETROIT_ASSESSOR_LAYER = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/parcel_file_current/FeatureServer/0"
 DLBA_NEIGHBORHOOD = "Neighborhood Lot For Sale"
 DLBA_PROGRAMS = (
     DLBA_NEIGHBORHOOD,
@@ -815,6 +816,39 @@ def parse_detroit_neighborhood_price(page):
     return number(match[1]) if match else None
 
 
+def enrich_detroit_assessor_acreage(fetch, rows):
+    # The assessor retains a terminal period for unsuffixed eight-digit IDs.
+    by_id = {row["apn"] + ("." if re.fullmatch(r"\d{8}", row["apn"]) else ""): row for row in rows}
+    ids = sorted(by_id)
+    matches = 0
+    for offset in range(0, len(ids), 300):
+        batch = set(ids[offset:offset + 300])
+        features = _arcgis_query(fetch, DETROIT_ASSESSOR_LAYER + "/query",
+                                 "parcel_id IN (%s)" % quote_list(sorted(batch)),
+                                 "parcel_id,total_acreage,is_improved", count=1000,
+                                 extra={"returnGeometry": "false"}, post=True)
+        by_parcel = {}
+        for feature in features:
+            attributes = feature.get("attributes") or {}
+            if not {"parcel_id", "total_acreage", "is_improved"}.issubset(attributes):
+                raise StructureError("Detroit assessor acreage fields changed")
+            parcel_id = attributes["parcel_id"]
+            if parcel_id in batch:
+                by_parcel.setdefault(parcel_id, set()).add((attributes["total_acreage"], attributes["is_improved"]))
+        for parcel_id, assessments in by_parcel.items():
+            if len(assessments) != 1:
+                continue
+            acres, improved = next(iter(assessments))
+            if type(acres) not in (int, float) or not math.isfinite(acres) or acres <= 0 or improved != 0:
+                continue
+            row = by_id[parcel_id]
+            row["acres"] = acres
+            row["facts"].append(fact("acreage", "%g acres (City of Detroit assessor)" % acres, "@detroit_assessor"))
+            matches += 1
+    if not matches:
+        raise StructureError("Detroit assessor returned no vacant parcel acreage for the marketed lots")
+
+
 def detroit_dlba(fetch, now, warn):
     where = "inventory_status_socrata IN (%s)" % quote_list(DLBA_PROGRAMS)
     fields = "parcel_id,name,inventory_status_socrata,neighborhood,council_district,latitude,longitude"
@@ -853,6 +887,7 @@ def detroit_dlba(fetch, now, warn):
         raise StructureError("only %d Detroit Land Bank marketed lots: feed looks incomplete" % len(rows))
     if offset != count:
         warn("Detroit Land Bank returned %d of %d queried lots" % (offset, count))
+    enrich_detroit_assessor_acreage(fetch, rows)
     return rows, {"complete": offset == count, "upstream_total": count}
 
 
@@ -2429,7 +2464,7 @@ def orlando_vacant_fl(fetch, now, warn):
 
 # ------------------------------------------------------------------------------------------- Phase 5: 15 Official Agencies Across 13 New States (AL, CT, DE, IA, IN, KS, MA, MN, NE, RI, TN, VA, WV)
 
-def _arcgis_query(fetch, gis_url, where, out_fields, count=500, extra=None):
+def _arcgis_query(fetch, gis_url, where, out_fields, count=500, extra=None, *, post=False):
     params = {
         "f": "json", "where": where, "outFields": out_fields,
         "outSR": "4326", "returnGeometry": "true", "geometryPrecision": "6",
@@ -2437,7 +2472,7 @@ def _arcgis_query(fetch, gis_url, where, out_fields, count=500, extra=None):
     }
     if extra:
         params.update(extra)
-    data = fetch.json(gis_url + "?" + urllib.parse.urlencode(params))
+    data = fetch.json(gis_url, form=params) if post else fetch.json(gis_url + "?" + urllib.parse.urlencode(params))
     if not isinstance(data, dict) or "features" not in data:
         raise StructureError("ArcGIS response changed for %s" % gis_url)
     return data["features"]
@@ -4921,6 +4956,7 @@ URLS.update({
     "stl_inventory": STL + "LRA_INVENTORY.csv",
     "stl_available": STL + "LRA_INVENTORY_AVAILABLE.csv",
     "dlba_gis": "https://data.detroitmi.gov/datasets/dlba-owned-properties",
+    "detroit_assessor": DETROIT_ASSESSOR_LAYER,
     "kc_dataset": KC_DATASET,
     "chi_dataset": CHI_DATASET,
     "pgh_dataset": PGH_DATASET,
@@ -6291,6 +6327,52 @@ def mndot_surplus(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+GRESHAM_NE_SALE = "https://www.yorkdevco.com/life/housing-and-neighborhoods"
+NE_PARCELS = "https://giscat.ne.gov/enterprise/rest/services/StatewideParcelsExternal/FeatureServer/0/query"
+
+
+def gresham_ne_lots(fetch, now, warn):
+    page = fetch.text(GRESHAM_NE_SALE)
+    link = re.search(r'<a\b[^>]*href="([^"]+)"[^>]*>\s*List of Lots Moved to CDA\s*</a>', page, re.I)
+    if not link or "Community Development Agency is accepting applications" not in clean(page):
+        raise StructureError("Gresham's current residential lot program materials changed")
+    url = urllib.parse.urljoin(GRESHAM_NE_SALE, html.unescape(link[1]))
+    parcel_ids = set(re.findall(r"\bPID:\s*(\d{9})\b", pdf_text(fetch, url, extraction_mode="plain")))
+    if not parcel_ids:
+        raise StructureError("Gresham's program parcel IDs were not found")
+    _, features = arcgis_query(fetch, NE_PARCELS, "Parcel_ID IN (%s)" % quote_list(sorted(parcel_ids)),
+                               "Parcel_ID,Situs_Address,Acres_Deeded,GIS_Acres,Improvements_Value,Other_Impr_Value,BuildingYear,ImpSF")
+    if {str((f.get("attributes") or {}).get("Parcel_ID")) for f in features} != parcel_ids:
+        raise StructureError("Gresham program parcels could not all be verified through the statewide assessor data")
+    rows = []
+    for feature in features:
+        item = feature.get("attributes") or {}
+        if item.get("BuildingYear") or any(item.get(key) != 0 for key in ("Improvements_Value", "Other_Impr_Value", "ImpSF")):
+            continue
+        pid = str(item["Parcel_ID"])
+        address = clean(str(item.get("Situs_Address") or "")).title()
+        outline = one_parcel_url(NE_PARCELS, "Parcel_ID='%s'" % pid)
+        deeded_acres = number(item.get("Acres_Deeded"))
+        gis_acres = number(item.get("GIS_Acres"))
+        row = {
+            "id": "ne-gresham-" + pid, "source": "gresham-ne-cda",
+            "title": "%s, Gresham (residential development lot)" % (address or "Parcel " + pid),
+            "state": "NE", "county": "York", "locality": "Gresham", "apn": pid,
+            "address": address, "acres": deeded_acres or gis_acres, "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": GRESHAM_NE_SALE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Parcel listed with the village’s open Residential Lot Sale program", url),
+                      fact("eligibility", "Application and qualified single-family construction required. The village sets the parcel price.", GRESHAM_NE_SALE)],
+            "tags": ["residential development", "application required"],
+        }
+        if gis_acres and not deeded_acres:
+            row["facts"].append(fact("acreage", "%g acres (state GIS estimate)" % gis_acres, outline, "gis_area"))
+        if rings := (feature.get("geometry") or {}).get("rings"):
+            apply_geometry(row, rings, outline, "Nebraska statewide parcel data")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(parcel_ids)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -6309,7 +6391,7 @@ SOURCES = [
      "about": "Vacant land bank parcels in Toledo & Lucas County with GIS polygon boundaries, zoning codes, acreage, and legal descriptions."},
     {"id": "detroit-dlba", "name": "Detroit Land Bank Authority marketed vacant lots", "agency": "Detroit Land Bank Authority",
      "url": DLBA_URL, "state": "MI", "run": detroit_dlba,
-     "about": "Actively marketed vacant lots from the official Detroit Land Bank GIS, including eligible Neighborhood Lots with the published program price."},
+     "about": "Actively marketed vacant lots from the official Detroit Land Bank GIS, including eligible Neighborhood Lots with the published program price and acreage from matched City of Detroit assessor records."},
     {"id": "chicago-dpd", "name": "City of Chicago City-Owned Land Inventory (ChiBlockBuilder)", "agency": "City of Chicago Dept. of Planning & Development",
      "url": CHI_URL, "state": "IL", "run": chicago_dpd,
      "about": "Actively offered and open-application Chicago city-owned vacant lots with zoning classifications, lot square footage, and Q4/2027 application deadlines."},
@@ -6605,6 +6687,10 @@ SOURCES = [
      "agency": "Minnesota Department of Transportation", "url": MNDOT_SALE, "state": "MN",
      "run": mndot_surplus, "requires_sale_match": True, "timezone": "America/Chicago",
      "about": "Vacant land on MnDOT's current sale pages, with the agency's figures and outlines matched by sale number."},
+    {"id": "gresham-ne-cda", "name": "Gresham, Nebraska residential development lots",
+     "agency": "Village of Gresham Community Development Agency", "url": GRESHAM_NE_SALE, "state": "NE",
+     "run": gresham_ne_lots, "requires_sale_match": True,
+     "about": "Current residential lot sale program parcels with no improvements in the state parcel data. The program sets prices individually."},
 ]
 NOT_CARRIED = [
     ("MnDOT individual sale packet documents", "https://www.mndot.net/row/propsales.html",

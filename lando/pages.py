@@ -1224,7 +1224,7 @@ class Site(object):
                 )
                 trs.append(
                     '<tr><th scope="row"><a href="%s">%s</a><span class="sub">%s, %s · %s</span></th>'
-                    '<td class="n" data-label="Official Price" data-v="%.2f">%s<span class="sub">Turnkey (+10%%): %s</span></td>'
+                    '<td class="n" data-label="Official Price" data-v="%.2f">%s<span class="sub">With 10%% fee: %s</span></td>'
                     '<td class="n" data-label="Acres" data-v="%s">%s</td>'
                     '<td class="n" data-label="$/acre" data-v="%s">%s</td>'
                     '<td class="n" data-label="Benchmark" data-v="%s">%s<span class="sub">%s</span></td>'
@@ -1232,7 +1232,7 @@ class Site(object):
                     '<td data-label="Acquire"><a class="chip-btn chip-link" href="%s" data-vital-event="offer_clicked">Land Agent ($20)</a></td></tr>' % (
                         self.u(cat.listing_path(r)), esc(r["title"]), esc(r["county_label"]), esc(r["state"]),
                         esc(r["status_label"]),
-                        r["price"], esc(money(r["price"])), esc(money(turnkey)),
+                        r["price"], esc(price_line(r)), esc(money(turnkey)),
                         r["acres"] or "", esc(acres_text(r["acres"])) if r.get("acres") else "–",
                         "%.2f" % ppa if ppa else "", (esc(money(ppa)) + "/ac") if ppa else "–",
                         "%.2f" % bench if bench else "", (esc(money(bench)) + "/ac") if bench else "–", esc(bench_src),
@@ -1241,7 +1241,7 @@ class Site(object):
                 )
             return (
                 '<div class="scroll"><table class="data sortable"><thead><tr>'
-                '<th scope="col">Parcel</th><th scope="col" class="n">Official Price / Turnkey</th>'
+                '<th scope="col">Parcel</th><th scope="col" class="n">Official Price</th>'
                 '<th scope="col" class="n">Acres</th><th scope="col" class="n">$/acre</th>'
                 '<th scope="col" class="n">County Benchmark</th><th scope="col">vs. Benchmark</th>'
                 '<th scope="col">Hands-Free</th></tr></thead><tbody>%s</tbody></table></div>' % "".join(trs)
@@ -1269,8 +1269,8 @@ class Site(object):
             '<p class="notice" style="margin:14px 0 22px"><strong>Verify before buying:</strong> Deep discounts on public-agency, tax-sale, and surplus land often reflect minimum opening bids, redemption windows, missing utilities, wetlands, or access limits. Run our free <a href="%s">Parcel X-Ray</a> on any tract—or pay $20 for our <a href="%s">Land Agent desk</a> to audit liens, access, and deed transfer before you commit.</p>' % (self.u("/xray/"), self.u("/services/")),
 
             '<section id="below-benchmark"><h2>Biggest Discounts vs. County USDA/FHFA Benchmark (Top %d)</h2>'
-            '<p class="small">Active parcels of at least 0.2 acres with published official prices or minimum bids at least 15%% below their county (or state) USDA/FHFA benchmark per acre. <a href="%s">Filter all on interactive map →</a></p>%s</section>' % (
-                min(60, len(below_bench)), self.u("/#deals=1&sort=discount_desc"), deal_table(below_bench, 60)),
+            '<p class="small">Active parcels of at least 0.2 acres with official prices, program prices, or minimum bids at least 15%% below the county (or state) USDA/FHFA benchmark per acre. The benchmark measures agricultural land. Check each program’s eligibility and terms before applying. <a href="%s">Browse below-benchmark parcels on the map →</a></p>%s</section>' % (
+                min(60, len(below_bench)), self.u("/#deals=1&acres=0.2&sort=discount_desc"), deal_table(below_bench, 60)),
 
             '<section id="rural-acreage" style="margin-top:28px"><h2>Cheapest Rural Acreage Deals (1+ Acres, Sorted by $/Acre)</h2>'
             '<p class="small">Active priced tracts of 1 acre or larger across official state trust, tax-forfeited, and county auctions.</p>%s</section>' % deal_table(rural_deals, 50),

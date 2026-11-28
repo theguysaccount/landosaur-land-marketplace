@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T00:36:03Z",
+ "checked": "2026-11-28T00:47:52Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -544,19 +544,19 @@
    "url": "https://detroitmi.gov/departments/housing-and-revitalization-department/commercial-real-estate"
   },
   "detroit-dlba": {
-   "about": "Actively marketed vacant lots from the official Detroit Land Bank GIS, including eligible Neighborhood Lots with the published program price.",
+   "about": "Actively marketed vacant lots from the official Detroit Land Bank GIS, including eligible Neighborhood Lots with the published program price and acreage from matched City of Detroit assessor records.",
    "agency": "Detroit Land Bank Authority",
    "complete": true,
    "count": 28077,
    "failures": 0,
-   "last_attempt": "2026-11-27T21:36:53Z",
-   "last_success": "2026-11-27T21:36:53Z",
+   "last_attempt": "2026-11-28T00:43:46Z",
+   "last_success": "2026-11-28T00:43:46Z",
    "message": "",
    "name": "Detroit Land Bank Authority marketed vacant lots",
    "notes": [],
    "ok": true,
    "read": 28077,
-   "seconds": 19,
+   "seconds": 119,
    "state": "MI",
    "upstream_total": 28077,
    "url": "https://buildingdetroit.org/properties"
@@ -632,6 +632,24 @@
    "state": "NY",
    "upstream_total": 3,
    "url": "https://www.greenburghny.com/m/newsflash/Home/Detail/3871"
+  },
+  "gresham-ne-cda": {
+   "about": "Current residential lot sale program parcels with no improvements in the state parcel data. The program sets prices individually.",
+   "agency": "Village of Gresham Community Development Agency",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T00:47:52Z",
+   "last_success": "2026-11-28T00:47:52Z",
+   "message": "",
+   "name": "Gresham, Nebraska residential development lots",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 34,
+   "state": "NE",
+   "upstream_total": 4,
+   "url": "https://www.yorkdevco.com/life/housing-and-neighborhoods"
   },
   "harris-county-tax-sales": {
    "about": "County sale cards marked For Sale, matched to vacant HCAD land classes with zero recorded building and improvement value.",

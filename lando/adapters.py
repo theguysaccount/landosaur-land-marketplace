@@ -233,6 +233,8 @@ def outline_url(listing):
         return one_parcel_url(IDAHO_FALLS_WATER_PARCELS, f"pin='{IDAHO_FALLS_WATER_PIN}'", IDAHO_FALLS_WATER_FIELDS)
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "irs-cheney-wa" and listing["apn"] == IRS_CHENEY_PIN:
+        return one_parcel_url(IRS_CHENEY_PARCELS, f"PID_NUM='{IRS_CHENEY_PIN}'", "PID_NUM,prop_use_desc")
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
         return one_parcel_url(RIO_GRANDE_CO_PARCELS, f"GIS_Parcel_Number='{RIO_GRANDE_CO_APN}'", RIO_GRANDE_CO_FIELDS)
     if listing["source"] == "cumberland-md-surplus" and listing["apn"] in CUMBERLAND_MD_OFFERS:
@@ -8449,6 +8451,66 @@ def lincoln_or_tax_foreclosed(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": upstream_total}
 
 
+IRS_CHENEY_SALE = "https://www.irsauctions.gov/ad/land-sale-cheney-wa/"
+IRS_CHENEY_FORM = "/sites/default/files/100/Form%202434.pdf"
+IRS_CHENEY_FORM_SHA256 = "f59a59810f10ecf1725223ce40229174e3db9766a43afae6bf6f61fc92bd3fae"
+IRS_CHENEY_PIN = "13286.9035"
+IRS_CHENEY_CARD = "https://cp.spokanecounty.org/scout/propertyinformation/Summary.aspx?PID=" + IRS_CHENEY_PIN
+IRS_CHENEY_PARCELS = ("https://gismo.spokanecounty.org/arcgis/rest/services/"
+                      "BPPublic/CommonLayersBPPublic/MapServer/0/query")
+IRS_CHENEY_CUTOFF = datetime.datetime(2026, 12, 2, 10, 30, tzinfo=ZoneInfo("America/Los_Angeles"))
+
+
+def irs_cheney_wa_auction(fetch, now, warn):
+    if now >= IRS_CHENEY_CUTOFF:
+        return [], {"complete": True, "upstream_total": 0}
+    page = fetch.text(IRS_CHENEY_SALE)
+    notice = clean(page)
+    terms = ("Public Auction Sale", f"Parcel No. {IRS_CHENEY_PIN}", "Date of Sale: December 2, 2026",
+             "Time of Sale: 10:30 am (Registration at 10:00 am)", "Minimum Bid $54,608.57",
+             "Approximately 14.14 acres", "Spokane County Superior Court")
+    if IRS_CHENEY_FORM not in page or not all(term in notice for term in terms):
+        raise StructureError("IRS Cheney land sale terms changed")
+    form = urllib.parse.urljoin(IRS_CHENEY_SALE, IRS_CHENEY_FORM)
+    if hashlib.sha256(fetch.bytes(form)).hexdigest() != IRS_CHENEY_FORM_SHA256:
+        raise StructureError("IRS Cheney Notice of Sale has changed")
+
+    card = clean(fetch.text(IRS_CHENEY_CARD))
+    situs = re.search(rf"Parcel Number: {re.escape(IRS_CHENEY_PIN)} Data As Of: (\d{{2}}/\d{{2}}/\d{{4}}) "
+                      r"Site Address: 16413 W SR 904 HWY\b", card)
+    assessment = card.partition("Dwelling/Structure Current Use Land Personal Prop.")[2]
+    values = re.match(r"(?:\s+2027(?:\s+[\d,]+){6})?\s+2026\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+(\d+)\b", assessment)
+    current = now.astimezone(IRS_CHENEY_CUTOFF.tzinfo).date()
+    assessed_date = datetime.datetime.strptime(situs[1], "%m/%d/%Y").date() if situs else None
+    if (not assessed_date or not 0 <= (current - assessed_date).days <= 7
+            or "14.14 Acre(s) 91 Vacant Land 2026" not in card
+            or not values or number(values[2]) != number(values[3]) or not number(values[3]) or values[4] != "0"):
+        raise StructureError("Spokane County has not confirmed the current vacant-land assessment")
+    match = f"PID_NUM='{IRS_CHENEY_PIN}'"
+    features = _arcgis_query(fetch, IRS_CHENEY_PARCELS, match, "PID_NUM,prop_use_desc", count=2)
+    if len(features) != 1 or features[0]["attributes"] != {"PID_NUM": IRS_CHENEY_PIN, "prop_use_desc": "Vacant Land"}:
+        raise StructureError("Spokane County has not confirmed the IRS offering’s exact parcel outline")
+    row = {
+        "id": "wa-spokane-irs-13286-9035", "source": "irs-cheney-wa",
+        "title": "16413 W SR 904 Hwy, Cheney (IRS vacant land auction)", "state": "WA", "county": "Spokane",
+        "locality": "Cheney", "apn": IRS_CHENEY_PIN, "address": "16413 W SR 904 Hwy", "acres": 14.14,
+        "price": 54608.57, "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+        "deadline": IRS_CHENEY_CUTOFF.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": IRS_CHENEY_SALE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("auction_start", "December 2, 2026 at 10:30 a.m. Pacific, Spokane County Superior Court", form),
+                  fact("minimum_bid", "$54,608.57 in the signed IRS Notice of Sale", form),
+                  fact("title_terms", "The IRS advertises only the seized interest in the parcel. Review its separately "
+                       "published encumbrances and deed terms before bidding.", "="),
+                  fact("land_use", "Spokane County lists this parcel as vacant land, with no dwelling or structure value.", IRS_CHENEY_CARD),
+                  fact("sale_terms", "Full payment is due upon acceptance of the winning bid.", form)],
+        "tags": ["vacant land", "federal public auction"],
+    }
+    apply_geometry(row, (features[0].get("geometry") or {}).get("rings", []), IRS_CHENEY_PARCELS, "Spokane County")
+    if not row["geometry"]:
+        raise StructureError("Spokane County IRS sale parcel outline is empty")
+    return [row], {"complete": True, "upstream_total": 1}
+
+
 GRAYS_HARBOR_WA_SALE = "https://www.graysharbor.gov/departments/foresty-tax-title/purchase-surplus-tax-title-property/"
 GRAYS_HARBOR_WA_ROSTER = "https://cms5.revize.com/revize/graysharborcounty/Forestry/2026%20Available%20Properties%20to%20Purchase_OTC.pdf"
 GRAYS_HARBOR_WA_PARCELS = "https://services3.arcgis.com/CxYgmwdx507LY5lO/arcgis/rest/services/Parcels___Grays_Harbor_County/FeatureServer/1/query"
@@ -12997,6 +13059,10 @@ SOURCES = [
      "agency": "Oregon Department of Transportation", "url": OREGON_DOT_SALES, "state": "OR",
      "run": oregon_dot_property_sales, "requires_sale_match": True,
      "about": "Unimproved land the state lists for sale through its standard bid process. Appraisals are not listed as prices."},
+    {"id": "irs-cheney-wa", "name": "IRS Cheney vacant land auction",
+     "agency": "Internal Revenue Service", "url": IRS_CHENEY_SALE, "state": "WA", "timezone": "America/Los_Angeles",
+     "run": irs_cheney_wa_auction, "requires_sale_match": True,
+     "about": "The signed federal sale notice and minimum bid are matched to current Spokane County assessment and parcel geometry."},
     {"id": "grays-harbor-wa-tax-title", "name": "Grays Harbor County over-the-counter tax-title land",
      "agency": "Grays Harbor County Treasurer", "url": GRAYS_HARBOR_WA_SALE, "state": "WA", "timezone": "America/Los_Angeles",
      "run": grays_harbor_wa_tax_title, "requires_sale_match": True,
@@ -13181,10 +13247,16 @@ NOT_CARRIED = [
      "The assessor’s public search path is disallowed by robots.txt. The county’s open parcel and structure layers are carried."),
     ("Montana State Library 2025 provisional aerial imagery", "https://msl.mt.gov/geoinfo/Data/web_services",
      "The imagery service path disallows automated access. Independently published city imagery verified the Missoula site."),
+    ("USGS National Map imagery exports", "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer",
+     "The imagery export host returned HTTP 403 for robots.txt during automated vacancy review."),
+    ("USDA’s legacy NAIP imagery service", "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer",
+     "The legacy service reset the connection before returning readable robots.txt."),
     ("Cowlitz County assessor parcel boundaries", "https://www.co.cowlitz.wa.us/2890/Public-GIS-Datasets",
      "The assessor’s parcel map terms require a data sharing agreement to disseminate boundaries. The independently published sale notice is carried."),
     ("Sandy, Oregon industrial property catalogue", "https://www.ci.sandy.or.us/property/clackamas-county-property",
      "The city site closed the connection before returning readable robots.txt. The listing was excluded."),
+    ("Washington State historic-resource parcel layer", "https://wisaard.dahp.wa.gov/server/rest/services/County_Parcels/MapServer",
+     "The map host did not return plain-text robots rules. Spokane County’s published assessment and boundary services were used for the Cheney sale."),
     ("Maui County tax sale notices", "https://www.mauicounty.gov/1748/Delinquent-Tax-Accounts",
      "The county's robots.txt returned HTTP 403. A delinquency or public-land record does not establish a current sale."),
     ("Rockingham, Vermont municipal property sale packet", "https://rockbf.org/public-notices",

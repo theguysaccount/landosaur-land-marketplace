@@ -2074,6 +2074,37 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("Owner", fetch.json.call_args.kwargs["form"]["outFields"])
         self.assertEqual(adapters.norwich_ct_auction(fetch, adapters.NORWICH_CT_CUTOFF, self.fail)[0], [])
 
+    def test_irs_cheney_uses_signed_terms_and_current_vacant_assessment(self):
+        fetch = unittest.mock.Mock()
+        now = datetime.datetime(2026, 11, 28, 19, tzinfo=datetime.timezone.utc)
+        notice = ("Public Auction Sale Parcel No. 13286.9035 Date of Sale: December 2, 2026 "
+                  "Time of Sale: 10:30 am (Registration at 10:00 am) Minimum Bid $54,608.57 "
+                  "Approximately 14.14 acres Spokane County Superior Court "
+                  f'<a href="{adapters.IRS_CHENEY_FORM}">Form 2434</a> Private Previous Holder')
+        card = ("Parcel Number: 13286.9035 Data As Of: 11/28/2026 Site Address: 16413 W SR 904 HWY "
+                "14.14 Acre(s) 91 Vacant Land 2026 "
+                "Dwelling/Structure Current Use Land Personal Prop. 2027 90,000 90,000 90,000 0 0 0 "
+                "2026 97,620 97,620 97,620 0 0 0")
+        pages = {adapters.IRS_CHENEY_SALE: notice, adapters.IRS_CHENEY_CARD: card}
+        fetch.text.side_effect = pages.__getitem__
+        signed = b"Verified signed terms"
+        fetch.bytes.return_value = signed
+        ring = [[-117.5, 47.5], [-117.5005, 47.5], [-117.5005, 47.4995], [-117.5, 47.5]]
+        fetch.json.return_value = {"features": [{"attributes": {"PID_NUM": "13286.9035", "prop_use_desc": "Vacant Land"},
+                                                  "geometry": {"rings": [ring]}}]}
+        with patch.object(adapters, "IRS_CHENEY_FORM_SHA256", hashlib.sha256(signed).hexdigest()):
+            rows, info = adapters.irs_cheney_wa_auction(fetch, now, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["acres"], row["deadline"]),
+                             ("13286.9035", 54608.57, 14.14, "2026-12-02T18:30:00Z"))
+            self.assertEqual(info["upstream_total"], 1)
+            self.assertTrue(row["geometry"])
+            self.assertNotIn("Private Previous Holder", repr(row))
+            pages[adapters.IRS_CHENEY_CARD] = card.replace("97,620 0 0 0", "97,620 300 0 0")
+            with self.assertRaisesRegex(adapters.StructureError, "vacant-land assessment"):
+                adapters.irs_cheney_wa_auction(fetch, now, self.fail)
+            self.assertEqual(adapters.irs_cheney_wa_auction(fetch, adapters.IRS_CHENEY_CUTOFF, self.fail)[0], [])
+
     def test_sheridan_publishes_one_current_proposal_after_matching_both_vacant_tracts(self):
         from lando.adapters import SHERIDAN_WY_AGENCY, SHERIDAN_WY_CLOSE, SHERIDAN_WY_OPEN, SHERIDAN_WY_TERMS
 

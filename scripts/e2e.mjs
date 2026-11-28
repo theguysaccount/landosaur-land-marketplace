@@ -290,17 +290,35 @@ try {
       ["PAD-US Managed Public Lands", "PAD_US_4_1"], ["USFWS Wetlands", "/Wetlands/MapServer/export"],
       ["FEMA Flood Zones", "NFHL"],
     ];
-    for (const [label, urlPart] of layers) {
-      assert(await page.eval(`(() => {
+    function selectLayer(label, enabled) {
+      return page.eval(`(() => {
         const labels = [...document.querySelectorAll("#map .leaflet-control-layers-list label")];
         const entry = labels.find((node) => node.textContent.trim().startsWith(${JSON.stringify(label)}));
         const input = entry?.querySelector("input");
         if (!input) return false;
-        input.click();
-        return input.checked;
-      })()`), "missing overlay " + label);
-      await page.waitFor(`[...document.querySelectorAll("#map .leaflet-tile")].some((tile) =>
-        tile.src.includes(${JSON.stringify(urlPart)}) && tile.complete && tile.naturalWidth > 0)`, 15000);
+        if (input.checked !== ${enabled}) input.click();
+        return input.checked === ${enabled};
+      })()`);
+    }
+    for (const [label, urlPart] of layers) {
+      const restore = label === "USGS 3DEP Hillshade"
+        ? () => selectLayer("Streets", true)
+        : () => selectLayer(label, false);
+      const loaded = `[...document.querySelectorAll("#map .leaflet-tile")].some((tile) =>
+        tile.src.includes(${JSON.stringify(urlPart)}) && tile.complete && tile.naturalWidth > 0)`;
+      assert(await selectLayer(label, true), "missing layer " + label);
+      try {
+        await page.waitFor(loaded, 15000);
+      } catch {
+        // Reopen a real layer once when its remote service does not return a tile on the first attempt.
+        assert(await restore() && await selectLayer(label, true), "could not reopen " + label);
+        try {
+          await page.waitFor(loaded, 20000);
+        } catch {
+          throw new Error(label + " returned no visible official tile on either attempt");
+        }
+      }
+      assert(await restore(), "could not restore the map after testing " + label);
     }
   });
   await step("watchlist compares parcels and produces valid CSV, GeoJSON, KML and GPX files", async () => {

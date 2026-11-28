@@ -189,8 +189,9 @@ class Fetcher:
                     raise FetchError("%s: %s" % (url, str(exc)[:200])) from exc
             time.sleep(3 * (attempt + 1))
 
-    def text(self, url):
-        return self._get(url).decode("utf-8-sig", "replace")
+    def text(self, url, *, form=None):
+        body = urllib.parse.urlencode(form).encode() if form is not None else None
+        return self._get(url, data=body).decode("utf-8-sig", "replace")
 
     def bytes(self, url):
         return self._get(url)

@@ -29,7 +29,7 @@ OFFICIAL = {
     "douglascountywa.gov", "co.chelan.wa.us", "franklintownshipnj.org", "townofgreybull.com", "washingtoncountytn.org", "tnecd.com",
     "firstpark.com", "cms2.revize.com", "alamosacounty.org", "denaliborough.org", "metroatlantalandbank.org",
     "fultoncountyga.gov", "townofpalmer.com", "ci.florence.or.us", "co.lincoln.or.us", "alaska.edu", "kgbak.us", "sjgov.org",
-    "jeffcotax.com", "cttaxsales.com", "gary.gov", "shastacounty.gov", "albanyga.gov",
+    "jeffcotax.com", "cttaxsales.com", "gary.gov", "shastacounty.gov", "albanyga.gov", "powerslakend.com",
     "grandforks.org", "behereberesford.com", "underwoodnd.org", "killdeer.com", "visitcentervillesd.com", "belchertown.org", "beatrice.ne.gov", "cityofgregorysd.gov", "mindennebraska.org", "bluehillne.com", "cityofconrad.com",
     "stlouis-mo.gov", "cosl.org", "wisconsin.gov", "alaskamentalhealthtrust.org",
     "alaska.gov", "buildingdetroit.org", "kclandbank.org", "dgs.ca.gov",

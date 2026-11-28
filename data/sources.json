@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T09:39:09Z",
+ "checked": "2026-11-28T10:06:24Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -38,21 +38,23 @@
    "url": "https://dnr.alaska.gov/mlw/landsales/"
   },
   "alaska-trust-otc": {
-   "about": "Trust land offered over the counter at fixed prices.",
+   "about": "Vacant Trust Land Office parcels with matching current over-the-counter catalog entries and official sale-map boundaries.",
    "agency": "Alaska Mental Health Trust Land Office",
    "complete": true,
-   "count": 10,
+   "count": 23,
    "failures": 0,
-   "last_attempt": "2026-11-26T19:15:42Z",
-   "last_success": "2026-11-26T19:15:42Z",
+   "last_attempt": "2026-11-28T10:06:24Z",
+   "last_success": "2026-11-28T10:06:24Z",
    "message": "",
    "name": "Alaska Mental Health Trust Land Office",
-   "notes": [],
+   "notes": [
+    "5 listings left the inventory after two complete reads without them"
+   ],
    "ok": true,
-   "read": 10,
-   "seconds": 4,
+   "read": 23,
+   "seconds": 70,
    "state": "AK",
-   "upstream_total": null,
+   "upstream_total": 60,
    "url": "https://alaskamentalhealthtrust.org/otc-parcel/"
   },
   "albany-ga-city-vacant": {
@@ -2380,6 +2382,24 @@
    "state": "OR",
    "upstream_total": 40,
    "url": "https://www.portland.gov/"
+  },
+  "powers-lake-nd-hegstad": {
+   "about": "The city\u2019s current lot map identifies individual homesites and marks completed sales. City council minutes document published prices and terms.",
+   "agency": "City of Powers Lake, North Dakota",
+   "complete": true,
+   "count": 6,
+   "failures": 0,
+   "last_attempt": "2026-11-28T10:06:24Z",
+   "last_success": "2026-11-28T10:06:24Z",
+   "message": "",
+   "name": "Powers Lake Hegstad Addition vacant homesites",
+   "notes": [],
+   "ok": true,
+   "read": 6,
+   "seconds": 21,
+   "state": "ND",
+   "upstream_total": 6,
+   "url": "https://www.powerslakend.com/index.asp?DE=6E1E90EF-4F3A-424D-9AB7-910480011D60&SEC=4A5A5441-1F2A-4062-BE63-D012995F8F8D"
   },
   "princeton-mn-lots": {
    "about": "City and economic development authority industrial and commercial lots currently posted for sale.",

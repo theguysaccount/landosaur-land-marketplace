@@ -164,7 +164,7 @@ def outline_url(listing):
         return one_parcel_url(AR_GIS, "UPPER(county)='%s' AND parcelid='%s'" % (listing["county"].upper().replace("'", "''"),
                                                                               listing["apn"].replace("'", "''")))
     if listing["source"] == "alaska-trust-otc":
-        return one_parcel_url(TRUST_GIS, "FILENUMBER='%s'" % listing["id"].split("-", 1)[1])
+        return one_parcel_url(TRUST_GIS, "FILENUMBER='%s'" % listing["id"].split("-", 1)[1], TRUST_FIELDS)
     if listing["source"] == "louisville-landbank":
         return one_parcel_url(LOU_GIS, "Parcel_No_='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "lucas-county-oh":
@@ -692,7 +692,20 @@ def wisconsin(fetch, now, warn):
 # ------------------------------------------------------------------------------------------- Alaska Trust
 
 TRUST = "https://alaskamentalhealthtrust.org/otc-parcel/"
+TRUST_FILTER = "https://alaskamentalhealthtrust.org/wp-admin/admin-ajax.php"
 TRUST_GIS = "https://services1.arcgis.com/7HDiw78fcUiM2BWn/arcgis/rest/services/OTC_Website_Parcel_List_Join/FeatureServer/0/query"
+TRUST_FIELDS = "FILENUMBER,CASESTATUS,CSSTTSDSCR,DISPLAY,Gen_Loc,Subdivision,Lot,Block,Acres,OTC_Price"
+TRUST_FNSB_FIELDS = "PAN,PARCEL_SUB,PARCEL_BLOCK,PARCEL_LOT,LRM_GEOM_DOC_AREA,LRM_GEOM_DOC_UNITS,Improvements,Tax_Status,Assessing_Primary_Use,Tax_Year"
+TRUST_FNSB_NAMES = {"Olnes East S/D": "OLNES EAST", "Olnes West S/D": "OLNES WEST", "Aspenwood S/D": "ASPENWOOD"}
+TRUST_KENAI_ASSESSOR = "https://services.arcgis.com/XdwPqILKwMlOaw4F/arcgis/rest/services/KPB_Parcels/FeatureServer/0/query"
+TRUST_KENAI_FIELDS = "PARCEL_ID,IMPROVEMENT_VALUE,LAND_VALUE"
+TRUST_KENAI_TRACTS = {"9200868": "13311038", "9200869": "13311039", "9200870": "13311040", "9200871": "13311041"}
+TRUST_WRANGELL_ASSESSOR = "https://services7.arcgis.com/7cBSaoaaRaH5ojZy/arcgis/rest/services/Parcels/FeatureServer/0/query"
+TRUST_WRANGELL_FIELDS = "PARCELNUM,TAX_YEAR,IMPR_VALUE,LAND_VALUE,TOTAL_VALUE,LOT"
+TRUST_WRANGELL_TRACTS = {
+    "9100392": "08-320-080", "9100887": "04-004-454", "9100890": "04-004-456", "9101290": "04-003-418",
+    "9101291": "04-003-420", "9101292": "04-005-503", "9101294": "04-005-511", "9101296": "04-006-589",
+}
 
 
 def parse_trust(page, warn):
@@ -702,17 +715,19 @@ def parse_trust(page, warn):
         title = clean((re.search(r'<h1 class="main-heading">(.*?)</h1>', block, re.S) or [None, ""])[1])
         if not title.startswith("OTC:"):
             continue
-        text = clean(block)
-        field = lambda label: (re.search(r"%s:\s*(.*?)(?=\s+[A-Z][A-Za-z ]+:|\s+Learn More|$)" % label, text) or [None, ""])[1].strip()  # noqa: E731
-        mht = field("MHT Number")
+        fields = {label: clean(value) for label, value in re.findall(r"<strong>([^<]+):</strong>\s*([^<]+)", block)}
+        field = lambda label: fields.get(label, "")  # noqa: E731
+        heading_id = re.search(r"\(MHT (\d{7})\)", title)
         price = number(field("Purchase Price"))
         acres = number(field("Acres"))
         href = (re.search(r'<a href="([^"]+)" class="button-submit"', block) or [None, ""])[1]
-        if not mht or not href or price is None or acres is None:
+        if not heading_id or not href or not price or not acres:
             warn("skipped an incomplete Alaska Trust card: %s" % title[:60])
             continue
+        mht = heading_id[1]
         url = urllib.parse.urljoin(TRUST, html.unescape(href))
-        if urllib.parse.urlsplit(url).netloc != "alaskamentalhealthtrust.org":
+        if (url != urllib.parse.urljoin(TRUST, f"/news/parcel/otc-mht-{mht}/")
+                or (field("MHT Number") and field("MHT Number") != mht)):
             continue
         road = field("Road Access")
         facts = [fact("price", "$%s" % "{:,.0f}".format(price), url, "Fixed over-the-counter purchase price set by the Trust Land Office."),
@@ -736,20 +751,145 @@ def parse_trust(page, warn):
 
 
 def alaska_trust(fetch, now, warn):
-    rows = parse_trust(fetch.text(TRUST), warn)
-    if rows:
+    first = fetch.text(TRUST)
+    pages = list(map(int, re.findall(r'data-navpage="(\d+)"', first)))
+    if max(pages, default=1) > 50:
+        raise StructureError("Unexpected number of Alaska Trust sale catalog pages")
+    cards = parse_trust(first, warn)
+    for page in range(2, max(pages, default=1) + 1):
+        content = fetch.text(TRUST_FILTER, form={
+            "action": "percel_post_filter", "program": 101, "region": "", "subdivision": "",
+            "percel_road_access": "Show All", "parcel_number": "", "case_file_number": "",
+            "page": page, "sortingValue": "", "orderValue": "", "parcel_acres": "",
+            "default_pagination": "yes", "sub_subdivision": "",
+        })
+        if not re.search(rf'<li class="selected active">\s*<a[^>]*data-navpage="{page}"', content):
+            raise StructureError("Alaska Trust catalog did not return the requested page")
+        cards.extend(parse_trust(content, warn))
+    mapped = defaultdict(list)
+    for item in _arcgis_query(fetch, TRUST_GIS, "CASESTATUS='06' AND DISPLAY='Y'", TRUST_FIELDS):
+        a = item["attributes"]
+        if (a.get("CASESTATUS"), a.get("CSSTTSDSCR"), a.get("DISPLAY")) == ("06", "AVAILABLE OTC (06)", "Y"):
+            mapped[a.get("FILENUMBER")].append(item)
+    county_where = ("Tax_Status='STATE OF ALASKA' AND Improvements=0 AND "
+                    f"PARCEL_SUB IN ({quote_list(TRUST_FNSB_NAMES.values())})")
+    county = defaultdict(list)
+    for item in _arcgis_query(fetch, FNSB_PARCELS, county_where, TRUST_FNSB_FIELDS, extra={"returnGeometry": "false"}):
+        a = item["attributes"]
+        if (a.get("Tax_Status") == "STATE OF ALASKA" and a.get("Improvements") == 0
+                and clean(a.get("Assessing_Primary_Use")) in ("Exempt", "Vacant Land") and a.get("Tax_Year") == now.year):
+            key = (a["PARCEL_SUB"], number(a.get("PARCEL_BLOCK")), number(a.get("PARCEL_LOT")))
+            county[key].append(a)
+    kenai_pins = [pin for mht, pin in TRUST_KENAI_TRACTS.items() if mht in mapped]
+    kenai = defaultdict(list)
+    if kenai_pins:
+        kenai_where = f"PARCEL_ID IN ({quote_list(kenai_pins)}) AND LAND_VALUE>0 AND IMPROVEMENT_VALUE=0"
+        for item in _arcgis_query(fetch, TRUST_KENAI_ASSESSOR, kenai_where, TRUST_KENAI_FIELDS):
+            a = item["attributes"]
+            if a.get("IMPROVEMENT_VALUE") == 0 and (number(a.get("LAND_VALUE")) or 0) > 0:
+                kenai[a.get("PARCEL_ID")].append(item)
+    wrangell_pins = [pin for mht, pin in TRUST_WRANGELL_TRACTS.items() if mht in mapped]
+    wrangell = defaultdict(list)
+    if wrangell_pins:
+        where = f"PARCELNUM IN ({quote_list(wrangell_pins)}) AND LAND_VALUE>0 AND LAND_VALUE=TOTAL_VALUE"
+        for item in _arcgis_query(fetch, TRUST_WRANGELL_ASSESSOR, where, TRUST_WRANGELL_FIELDS):
+            a = item["attributes"]
+            if (a.get("LAND_VALUE") == a.get("TOTAL_VALUE") and (number(a.get("LAND_VALUE")) or 0) > 0
+                    and a.get("IMPR_VALUE") in (None, 0) and a.get("TAX_YEAR") in (str(now.year), str(now.year + 1))):
+                wrangell[a.get("PARCELNUM")].append(item)
+    duplicates = Counter(card["_mht"] for card in cards)
+    rows = []
+    for row in cards:
+        pin = row.pop("_mht")
+        shape = mapped[pin]
+        if duplicates[pin] != 1 or len(shape) != 1:
+            continue
+        item = shape[0]
+        a = item["attributes"]
+        rings = (item.get("geometry") or {}).get("rings", [])
+        if not rings:
+            continue
+        acres = number(a.get("Acres"))
+        if not acres or round(acres, 3) != row["acres"] or number(a.get("OTC_Price")) != row["price"]:
+            continue
+        subdivision = clean(a.get("Subdivision"))
+        lot = clean(str(a.get("Lot") or ""))
+        block = number(a.get("Block"))
+        matches = county[(TRUST_FNSB_NAMES.get(subdivision), block, int(lot))] if lot.isdigit() else []
+        assessment = matches[0] if len(matches) == 1 else None
+        if assessment and (assessment.get("LRM_GEOM_DOC_UNITS") != "acres"
+                           or number(assessment.get("LRM_GEOM_DOC_AREA")) != row["acres"]):
+            assessment = None
         try:
-            url, feats = arcgis_query(fetch, TRUST_GIS, "FILENUMBER IN (%s)" % quote_list([r["_mht"] for r in rows]), "FILENUMBER")
-            by = {r["_mht"]: r for r in rows}
-            for f in feats:
-                r = by.get(str((f.get("attributes") or {}).get("FILENUMBER") or ""))
-                if r and f.get("geometry", {}).get("rings"):
-                    apply_geometry(r, f["geometry"]["rings"], one_parcel_url(TRUST_GIS, "FILENUMBER='%s'" % r["_mht"]), "Trust Land Office")
+            detail = fetch.text(row["url"])
         except FetchError as exc:
-            warn("Alaska Trust parcel outlines unavailable (%s)" % exc)
-    for r in rows:
-        r.pop("_mht", None)
-    return rows, {"complete": True}
+            warn(f"Could not verify Alaska Trust parcel MHT {pin}: {exc}")
+            continue
+        approved = trust_detail_matches(row, detail, pin)
+        kenai_pin = TRUST_KENAI_TRACTS.get(pin)
+        kenai_matches = kenai[kenai_pin]
+        kenai_match = len(kenai_matches) == 1 and trust_overlapping_lot(rings, kenai_matches[0])
+        wrangell_pin = TRUST_WRANGELL_TRACTS.get(pin)
+        wrangell_matches = wrangell[wrangell_pin]
+        wrangell_match = (len(wrangell_matches) == 1 and clean(wrangell_matches[0]["attributes"].get("LOT")) == lot
+                          and trust_overlapping_lot(rings, wrangell_matches[0]))
+        if approved is None or (not approved and not assessment and not kenai_match and not wrangell_match):
+            continue
+        row["locality"] = row["locality"] or clean(a.get("Gen_Loc"))
+        row["address"] = row["address"] or subdivision
+        if assessment:
+            pan = str(assessment.get("PAN"))
+            if not pan.isdigit():
+                continue
+            row.update(apn=pan, county="Fairbanks North Star")
+            row["facts"].append(fact("vacancy", "The borough tax roll records zero improvements for the matched lot.",
+                                     one_parcel_url(FNSB_PARCELS, f"PAN={pan}", TRUST_FNSB_FIELDS)))
+        elif kenai_match:
+            row.update(apn=kenai_pin, county="Kenai Peninsula")
+            row["facts"].append(fact("vacancy", "The borough tax roll records zero improvements for the matched tract.",
+                                     one_parcel_url(TRUST_KENAI_ASSESSOR, f"PARCEL_ID='{kenai_pin}'", TRUST_KENAI_FIELDS)))
+        elif wrangell_match:
+            row.update(apn=wrangell_pin, county="Wrangell")
+            row["facts"].append(fact("vacancy", "The borough assessment for this lot contains land value only.",
+                                     one_parcel_url(TRUST_WRANGELL_ASSESSOR, f"PARCELNUM='{wrangell_pin}'", TRUST_WRANGELL_FIELDS)))
+        if lot:
+            row["facts"].append(fact("survey_lot", (f"Block {block:g}, " if block else "") + lot, "@outline"))
+        apply_geometry(row, rings, TRUST_GIS, "Trust Land Office")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(cards)}
+
+
+def trust_overlapping_lot(rings, candidate):
+    other = (candidate.get("geometry") or {}).get("rings", [])
+    if len(rings) != 1 or len(other) != 1:
+        return False
+    mapped_area, county_area = rings_acres(rings), rings_acres(other)
+    if not mapped_area or not county_area or abs(county_area / mapped_area - 1) > 0.035:
+        return False
+    lon, lat = ring_centroid(rings[0])
+    other_lon, other_lat = ring_centroid(other[0])
+    # These two agencies digitized the same surveyed tracts independently.
+    return math.hypot((lon - other_lon) * math.cos(math.radians(lat)), lat - other_lat) < 0.0003
+
+
+def trust_detail_matches(row, page, pin):
+    detail = re.search(r'<div class="data-single-section">.*?<h3>(.*?)</h3>\s*'
+                       r'<div class="percel-info">(.*?)</div>(.*?)<h4>How to Purchase', page, re.S)
+    if not detail:
+        return None
+    heading, fields, description = map(clean, detail.groups())
+    match = re.search(r"\bMHT Number\s*:\s*(\d+)\s+Purchase Price\s*:\s*\$([\d,.]+)"
+                      r"\s+Parcel Acres\s*:\s*([\d.]+)", fields)
+    if (f"(MHT {pin})" not in heading or not match or match[1] != pin
+            or number(match[2]) != row["price"] or number(match[3]) != row["acres"]
+            or re.search(r"\b(?:sale pending|no longer available|not available for purchase|withdrawn|under contract|"
+                         r"existing (?:house|building|cabin|structure) on (?:the|this) (?:parcel|lot|property))\b", description, re.I)):
+        return None
+    return bool(re.search(r"\b(?:this|the) (?:lot|parcel|property|tract|subdivision) is "
+                          r"(?:vacant|unimproved|undeveloped)\b|\b(?:parcels?|lots?) in the [^.]{2,100} subdivision are "
+                          r"(?:vacant|unimproved|undeveloped)\b|\bno (?:structural )?improvements (?:on|are located on)\b",
+                          description, re.I))
 
 
 # ------------------------------------------------------------------------------------------- Alaska DNR
@@ -10843,6 +10983,48 @@ def underwood_nd_westridge(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": published_count}
 
 
+POWERS_LAKE_SALES = ("https://www.powerslakend.com/index.asp?DE=6E1E90EF-4F3A-424D-9AB7-910480011D60"
+                     "&SEC=4A5A5441-1F2A-4062-BE63-D012995F8F8D")
+POWERS_LAKE_FILES = ("https://www.powerslakend.com/vertical/sites/%7BEF9FF932-081C-47D8-982A-C2C6AC78DA43%7D/"
+                      "uploads/")
+POWERS_LAKE_HEGSTAD_MAP = POWERS_LAKE_FILES + "HEGSTAD_LOTSFORSALE02172026.pdf"
+POWERS_LAKE_HEGSTAD_MAP_HASH = "6e7a931f671f96fcfcef321042c9523dcf09f438a854aa02a9aef7108e425fa8"
+POWERS_LAKE_HEGSTAD_PRICES = POWERS_LAKE_FILES + "2-4-2026.pdf"
+# The city map marks sold lots with overprinted diagonal stamps. Bind the transcription to the reviewed file.
+POWERS_LAKE_HEGSTAD_AVAILABLE = {1: .31, 3: .45, 6: .31, 7: .31, 8: .28, 9: .46}
+
+
+def powers_lake_nd_hegstad(fetch, now, warn):
+    page = fetch.text(POWERS_LAKE_SALES)
+    if "Hegstad Subdivision) with lots for sale" not in clean(page) or POWERS_LAKE_HEGSTAD_MAP.rsplit("/", 1)[1] not in page:
+        raise StructureError("Powers Lake’s advertised Hegstad sale map changed")
+    if hashlib.sha256(fetch.bytes(POWERS_LAKE_HEGSTAD_MAP)).hexdigest() != POWERS_LAKE_HEGSTAD_MAP_HASH:
+        raise StructureError("Powers Lake’s lot availability map needs renewed visual verification")
+    terms = clean(pdf_text(fetch, POWERS_LAKE_HEGSTAD_PRICES, extraction_mode="plain"))
+    comparable = re.search(r"price adjustment for lots 10 & 11 to match lot 9,\s*\$([\d,]+\.\d{2})", terms, re.I)
+    rate = re.search(r"All other lots will remain at the \$([\d.]+)/sq ft pricing", terms, re.I)
+    rows = []
+    for lot, acres in POWERS_LAKE_HEGSTAD_AVAILABLE.items():
+        price = number(comparable[1]) if comparable and lot == 9 else None
+        facts = [fact("availability", "The city shows this municipal homesite for sale on its current lot map.", POWERS_LAKE_HEGSTAD_MAP),
+                 fact("parcel_number", f"Hegstad Addition Block 1 Lot {lot}", POWERS_LAKE_HEGSTAD_MAP),
+                 fact("acreage", f"Approximately {acres:.2f} acres on the city’s lot map.", POWERS_LAKE_HEGSTAD_MAP)]
+        if price:
+            facts.append(fact("price", f"City council records cite the price of this lot as ${price:,.2f}.", POWERS_LAKE_HEGSTAD_PRICES))
+        elif rate:
+            facts.append(fact("sale_terms", f"Council minutes state ${number(rate[1]):g} per square foot. Request the exact lot price from the city.",
+                              POWERS_LAKE_HEGSTAD_PRICES))
+        rows.append({
+            "id": f"nd-powers-lake-hegstad-1-{lot}", "source": "powers-lake-nd-hegstad",
+            "title": f"Hegstad Addition, Block 1, Lot {lot}, Powers Lake", "state": "ND", "county": "Burke",
+            "locality": "Powers Lake", "apn": "", "address": "", "acres": acres,
+            "price": price, "price_kind": "asking" if price else "none", "offering": "sale", "status": "listed",
+            "deadline": None, "url": POWERS_LAKE_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": facts, "tags": ["vacant homesite", "city development"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 BERESFORD_SALES = "https://behereberesford.com/#available-lots"
 BERESFORD_FIELDS_GIS = "https://gis.lincolncountysd.gov/arcgis/rest/services/ParcelRelate/MapServer/0/query"
 BERESFORD_PARCEL_FIELDS = ("Parcel.PID,Parcel.LegalDesc,Parcel.Lot,Parcel.Block,Parcel.Address,"
@@ -11001,6 +11183,10 @@ def grand_forks_nd_business_park(fetch, now, warn):
 
 
 SOURCES = [
+    {"id": "powers-lake-nd-hegstad", "name": "Powers Lake Hegstad Addition vacant homesites",
+     "agency": "City of Powers Lake, North Dakota", "url": POWERS_LAKE_SALES, "state": "ND",
+     "run": powers_lake_nd_hegstad, "requires_sale_match": True,
+     "about": "The city’s current lot map identifies individual homesites and marks completed sales. City council minutes document published prices and terms."},
     {"id": "grand-forks-nd-business-park", "name": "Grand Forks City Business Park vacant industrial land",
      "agency": "City of Grand Forks Growth Fund, North Dakota", "url": GRAND_FORKS_SALES, "state": "ND",
      "run": grand_forks_nd_business_park, "requires_sale_match": True,
@@ -11259,7 +11445,8 @@ SOURCES = [
     {"id": "wisconsin-bcpl", "name": "Wisconsin Board of Commissioners of Public Lands", "agency": "Wisconsin BCPL",
      "url": WI, "state": "WI", "run": wisconsin, "about": "Surplus state trust land sold by sealed-bid auction or private sale."},
     {"id": "alaska-trust-otc", "name": "Alaska Mental Health Trust Land Office", "agency": "Alaska Mental Health Trust Land Office",
-     "url": TRUST, "state": "AK", "run": alaska_trust, "about": "Trust land offered over the counter at fixed prices."},
+     "url": TRUST, "state": "AK", "run": alaska_trust, "requires_sale_match": True,
+     "about": "Vacant Trust Land Office parcels with matching current over-the-counter catalog entries and official sale-map boundaries."},
     {"id": "alaska-dnr", "name": "Alaska Department of Natural Resources land sales", "agency": "Alaska DNR Division of Mining, Land and Water",
      "url": DNR, "state": "AK", "run": alaska_dnr, "about": "State land sold over the counter and by sealed-bid auction."},
     {"id": "utah-udot", "name": "Utah DOT Surplus Real Property", "agency": "Utah Department of Transportation",
@@ -11609,6 +11796,8 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Kenai Peninsula Borough additional parcel map service", "https://maps.kpb.us/gis/rest/services/BoroughParcels/MapServer/0",
+     "The map service did not return its robots.txt before the timeout. The borough’s separately published assessment layer is carried where it confirms vacancy."),
     ("Graham County tax-deed sale notices", "https://www.graham.az.gov/731/Tax-Deed-Sales",
      "The official listings and linked notices returned HTTP 403. The separately published parcel map does not establish sale status."),
     ("Yavapai County tax-deed roster and assessor GIS", "https://www.yavapaiaz.gov/Mapping-and-Properties/Property-Taxes/Tax-Deed-Sales",

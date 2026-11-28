@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import html
 import json
 import unittest
@@ -45,6 +46,26 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_powers_lake_excludes_sold_lots_and_keeps_only_exact_price(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = (
+            'Hegstad Subdivision) with lots for sale <a href="HEGSTAD_LOTSFORSALE02172026.pdf">Map</a>'
+        )
+        fetch.bytes.return_value = b"checked sale map"
+        digest = hashlib.sha256(fetch.bytes.return_value).hexdigest()
+        terms = ("approve the sale price adjustment for lots 10 & 11 to match lot 9, $20,182.88 "
+                 "All other lots will remain at the $1/sq ft pricing.")
+        with patch.object(adapters, "POWERS_LAKE_HEGSTAD_MAP_HASH", digest), patch.object(
+            adapters, "pdf_text", return_value=terms
+        ):
+            rows, info = adapters.powers_lake_nd_hegstad(fetch, NOW, self.fail)
+            self.assertEqual([row["id"].rsplit("-", 1)[-1] for row in rows], ["1", "3", "6", "7", "8", "9"])
+            self.assertEqual([row["price"] for row in rows], [None] * 5 + [20182.88])
+            self.assertEqual(info["upstream_total"], 6)
+            fetch.bytes.return_value = b"changed sale map"
+            with self.assertRaises(adapters.StructureError):
+                adapters.powers_lake_nd_hegstad(fetch, NOW, self.fail)
+
     def test_grand_forks_matches_the_exact_lot_with_public_title_and_vacant_assessment(self):
         notice = ("CITY OF GRAND FORKS BUSINESS PARK\nASKING PRICE\nCity of Grand Forks\n"
                   "A - 8.5 Acres\nA - $1,851,040\nE - 7.18 Acres\nE - $1,563,845\nH - 4.36 Acres\nH - $949,150")
@@ -1019,6 +1040,38 @@ class AlaskaTest(unittest.TestCase):
         r = rows[0]
         self.assertEqual((r["price"], r["acres"], r["locality"], r["status"]), (114000.0, 2.139, "Sitka", "listed"))
         self.assertEqual(r["title"], "Sitka – Middle Island (MHT 9100501)")
+        self.assertEqual(r["address"], "Middle Island East")
+
+    def test_trust_catalog_reads_later_pages_and_checks_active_exact_parcels(self):
+        mapped = []
+        detail = ('<div class="data-single-section"><h3>OTC: (MHT 9100501)</h3>'
+                  '<div class="percel-info">MHT Number : 9100501 Purchase Price : $114,000.00 Parcel Acres : 2.139'
+                  '</div><p>The parcel is undeveloped.</p><h4>How to Purchase</h4>')
+        for pin, state in (("9100501", "AVAILABLE OTC (06)"), ("9100502", "AVAILABLE OTC (06)"),
+                           ("9100503", "SOLD"), ("9100504", "AVAILABLE OTC (06)")):
+            attrs = {"FILENUMBER": pin, "CASESTATUS": "06", "CSSTTSDSCR": state,
+                     "DISPLAY": "Y", "Acres": 2.139, "OTC_Price": 114000}
+            mapped.append({"attributes": attrs, "geometry": {"rings": [
+                [[-135.3, 57.1], [-135.299, 57.1], [-135.299, 57.101], [-135.3, 57.1]]
+            ]}})
+        later = ('<li class="selected active"><a data-navpage="2">2</a></li>' + "".join(
+            TRUST_PAGE.replace("9100501", pin).replace(f"<strong>MHT Number:</strong> {pin}</p>", "")
+            for pin in ("9100502", "9100503", "9100504")
+        ))
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [
+            TRUST_PAGE + '<a data-navpage="2">2</a>',
+            later,
+            detail,
+            detail.replace("9100501", "9100502"),
+            detail.replace("9100501", "9100504").replace("The parcel is undeveloped.", "Sale pending."),
+        ]
+        with patch.object(adapters, "_arcgis_query", side_effect=[mapped, []]):
+            rows, info = adapters.alaska_trust(fetch, NOW, self.fail)
+        self.assertEqual([row["id"] for row in rows], ["akmht-9100501", "akmht-9100502"])
+        self.assertEqual(info["upstream_total"], 4)
+        self.assertEqual(fetch.text.call_args_list[1].kwargs["form"]["page"], 2)
+        self.assertTrue(all(row["geometry"] for row in rows))
 
     def test_dnr_cards(self):
         rows = adapters.parse_dnr(DNR_PAGE, "", NOW, lambda w: None)

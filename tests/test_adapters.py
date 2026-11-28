@@ -2074,6 +2074,75 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("Owner", fetch.json.call_args.kwargs["form"]["outFields"])
         self.assertEqual(adapters.norwich_ct_auction(fetch, adapters.NORWICH_CT_CUTOFF, self.fail)[0], [])
 
+    def test_skowhegan_checks_current_availability_and_does_not_use_the_brochure_price(self):
+        page = (
+            'Southgate Industrial Park <h2>Lots Available</h2><table><tr><th>Lot Number</th><th>Acres</th></tr>'
+            '<tr><td>Lot 2</td><td>3.29 acres</td></tr></table><h2>Lots Sold</h2>'
+            '<table><tr><th>Lot Number</th><th>Acres</th></tr><tr><td>Lot 1</td><td>6.7 acres</td></tr></table>'
+            '<a href="/DocumentCenter/View/198">Park Brochure</a>'
+        )
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = page
+        docs = {
+            adapters.SKOWHEGAN_ME_PLAT: b"Lot 2, recorded plat, brochure price $34,900.00 in 2006",
+            adapters.SKOWHEGAN_ME_ASSESSMENT: b"Southgate Parkway 14-21-2, zero improvements in the 2026 assessment",
+        }
+        with patch.object(adapters, "SKOWHEGAN_ME_VERIFIED_DOCUMENTS", {
+            url: hashlib.sha256(body).hexdigest() for url, body in docs.items()
+        }):
+            fetch.bytes.side_effect = docs.__getitem__
+            rows, info = adapters.skowhegan_me_southgate(fetch, None, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["acres"], row["price"]), ("14-21-2", 3.29, None))
+            self.assertEqual(info, {"complete": True, "upstream_total": 1})
+            self.assertNotIn("34,900", repr(row))
+            fetch.text.return_value = page.replace("<tr><td>Lot 2</td><td>3.29 acres</td></tr>", "")
+            self.assertEqual(adapters.skowhegan_me_southgate(fetch, None, self.fail)[0], [])
+            fetch.text.return_value = page
+            docs[adapters.SKOWHEGAN_ME_ASSESSMENT] = b"Changed assessor report"
+            with self.assertRaisesRegex(adapters.StructureError, "needs renewed verification"):
+                adapters.skowhegan_me_southgate(fetch, None, self.fail)
+
+    def test_genesee_merges_confirmed_vacant_bundles_and_excludes_sold_lots(self):
+        root = adapters.GENESEE_MI_FEATURED
+        home = "https://www.thelandbank.org/"
+        listings = {
+            "04-04-300-022": ("10394 BEECHER RD, FLUSHING", "1.80", "18,000.00", ""),
+            "10-08-501-021": ("DUFFIELD RD, SWARTZ CRK", "0.46", "10,000.00", "10-08-501-022"),
+            "10-08-501-022": ("DUFFIELD RD, SWARTZ CRK", "0.46", "10,000.00", "10-08-501-021"),
+            "10-08-501-023": ("DUFFIELD RD, SWARTZ CRK", "0.47", "10,000.00", "10-08-501-022"),
+            "41-19-176-011": ("2701 CAMDEN AVE, FLINT", "7.46", "50,000.00", "*Sold*"),
+            "57-01-581-001": ("313 W MT MORRIS ST, MT MORRIS", "0.12", "", "57-01-581-002"),
+        }
+        pages = {}
+        cards = []
+        for pin, (address, acres, price, status) in listings.items():
+            path = "featuredprop_fm.asp?pid=" + pin.replace("-", "")
+            badge = f'<div class="pcardoffer">${price}</div>' if price else ""
+            cards.append(f'<a href="{path}">{badge}</a><div class="pcardinfo"><div class="pcardaddr1">{address}</div></div>')
+            offer = f"<h3>Suggested Starting Offer: ${price}</h3>" if price else ""
+            terms = f"<p>Bundled with: Tax ID {status}</p>" if status and not status.startswith("*") else status
+            if pin.startswith("10-08-"):
+                terms += "<p>Parcels 10-08-501-021, 022 &amp; 023 are being sold as a bundle only.</p>"
+            pages[home + path] = (
+                f'<article id="content"><h3>{address}</h3><h4>Tax ID: {pin}</h4><ul><li>{acres} Acres</li></ul>'
+                f"{offer}{terms}<p>No land contract offers accepted on vacant land.</p>Previous holder</article>"
+            )
+        pages[root] = "Featured Lots for Development. Please submit proof of funds and feasibility." + "".join(cards)
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = pages.__getitem__
+        rows, info = adapters.genesee_mi_featured_lots(fetch, None, self.fail)
+        single, bundle = rows
+        self.assertEqual(info, {"complete": True, "upstream_total": 6})
+        self.assertEqual((single["apn"], single["price"], single["price_kind"]), ("04-04-300-022", 18000, "application"))
+        self.assertEqual((bundle["apn"], bundle["acres"], bundle["price"], bundle["offering"]),
+                         ("10-08-501-021, 10-08-501-022, 10-08-501-023", 1.39, 10000, "proposal"))
+        self.assertEqual(sum(detail["topic"] == "bundle_parcel" for detail in bundle["facts"]), 3)
+        self.assertNotIn("Previous holder", repr(rows))
+        pages[root] = pages[root].replace("$18,000.00", "$20,000.00")
+        with self.assertRaisesRegex(adapters.StructureError, "conflicting suggested offers"):
+            adapters.genesee_mi_featured_lots(fetch, None, self.fail)
+
     def test_irs_cheney_uses_signed_terms_and_current_vacant_assessment(self):
         fetch = unittest.mock.Mock()
         now = datetime.datetime(2026, 11, 28, 19, tzinfo=datetime.timezone.utc)

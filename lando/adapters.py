@@ -10500,6 +10500,153 @@ def tnecd_certified_sites(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(listings)}
 
 
+GENESEE_MI_FEATURED = "https://www.thelandbank.org/featured_lots.asp"
+GENESEE_MI_PIN = r"\d{2}-\d{2}-\d{3}-\d{3}"
+GENESEE_MI_BUNDLE_LIST = rf"{GENESEE_MI_PIN}(?:(?:,\s*|\s*(?:&|and)\s+)(?:{GENESEE_MI_PIN}|\d{{1,3}})(?!\d|[-]))+"
+GENESEE_MI_BUNDLE_TERMS = (
+    rf"Properties sold together(?:,[^,]*,)?\s+({GENESEE_MI_BUNDLE_LIST})",
+    rf"Parcels are being sold as a bundle only\s+({GENESEE_MI_BUNDLE_LIST})",
+    rf"Parcels\s+({GENESEE_MI_BUNDLE_LIST})\s+are being sold as a bundle only",
+)
+
+
+def genesee_bundle_members(detail, pin):
+    described = re.search(rf"Bundled with:\s*Tax ID:?\s*({GENESEE_MI_PIN})", detail, re.I)
+    for pattern in GENESEE_MI_BUNDLE_TERMS:
+        terms = re.search(pattern, detail, re.I)
+        if terms:
+            refs = re.split(r"\s*(?:,|&|\band\b)\s*", terms[1])
+            first, *others = refs
+            prefix = first.rsplit("-", 1)[0]
+            members = {first, *(ref if "-" in ref else f"{prefix}-{ref.zfill(3)}" for ref in others)}
+            if described and pin in members and described[1] in members:
+                return frozenset(members)
+            return None
+    if re.search(r"being sold as a bundle|properties sold together|not be sold independently", detail, re.I):
+        return None
+    if described and described[1] != pin:
+        return frozenset((pin, described[1]))
+    return None if "bundled with" in detail.lower() else frozenset((pin,))
+
+
+def parse_genesee_featured_detail(page, identifier, address):
+    article = re.search(r'<article\s+id="content"[^>]*>(.*?)</article>', page, re.S | re.I)
+    if not article:
+        raise StructureError("Genesee featured lot detail no longer has its parcel section")
+    detail = clean(article[1])
+    headings = [clean(text) for text in re.findall(r"<h[1-6]\b[^>]*>(.*?)</h[1-6]>", article[1], re.S | re.I)]
+    if (re.search(r"\*+\s*sold\s*\*+|\b(?:sale pending|under contract|no longer available|withdrawn)\b", detail, re.I)
+            or any(heading.lower() in {"sold", "pending", "unavailable", "sale closed"} for heading in headings)):
+        return None
+    pin = re.search(rf"\bTax ID:\s*({GENESEE_MI_PIN})\b", detail, re.I)
+    acres = re.search(r'<li\b[^>]*>\s*([\d.,]+)\s+acres\s*</li>', article[1], re.I)
+    offer = re.search(r"\bSuggested Starting Offer:\s*\$([\d,]+(?:\.\d{2})?)\b", detail, re.I)
+    if not (pin and pin[1].replace("-", "") == identifier and address.upper() in {h.upper() for h in headings}
+            and acres and number(acres[1]) and "No land contract offers accepted on vacant land" in detail):
+        raise StructureError(f"Genesee featured lot {identifier} no longer confirms its parcel or vacant offer terms")
+    return {"pin": pin[1], "acres": number(acres[1]), "offer": number(offer[1]) if offer else None,
+            "members": genesee_bundle_members(detail, pin[1])}
+
+
+def genesee_mi_featured_lots(fetch, now, warn):
+    page = fetch.text(GENESEE_MI_FEATURED)
+    text = clean(page)
+    if "Featured Lots for Development" not in text or "submit proof of funds and feasibility" not in text.lower():
+        raise StructureError("Genesee’s featured development offer instructions changed")
+    cards = re.findall(r'<a\s+href="(featuredprop_fm\.asp\?pid=(\d{10}))"[^>]*>(.*?)</a>\s*'
+                       r'<div class="pcardinfo">\s*<div class="pcardaddr1">([^<]+)', page, re.S | re.I)
+    linked = re.findall(r'\bhref="featuredprop_fm\.asp\?pid=(\d{10})"', page, re.I)
+    if [identifier for _, identifier, _, _ in cards] != linked or len(set(linked)) != len(linked):
+        raise StructureError("Genesee’s featured development directory card layout changed")
+    if not cards and "no featured lots available" not in text.lower():
+        raise StructureError("Genesee’s featured development directory has no readable parcels")
+
+    lots = {}
+    for path, identifier, card, address in cards:
+        address = clean(address)
+        url = urllib.parse.urljoin(GENESEE_MI_FEATURED, path)
+        lot = parse_genesee_featured_detail(fetch.text(url), identifier, address)
+        if not lot:
+            continue
+        card_offer = re.search(r'<div class="pcardoffer">\s*\$([\d,.]+)\s*</div>', card, re.I)
+        if card_offer and number(card_offer[1]) != lot["offer"]:
+            raise StructureError(f"Genesee featured lot {identifier} has conflicting suggested offers")
+        street, separator, city = address.rpartition(", ")
+        if not separator or not street or not city:
+            raise StructureError(f"Genesee featured lot {identifier} has no verified address and locality")
+        lots[lot["pin"]] = dict(lot, url=url, street=street.title(), city=city.title())
+
+    rows = []
+    for pin, lot in sorted(lots.items()):
+        members = lot["members"]
+        if not members or pin != min(members) or any(
+                member not in lots or lots[member]["members"] != members for member in members):
+            continue
+        group = [lots[member] for member in sorted(members)]
+        amounts = {member["offer"] for member in group}
+        price = lot["offer"] if len(amounts) == 1 else None
+        bundled = len(group) > 1
+        acreage = round(sum(member["acres"] for member in group), 4)
+        facts = [fact("availability", "Featured vacant land accepting offers through the Genesee County Land Bank.", GENESEE_MI_FEATURED),
+                 fact("purchase_terms", "Submit proof of funds and development feasibility with an offer for agency review. Land contracts are unavailable.", lot["url"])]
+        if bundled:
+            for member in group:
+                facts.append(fact("bundle_parcel", f'{member["pin"]} · {member["street"]} · {member["acres"]:g} acres', member["url"]))
+            facts.append(fact("bundle_terms", "The agency markets these parcels together as one offer.", lot["url"]))
+        if price is not None:
+            facts.append(fact("price", f"Suggested starting offer of ${price:,.2f}. The agency reviews offers.", lot["url"]))
+        rows.append({
+            "id": "mi-genesee-" + ("bundle-" if bundled else "") + pin.replace("-", ""),
+            "source": "genesee-mi-featured", "state": "MI", "county": "Genesee", "locality": lot["city"],
+            "title": f'{lot["street"]}, {lot["city"]} (Genesee Land Bank {"bundle" if bundled else "lot"} {pin})',
+            "address": lot["street"], "apn": ", ".join(sorted(members)), "acres": acreage,
+            "price": price, "price_kind": "application" if price is not None else "none",
+            "offering": "proposal", "status": "proposal_open", "deadline": None, "url": lot["url"],
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["vacant development land", "land bank", *(["parcel bundle"] if bundled else [])],
+        })
+    return rows, {"complete": True, "upstream_total": len(cards)}
+
+
+SKOWHEGAN_ME_SOUTHGATE = "https://www.skowhegan.org/141/Southgate-Industrial-Park"
+SKOWHEGAN_ME_ASSESSMENT = "https://www.skowhegan.org/DocumentCenter/View/6683/2026-VALUES-BY-LOCATION"
+SKOWHEGAN_ME_PLAT = "https://www.skowhegan.org/DocumentCenter/View/198"
+# The public brochure identifies the subdivision lot; the 2026 roll confirms its vacant assessment.
+SKOWHEGAN_ME_VERIFIED_DOCUMENTS = {
+    SKOWHEGAN_ME_PLAT: "3c51730ae937a559d860550b23548a7e0a0e38e059f20ccd4df601af096a2b8f",
+    SKOWHEGAN_ME_ASSESSMENT: "2c75ba25cf6e9ebde65ba6bc5e2d08f9566bf6e055f31bd4981957b5ae78dd8d",
+}
+
+
+def skowhegan_me_southgate(fetch, now, warn):
+    page = fetch.text(SKOWHEGAN_ME_SOUTHGATE)
+    text = clean(page)
+    available = re.search(r"\bLots Available\s+Lot Number Acres\s*(.*?)\s*Lots Sold\s+Lot Number Acres\b", text)
+    if not available or "Park Brochure" not in text or 'href="/DocumentCenter/View/198"' not in page:
+        raise StructureError("Skowhegan’s Southgate Industrial Park availability table or plat link changed")
+    lots = re.findall(r"\bLot\s+(\d+)\s+([\d.]+)\s+acres\b", available[1], re.I)
+    candidates = [number(acres) for lot, acres in lots if lot == "2"]
+    if not candidates:
+        return [], {"complete": True, "upstream_total": len(lots)}
+    if candidates != [3.29]:
+        raise StructureError("Skowhegan’s Southgate Lot 2 size changed")
+    for url, digest in SKOWHEGAN_ME_VERIFIED_DOCUMENTS.items():
+        if hashlib.sha256(fetch.bytes(url)).hexdigest() != digest:
+            raise StructureError("Skowhegan’s Southgate plat or vacant assessment needs renewed verification")
+    return [{
+        "id": "me-skowhegan-southgate-lot-2", "source": "skowhegan-me-southgate", "state": "ME",
+        "county": "Somerset", "locality": "Skowhegan", "title": "Southgate Industrial Park Lot 2, Skowhegan",
+        "address": "Southgate Parkway", "apn": "14-21-2", "acres": 3.29,
+        "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+        "deadline": None, "url": SKOWHEGAN_ME_SOUTHGATE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The town lists Lot 2 as available in Southgate Industrial Park.", "="),
+                  fact("parcel_number", "Map 14, block 21, lot 2 has no improvement assessment in the town’s 2026 roll.", SKOWHEGAN_ME_ASSESSMENT),
+                  fact("acreage", "3.29 acres on the recorded subdivision plat.", SKOWHEGAN_ME_PLAT),
+                  fact("price", "The town’s current availability table gives no asking price.", "=")],
+        "tags": ["vacant development land", "industrial park"],
+    }], {"complete": True, "upstream_total": len(lots)}
+
+
 FIRSTPARK_ME = "https://firstpark.com/available-lots/"
 
 
@@ -13175,6 +13322,14 @@ SOURCES = [
      "agency": "Tennessee Department of Economic and Community Development", "url": TNECD_CERTIFIED, "state": "TN",
      "run": tnecd_certified_sites, "requires_sale_match": True,
      "about": "State-certified development sites listed for purchase on Tennessee’s official directory, matched to published public holdings and offer terms."},
+    {"id": "genesee-mi-featured", "name": "Genesee County featured vacant development lots",
+     "agency": "Genesee County Land Bank Authority", "url": GENESEE_MI_FEATURED, "state": "MI",
+     "run": genesee_mi_featured_lots, "requires_sale_match": True,
+     "about": "Current featured sale offers matched to each parcel’s own detail page. Parcels marketed as a bundle appear together."},
+    {"id": "skowhegan-me-southgate", "name": "Skowhegan Southgate Industrial Park vacant land",
+     "agency": "Town of Skowhegan, Maine", "url": SKOWHEGAN_ME_SOUTHGATE, "state": "ME",
+     "run": skowhegan_me_southgate, "requires_sale_match": True,
+     "about": "The town’s current available-lot table, checked against its recorded subdivision plat and 2026 assessment roll."},
     {"id": "firstpark-me-lots", "name": "FirstPark vacant business park lots",
      "agency": "Kennebec Regional Development Authority, Maine", "url": FIRSTPARK_ME, "state": "ME",
      "run": firstpark_me_lots, "requires_sale_match": True,
@@ -13237,6 +13392,9 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("Genesee County Land Records and GIS parcel outlines",
+     "https://www.arcgis.com/home/item.html?id=696272b4cb35434aac565955af30e9e0",
+     "The county’s parcel layer license does not permit digital redistribution. The separately published Land Bank sale notices are carried."),
     ("The Flume and Park County Republican public notice portal", "https://theflume.column.us/search",
      "The publisher returned HTML in place of robots.txt. An independently published county notice is carried."),
     ("Payson Roundup legal notices", "https://payson.onlineads.advpubtech.com/showads/section/show/title/public-notices",

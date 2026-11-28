@@ -2,6 +2,7 @@ import datetime
 import html
 import json
 import unittest
+from unittest.mock import patch
 
 from lando import adapters
 
@@ -880,6 +881,82 @@ Tracts are available for purchase at not less than the appraised price.
         rows = adapters.parse_philly_lb_features(features, {"341032950": "Owned - Available"}, lambda message: None)
         self.assertEqual([r["apn"] for r in rows], ["341032950"])
         self.assertEqual(rows[0]["url"], adapters.PHILLY_LB_URL)
+
+class RegionalVacantOffersTest(unittest.TestCase):
+    def test_salem_requires_exact_sale_and_excludes_grouped_property(self):
+        page = """<h2>West Broadway Commercial Redevelopment Package</h2>
+        <p>The following properties must be purchased and redeveloped together:</p>
+        <p>Block/Lot: 13/46</p><h3>Former Salem Café</h3>"""
+        report = """Block  Lot  Address  Notes
+13   46   142-144 W Broadway
+14   9    198 Pledger St  Residential
+14   10   200 Pledger St  Pending
+77   23   Oak St Rear     Historic area: HPC approval required
+"""
+        self.assertEqual(adapters.salem_nj_roster(page, report), {
+            "1713_14_9": "Residential", "1713_77_23": "Historic area: HPC approval required",
+        })
+
+    def test_deldot_uses_notice_minimum_and_expires_at_auction_start(self):
+        report = """Date and Time: Tuesday, December 8, 2026, 11:00 a.m. to 12:00 pm
+        Kent County Tax Parcel No.: 7-02-103.00-01-     10.01-000
+        Size: 0.2256 acres +/-
+        Approved Appraised Value: $85,000.00
+        Minimum Sale Price: $72,250.00 (85% of Approved Appraised Value)"""
+        url = adapters.DELDOT_AUCTIONS
+        row = adapters.parse_deldot_k303(report, url, "518 Lochmeath Way, Camden-Wyoming", NOW)
+        self.assertEqual((row["apn"], row["acres"], row["price"], row["deadline"]),
+                         ("7-02-103.00-01-10.01-000", .2256, 72250, "2026-12-08T16:00:00Z"))
+        closed = datetime.datetime(2026, 12, 8, 16, 0, tzinfo=datetime.timezone.utc)
+        self.assertIsNone(adapters.parse_deldot_k303(report, url, row["address"], closed))
+
+    def test_conrad_checks_current_plat_and_only_uses_available_lots(self):
+        class CityPage:
+            def text(self, url):
+                return ('<a href="https://www.cityofconrad.com/_files/ugd/other.pdf">Policy Manual</a>'
+                        '<p>View the Industrial Park lots available for sale.</p>'
+                        '<a href="https://www.cityofconrad.com/_files/ugd/map.pdf">Industrial Park lots</a>')
+
+            def bytes(self, url):
+                if not url.endswith("/map.pdf"):
+                    raise AssertionError("wrong plat linked")
+                return b"reviewed map fixture"
+
+        with self.assertRaises(adapters.StructureError):
+            adapters.conrad_mt_industrial_park(CityPage(), NOW, None)
+        digest = adapters.hashlib.sha256(b"reviewed map fixture").hexdigest()
+        rings = [[[-111.8, 48.1], [-111.799, 48.1], [-111.8, 48.101], [-111.8, 48.1]]]
+        features = [{"attributes": {"PARCELID": pin, "TotalAcres": acres, "TotalBuildingValue": 0,
+                                    "Subdivision": "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"},
+                     "geometry": {"rings": rings}}
+                    for pin, acres in [("26398713201100000", 3.02), ("26398713201120000", 5.64), ("26398713201150000", 5.83),
+                                       ("26398713201160000", 5.72)]]
+        with patch.object(adapters, "CONRAD_MT_PLAT_SHA256", digest), patch.object(adapters, "_arcgis_query", return_value=features):
+            rows, info = adapters.conrad_mt_industrial_park(CityPage(), NOW, None)
+        self.assertTrue(info["complete"])
+        self.assertEqual([(r["facts"][1]["value"], r["price"]) for r in rows], [
+            ("Lot 1 of Conrad East Industrial Park Subdivision", 90600),
+            ("Lot 3 of Conrad East Industrial Park Subdivision", 197400),
+            ("Lot 6 of Conrad East Industrial Park Subdivision", 233200),
+        ])
+
+    def test_northumberland_requires_express_vacancy_and_uses_sealed_bid_floor(self):
+        report = """Available for “SEALED BID” ONLY
+MINIMUM BID $100.00
+00F-01-00F-033
+Maple Avenue
+VAC/ LOT 12.5 X 80 FT
+PRIVATE PERSON
+016-01-008-039
+216 E. Cameron Street
+LOT 14 X 50
+026-00-012-078-C-001-L
+1804 Old State Road
+LEASED LAND - MOBILE HOME ONLY"""
+        rows = adapters.parse_northumberland_pa_repo(report, adapters.NORTHUMBERLAND_PA_REPO)
+        self.assertEqual([(r["apn"], r["price"], r["acres"]) for r in rows], [("00F-01-00F-033", 100, .023)])
+        self.assertNotIn("PRIVATE PERSON", repr(rows))
+
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):

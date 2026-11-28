@@ -196,6 +196,10 @@ def outline_url(listing):
         return one_parcel_url(NAVAJO_AZ_GIS, "APN='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "cherry-hill-nj":
         return one_parcel_url(CHERRYHILL_NJ_GIS, "UNIQUEID='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "salem-nj-offers":
+        return one_parcel_url(NJ_COMPOSITE_PARCELS, "PIN_NODUP='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "conrad-mt-industrial-park":
+        return one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % listing["apn"].replace("'", "''"))
     return ""
 
 
@@ -6887,6 +6891,200 @@ def luzerne_pa_repository(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(roster)}
 
 
+SALEM_NJ_SALE = "https://cityofsalemnj.gov/city-properties-for-sale/"
+NJ_COMPOSITE_PARCELS = "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0/query"
+
+
+def salem_nj_roster(page, report):
+    if not re.search(r"\bBlock\s+Lot\s+Address\s+Notes\b", report):
+        raise StructureError("Salem's property list columns changed")
+    package = re.search(r"West Broadway Commercial Redevelopment Package\s+The following properties must be purchased.*?Former Salem Café", clean(page), re.I)
+    if not package:
+        raise StructureError("Salem's mandatory package section changed")
+    grouped = {"1713_%s_%s" % item for item in re.findall(r"Block/Lot:\s*(\d+)/\s*(\d+)", package[0], re.I)}
+    if not grouped:
+        raise StructureError("Salem's package block and lot numbers could not be read")
+    offers = {}
+    for match in re.finditer(r"^[ \t]*(\d+(?:\.\d+)?)[ \t]+(\d+(?:\.\d+)?)[ \t]+(.+)$", report, re.M):
+        pin = "1713_%s_%s" % (match[1], match[2])
+        columns = re.split(r"[ \t]{2,}", match[3].strip(), maxsplit=1)
+        notes = columns[1] if len(columns) == 2 else ""
+        if pin not in grouped and not re.search(r"\b(?:package|unavailable|sold|withdrawn|pending|lease)\b", notes, re.I):
+            offers[pin] = notes
+    if not offers:
+        raise StructureError("Salem's current block and lot list could not be read")
+    return offers
+
+
+def salem_nj_offers(fetch, now, warn):
+    page = fetch.text(SALEM_NJ_SALE)
+    link = re.search(r'<a\b[^>]*href="(https://cityofsalemnj\.gov/wp-content/uploads/[^"<>]+\.pdf)"[^>]*>\s*<span[^>]*>City Properties for Sale PDF\b', page, re.I)
+    if not link:
+        raise StructureError("Salem's current city properties for sale PDF link changed")
+    url = html.unescape(link[1])
+    roster = salem_nj_roster(page, pdf_text(fetch, url))
+    fields = "PIN_NODUP,PROP_CLASS,IMPRVT_VAL,BLDG_DESC,BLDG_CLASS,YR_CONSTR,DWELL,COMM_DWELL,PROP_LOC,CALC_ACRE"
+    where = "MUN_NAME='SALEM CITY' AND COUNTY='SALEM' AND PIN_NODUP IN (%s)" % quote_list(sorted(roster))
+    features = _arcgis_query(fetch, NJ_COMPOSITE_PARCELS, where, fields)
+    matched = Counter(feature["attributes"].get("PIN_NODUP") for feature in features)
+    if len(matched.keys() & roster.keys()) < 0.8 * len(roster):
+        raise StructureError("too few Salem offer parcels match the state assessment records")
+    rows = []
+    for feature in features:
+        item = feature["attributes"]
+        pin = item.get("PIN_NODUP")
+        if pin not in roster or matched[pin] != 1 or item.get("PROP_CLASS") not in ("1", "15C"):
+            continue
+        if str(item.get("IMPRVT_VAL")).strip() != "0" or any(item.get(k) not in (None, "", "0", 0)
+                for k in ("BLDG_DESC", "BLDG_CLASS", "YR_CONSTR", "DWELL", "COMM_DWELL")):
+            continue
+        rings = (feature.get("geometry") or {}).get("rings")
+        address = clean(item.get("PROP_LOC") or "").title()
+        if not rings or not address:
+            continue
+        facts = [fact("availability", "Advertised by the City of Salem for qualified applicants", url),
+                 fact("sale_terms", "The city requires a developer qualification application and reviews proposed uses and eligibility by property.", SALEM_NJ_SALE)]
+        if "historic" in roster[pin].lower():
+            facts.append(fact("sale_restrictions", "Historic Preservation Commission review may apply.", SALEM_NJ_SALE))
+        row = {
+            "id": "nj-salem-" + slug(pin), "source": "salem-nj-offers",
+            "title": "%s, Salem (city land for sale)" % address, "state": "NJ", "county": "Salem", "locality": "Salem",
+            "apn": pin, "address": address, "acres": number(item.get("CALC_ACRE")),
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": SALEM_NJ_SALE, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["city-owned land", "development proposal"],
+        }
+        apply_geometry(row, rings, one_parcel_url(NJ_COMPOSITE_PARCELS, "PIN_NODUP='%s'" % pin), "New Jersey state parcel GIS")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
+DELDOT_AUCTIONS = "https://deldot.gov/Business/auctions/"
+# The vacancy is visible in the sale notice's official aerial and survey, not stated in its text.
+DELDOT_K303_SHA256 = "93435aa46f4c83a1ff0050b324d084bed18ae2102ed3740e187622b8f71e5180"
+
+
+def parse_deldot_k303(text, url, address, now):
+    from zoneinfo import ZoneInfo
+
+    text = clean(text)
+    fields = (
+        r"\bDate and Time:\s*\w+,\s*([A-Za-z]+ \d{1,2}, \d{4}),\s*(\d{1,2}:\d{2})\s*([ap])\.m\.",
+        r"\bKent County Tax Parcel No\.:\s*([\d.-]+)\s*(\d+\.\d+-\d{3})\b",
+        r"\bSize:\s*([\d.]+)\s+acres?\b",
+        r"\bMinimum Sale Price:\s*\$([\d,.]+)",
+    )
+    date, parcel, acres, price = (re.search(field, text, re.I) for field in fields)
+    if not all((date, parcel, acres, price)):
+        raise StructureError("DelDOT auction date, parcel or terms could not be read")
+    start = datetime.datetime.strptime("%s %s%sM" % date.groups(), "%B %d, %Y %I:%M%p")
+    start = start.replace(tzinfo=ZoneInfo("America/New_York"))
+    if start <= now:
+        return None
+    return {
+        "id": "de-deldot-k303", "source": "deldot-land-auctions", "title": "%s (DelDOT land auction)" % address,
+        "state": "DE", "county": "Kent", "locality": "Camden-Wyoming", "apn": "".join(parcel.groups()), "address": address,
+        "acres": number(acres[1]), "price": number(price[1]), "price_kind": "min_bid", "offering": "auction",
+        "status": "auction_terms", "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": DELDOT_AUCTIONS, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "Published DelDOT auction for a vacant surplus tract", url),
+                  fact("auction_start", start.strftime("%B %d, %Y at %I:%M %p ET"), url),
+                  fact("auction_terms", "DelDOT requires a certified or cashier’s check for 10% of the minimum at registration.", url)],
+        "tags": ["state transportation surplus", "commercial zoning"],
+    }
+
+
+def deldot_land_auctions(fetch, now, warn):
+    page = fetch.text(DELDOT_AUCTIONS)
+    if "Real Estate Auctions" not in page or "Kent County" not in page:
+        raise StructureError("DelDOT's current auction directory changed")
+    link = re.search(r'<a\b[^>]+href="(/Business/auctions/pdfs/kc/k-303\.pdf)"[^>]*>\s*K-303\s+-\s+([^<]+?)\s+-\s+[\d.]+ acres\s+-\s+Auction Date:', page, re.I)
+    if not link:
+        return [], {"complete": True, "upstream_total": 0}
+    url = urllib.parse.urljoin(DELDOT_AUCTIONS, link[1])
+    row = parse_deldot_k303(pdf_text(fetch, url, checked_sha256=DELDOT_K303_SHA256), url, clean(link[2]), now)
+    return ([row] if row else []), {"complete": True, "upstream_total": 1}
+
+
+CONRAD_MT_SALE = "https://www.cityofconrad.com/industrial-park-committee"
+MT_COMPOSITE_PARCELS = "https://gisservice.mt.gov/ArcGIS/rest/services/msdi_cadastral_map_v1/MapServer/1/query"
+CONRAD_MT_PLAT_SHA256 = "42d75f85df5fa34955e41c8b669a392bc1822cff9abad734f50c09f12c938563"
+# The current city-linked plat advertises lots 1, 3 and 6. Use the state parcel numbers for those exact tracts.
+CONRAD_MT_AVAILABLE_LOTS = {1: ("26398713201100000", 3.02, 90600), 3: ("26398713201120000", 5.64, 197400),
+                            6: ("26398713201150000", 5.83, 233200)}
+
+
+def conrad_mt_industrial_park(fetch, now, warn):
+    page = fetch.text(CONRAD_MT_SALE)
+    links = re.findall(r'<a\b[^>]+href="(https://www\.cityofconrad\.com/_files/ugd/[^"<>]+\.pdf)"[^>]*>(.*?)</a>', page, re.I | re.S)
+    url = next((link for link, label in links if clean(label) == "Industrial Park lots"), None)
+    if not url or "available for sale" not in clean(page).lower():
+        raise StructureError("Conrad's advertised Industrial Park plat could not be confirmed")
+    if hashlib.sha256(fetch.bytes(url)).hexdigest() != CONRAD_MT_PLAT_SHA256:
+        raise StructureError("Conrad's new plat requires review of the availability markings")
+    where = "PARCELID IN (%s)" % quote_list([v[0] for v in CONRAD_MT_AVAILABLE_LOTS.values()])
+    features = _arcgis_query(fetch, MT_COMPOSITE_PARCELS, where, "PARCELID,TotalAcres,TotalBuildingValue,Subdivision")
+    parcels = {x["attributes"].get("PARCELID"): x for x in features}
+    rows = []
+    for lot, (pin, acres, price) in CONRAD_MT_AVAILABLE_LOTS.items():
+        parcel = parcels.get(pin, {})
+        attrs = parcel.get("attributes", {})
+        rings = (parcel.get("geometry") or {}).get("rings")
+        if (not rings or attrs.get("Subdivision") != "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"
+                or attrs.get("TotalBuildingValue") != 0 or number(attrs.get("TotalAcres")) != acres):
+            continue
+        row = {
+            "id": "mt-conrad-east-industrial-park-%s" % lot, "source": "conrad-mt-industrial-park",
+            "title": "Lot %s, Conrad East Industrial Park" % lot, "state": "MT", "county": "Pondera", "locality": "Conrad",
+            "apn": pin, "address": "", "acres": acres, "price": price, "price_kind": "asking", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CONRAD_MT_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Available on the city’s annotated industrial park plat", url),
+                      fact("lot", "Lot %s of Conrad East Industrial Park Subdivision" % lot, url)],
+            "tags": ["city-owned land", "industrial park"],
+        }
+        apply_geometry(row, rings, one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % pin), "Montana parcel GIS")
+        if row["geometry"]:
+            rows.append(row)
+    if not rows:
+        raise StructureError("Conrad's advertised lots did not match the state parcel layer")
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+NORTHUMBERLAND_PA_REPO = "https://www.northumberlandcountypa.gov/htdocs/index.php/repository-sale/"
+
+
+def parse_northumberland_pa_repo(report, url):
+    bid = re.search(r"\bMINIMUM BID\s*\$([\d,.]+)", report, re.I)
+    if not bid or not re.search(r"Available for [“\"']?SEALED BID", report, re.I):
+        raise StructureError("Northumberland County's current sealed-bid layout or minimum changed")
+    rows = []
+    for match in re.finditer(r"^([0-9A-Z]{3}(?:-[0-9A-Z]{2,3}){3})[ \t]*\n([^\n]+)\nVAC\s*/\s*LOT[ \t]+([\d.]+)\s*X\s*([\d.]+)\s*FT\b", report, re.M | re.I):
+        pin, address, width, length = match.groups()
+        acres = round(float(width) * float(length) / 43560, 4)
+        rows.append({
+            "id": "pa-northumberland-repository-" + slug(pin), "source": "northumberland-pa-repository",
+            "title": "%s, Northumberland County (vacant repository land)" % clean(address), "state": "PA", "county": "Northumberland",
+            "locality": "", "apn": pin, "address": clean(address), "lat": None, "lon": None, "geometry": None,
+            "acres": acres, "price": number(bid[1]), "price_kind": "min_bid", "offering": "sale", "status": "listed",
+            "deadline": None, "url": NORTHUMBERLAND_PA_REPO,
+            "facts": [fact("availability", "Identified as a vacant lot on the county’s current sealed-bid repository list", url),
+                      fact("lot_area", "%s by %s feet according to the county sale notice" % (width, length), url),
+                      fact("auction_terms", "The county reviews sealed bids quarterly. Transfer and recording fees apply.", NORTHUMBERLAND_PA_REPO)],
+            "tags": ["tax repository", "sealed bid"],
+        })
+    return rows
+
+
+def northumberland_pa_repository(fetch, now, warn):
+    page = fetch.text(NORTHUMBERLAND_PA_REPO)
+    link = re.search(r'<a\b[^>]+href="(https://www\.northumberlandcountypa\.gov/htdocs/wp-content/uploads/documents/taxclaims/[\d_]+sealed_ada\.pdf)"', page, re.I)
+    if not link:
+        raise StructureError("Northumberland County's current sealed-bid list could not be found")
+    rows = parse_northumberland_pa_repo(pdf_text(fetch, link[1]), link[1])
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -7237,8 +7435,28 @@ SOURCES = [
      "agency": "Luzerne County Tax Claim Bureau", "url": LUZERNE_PA_REPO, "state": "PA",
      "run": luzerne_pa_repository, "requires_sale_match": True,
      "about": "Vacant parcels from the county's current repository and public assessment GIS. The customary minimum applies after the initial period."},
+    {"id": "salem-nj-offers", "name": "Salem city land offered to qualified applicants", "agency": "City of Salem, New Jersey",
+     "url": SALEM_NJ_SALE, "state": "NJ", "run": salem_nj_offers, "requires_sale_match": True,
+     "about": "Currently advertised city properties with no improvement evidence in New Jersey's parcel records. Check city program eligibility."},
+    {"id": "deldot-land-auctions", "name": "DelDOT vacant surplus land auctions", "agency": "Delaware Department of Transportation",
+     "url": DELDOT_AUCTIONS, "state": "DE", "run": deldot_land_auctions, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Surplus land advertised by DelDOT, with the minimum in the public auction notice and vacancy confirmed on its aerial exhibit."},
+    {"id": "conrad-mt-industrial-park", "name": "Conrad East Industrial Park vacant lots", "agency": "City of Conrad, Montana",
+     "url": CONRAD_MT_SALE, "state": "MT", "run": conrad_mt_industrial_park, "requires_sale_match": True,
+     "about": "Vacant lots shown for sale on the city’s industrial park map, with its published asking prices."},
+    {"id": "northumberland-pa-repository", "name": "Northumberland County vacant sealed-bid lots", "agency": "Northumberland County Tax Claim Bureau",
+     "url": NORTHUMBERLAND_PA_REPO, "state": "PA", "run": northumberland_pa_repository, "requires_sale_match": True,
+     "about": "Parcels expressly labeled vacant in the county’s current sealed-bid repository notice."},
 ]
 NOT_CARRIED = [
+    ("Northumberland County, Pennsylvania assessment parcel boundaries", "https://gis.norrycopa.net/arcgis/rest/services/Assessment/NC_Tax_Parcels/MapServer",
+     "The county's GIS host did not serve a verifiable TLS certificate for robots.txt. The county's separate current sale notice is carried."),
+    ("Baltimore City open-bid vacant parcels", "https://geodata.baltimorecity.gov/egis/rest/services/Housing/dmxLandTransactions/MapServer/4",
+     "The open-bid GIS hosts timed out on robots.txt, and the linked DHCD site returned HTTP 403 for robots.txt."),
+    ("Pondera Port Authority Conrad industrial park offers", "https://www.ponderaportauthority.com/opportunitites.htm",
+     "The port authority's robots.txt endpoint did not serve a valid TLS certificate."),
+    ("Alamosa County, Colorado treasurer auctions", "https://alamosacounty.colorado.gov/departments/treasurer",
+     "The county's robots.txt endpoint did not complete a verified TLS connection."),
     ("Cambria County, Pennsylvania tax claim sales", "https://www.cambriacountypa.gov/tax-claim/",
      "The county website returned HTTP 403 for robots.txt."),
     ("Stevens County, Washington foreclosure sales", "https://www.stevenscountywa.gov/21023",

@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T01:24:19Z",
+ "checked": "2026-11-28T01:45:06Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -471,6 +471,24 @@
    "upstream_total": 2,
    "url": "https://portal.ct.gov/dot/properties/active-public-bids"
   },
+  "conrad-mt-industrial-park": {
+   "about": "Vacant lots shown for sale on the city\u2019s industrial park map, with its published asking prices.",
+   "agency": "City of Conrad, Montana",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:45:06Z",
+   "last_success": "2026-11-28T01:45:06Z",
+   "message": "",
+   "name": "Conrad East Industrial Park vacant lots",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 3,
+   "state": "MT",
+   "upstream_total": 3,
+   "url": "https://www.cityofconrad.com/industrial-park-committee"
+  },
   "craven-nc-surplus": {
    "about": "County-owned unimproved land in the available-to-purchase workbook. Assessed values are not sale prices.",
    "agency": "Craven County, North Carolina",
@@ -542,6 +560,24 @@
    "state": "IN",
    "upstream_total": 342,
    "url": "https://delawarecounty.in.gov/"
+  },
+  "deldot-land-auctions": {
+   "about": "Surplus land advertised by DelDOT, with the minimum in the public auction notice and vacancy confirmed on its aerial exhibit.",
+   "agency": "Delaware Department of Transportation",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:42:28Z",
+   "last_success": "2026-11-28T01:42:28Z",
+   "message": "",
+   "name": "DelDOT vacant surplus land auctions",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 3,
+   "state": "DE",
+   "upstream_total": 1,
+   "url": "https://deldot.gov/Business/auctions/"
   },
   "desoto-fl-auctions": {
    "about": "Scheduled tax deed sales with a published opening bid, matched by parcel number to vacant Florida assessment records with no buildings.",
@@ -1263,6 +1299,24 @@
    "upstream_total": 213,
    "url": "https://www.noraworks.org/opportunities/"
   },
+  "northumberland-pa-repository": {
+   "about": "Parcels expressly labeled vacant in the county\u2019s current sealed-bid repository notice.",
+   "agency": "Northumberland County Tax Claim Bureau",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:42:28Z",
+   "last_success": "2026-11-28T01:42:28Z",
+   "message": "",
+   "name": "Northumberland County vacant sealed-bid lots",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 4,
+   "state": "PA",
+   "upstream_total": 2,
+   "url": "https://www.northumberlandcountypa.gov/htdocs/index.php/repository-sale/"
+  },
   "oakland-mi-landbank": {
    "about": "Vacant-class parcels on the county's interactive Land Bank application map.",
    "agency": "Oakland County Land Bank Authority",
@@ -1534,6 +1588,24 @@
    "state": "NY",
    "upstream_total": 25,
    "url": "https://www.cityofrochester.gov/departments/finance-department/tax-foreclosure-auctions-environmental-auctions"
+  },
+  "salem-nj-offers": {
+   "about": "Currently advertised city properties with no improvement evidence in New Jersey's parcel records. Check city program eligibility.",
+   "agency": "City of Salem, New Jersey",
+   "complete": true,
+   "count": 8,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:38:41Z",
+   "last_success": "2026-11-28T01:38:41Z",
+   "message": "",
+   "name": "Salem city land offered to qualified applicants",
+   "notes": [],
+   "ok": true,
+   "read": 8,
+   "seconds": 63,
+   "state": "NJ",
+   "upstream_total": 35,
+   "url": "https://cityofsalemnj.gov/city-properties-for-sale/"
   },
   "salt-lake-county-surplus": {
    "about": "Active county surplus offers matched to assessor parcels with zero recorded building value.",

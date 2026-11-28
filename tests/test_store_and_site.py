@@ -6,8 +6,9 @@ import re
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from lando import build, config, refresh, research, store
+from lando import adapters, build, config, refresh, research, store
 from lando.model import Catalog
 from lando.pages import Site
 
@@ -244,6 +245,21 @@ class RefreshAndBuildTest(unittest.TestCase):
         doc = site.research()
         self._assert_faq_parity(doc, expected_count=6, required_types={"Organization", "BreadcrumbList", "Article", "Dataset", "FAQPage"})
         self._assert_zero_pbn_dofollow(doc)
+
+    def test_new_agency_does_not_change_an_unrelated_parcel_page(self):
+        parcel = listing(1, price=1250, price_kind="asking")
+        store.save_listings(parcel["source"], [parcel], self.data)
+        store.save_status({"sources": {parcel["source"]: {"last_success": "2026-11-26T12:00:00Z"}}}, self.data)
+        before = Catalog(self.data, now=NOW)
+        expected = Site(before).listing(before.by_id[parcel["id"]])
+        added = {"id": "another-agency", "agency": "Agency for Another State", "state": "NE"}
+        with patch.object(adapters, "SOURCES", [*adapters.SOURCES, added]):
+            after = Catalog(self.data, now=NOW)
+            doc = Site(after).listing(after.by_id[parcel["id"]])
+        self.assertEqual(doc, expected)
+        self.assertIn('href="/sources/">Official agency directory', doc)
+        self.assertIn('data-official-source="1"', doc)
+        self.assertIn("It is not an offer", doc)
 
     def test_stale_sources_leave_the_map(self):
         good = {"id": "st-louis-lra", "name": "STL", "agency": "City", "url": "https://x", "state": "MO", "about": "a",

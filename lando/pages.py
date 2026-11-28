@@ -181,21 +181,21 @@ class Site(object):
             extra += ' · <a href="%s" rel="noopener sponsored">Support Landosaur</a>' % esc(config.SUPPORT_URL)
         return (
             '<footer><div class="wrap"><p class="notice">%s</p>'
-            '<p>Official agencies tracked (%d): %s. <a href="%s">How sources are read</a>.</p>'
+            '<p><a href="%s">Official agency directory and refresh status</a></p>'
             '<p>County land values across 3,115 U.S. counties: <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
             '<a href="%s">Below-Market Land Deals</a> · <a href="%s">50-State Tax-Sale Atlas</a> · '
             '<a href="%s">50-State Land Data Atlas &amp; Charts</a> · <a href="%s">Land Agent Services ($20)</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
             '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Deals Scanner</a> · <a href="%s">50-State Tax Sales</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
             '<a href="%s">Land under $5,000</a> · <a href="%s">Land under $10,000</a> · <a href="%s">Acreage for sale</a> · '
-            '<a href="%s">Research &amp; Guides</a> · <a href="%s">LandWatch &amp; Land.com Alternatives</a> · <a href="%s">Closing Soon</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
+            '<a href="%s">Research &amp; Guides</a> · <a href="%s">LandWatch &amp; Land.com Alternatives</a> · <a href="%s">Closing Soon</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
             '<a href="%s">About</a> · <a href="%s" rel="noopener">Source Code</a> · '
             '<a href="%s" rel="noopener">Report a Problem</a>%s</p></div></footer>'
         ) % (
-            esc(NOTICE), len(adapters.SOURCES), ", ".join(esc(s["agency"]) for s in adapters.SOURCES), self.u("/sources/"),
+            esc(NOTICE), self.u("/sources/"),
             esc(config.LAND_INDEX_URL), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/services/"), self.u("/xray/"),
             self.u("/services/"), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
             self.u("/land-under-5000/"), self.u("/land-under-10000/"), self.u("/acreage-for-sale/"),
-            self.u("/research/"), self.u("/landwatch-alternatives/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
+            self.u("/research/"), self.u("/landwatch-alternatives/"), self.u("/closing-soon/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
 

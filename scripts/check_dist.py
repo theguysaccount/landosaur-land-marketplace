@@ -51,6 +51,7 @@ OFFICIAL = {
     "cityofschenectady.gov", "co.muskegon.mi.us", "cuyahogalandbank.org", "noraworks.org", "oaklandcountymi.gov", "skagitcountywa.gov",
     "luzernecountytaxclaim.com", "cityofsalemnj.gov", "deldot.gov", "cityofconrad.com", "northumberlandcountypa.gov",
     "clearlakeadc.com", "clarkcountylandbank.org", "athenscountylandbank.com", "rtcwashoe.com", "waycrossga.gov",
+    "cityofhuntington.com", "oregon.gov",
     "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us", "hokecounty.net", "wsdot.wa.gov", "itascacountymn.gov", "valencia.nm.us", "tax.newmexico.gov", "stlouiscountymn.gov", "fnsb.gov",
 }
 

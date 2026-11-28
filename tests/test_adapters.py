@@ -1011,6 +1011,32 @@ LEASED LAND - MOBILE HOME ONLY"""
         self.assertEqual([r[1] for r in adapters.parse_waycross_ga_offer_table(page, 1)], ["WA1902 010"])
 
 
+    def test_huntington_notice_includes_vacant_and_excludes_improved_and_infrastructure(self):
+        report = """Parcel ID     District     Address     Vacant/Structure
+Zoning R-1 Single Family Residential
+06-06-0056-0237-0000  West Huntington   HARVEY RD, HUNTINGTON 25701    Vacant
+06-06-0056-0240-0000  West Huntington   ALLEY, HUNTINGTON 25701       Vacant
+06-06-0066-0056-0000  West Huntington   1522 R WEST RD, HUNTINGTON 25701   Structure
+"""
+        self.assertEqual(adapters.parse_huntington_wv_notice(report), {
+            "06-06-0056-0237-0000": ("Harvey Rd", "R-1 Single Family Residential"),
+        })
+
+    def test_oregon_dot_uses_live_status_and_withholds_appraisal_value(self):
+        def item(status):
+            return ("<entry><content><m:properties><d:Status>%s</d:Status><d:City>Eugene</d:City><d:County>Lane</d:County>"
+                    "<d:Listing_x0020_Number>PM220A-041</d:Listing_x0020_Number>"
+                    "<d:Description>Unimproved 1.87 acres parcel (17S04W2733 tax lot 1300).</d:Description>"
+                    "<d:Address>Land parcel located along S. Bertelsen Road</d:Address><d:Price>650000</d:Price>"
+                    "</m:properties></content></entry>") % status
+
+        fixture = ('<feed xmlns="http://www.w3.org/2005/Atom" xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices" '
+                   'xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">'
+                   + item("ON HOLD") + item("Active Listing") + '</feed>')
+        row, = adapters.parse_oregon_dot_sales(fixture)
+        self.assertEqual((row["apn"], row["acres"], row["price"]), ("17S04W2733-1300", 1.87, None))
+
+
 class OfficialInventoryExtensionTest(unittest.TestCase):
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
         attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,

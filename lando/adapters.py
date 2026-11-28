@@ -7335,6 +7335,126 @@ def waycross_ga_landbank(fetch, now, warn):
     return waycross_ga_offers(fetch, 1)
 
 
+HUNTINGTON_WV_SALES = "https://www.cityofhuntington.com/residents/landbank/"
+HUNTINGTON_WV_DASHBOARD = "https://www.arcgis.com/apps/dashboards/65250e509a0d4d6c988c3a897201bb4b"
+HUNTINGTON_WV_MAP = "https://www.arcgis.com/sharing/rest/content/items/f37745b22d6c49058de5ceef72939c13/data?f=json"
+
+
+def parse_huntington_wv_notice(report):
+    if not re.search(r"Parcel ID\s+District\s+Address\s+Vacant/Structure", report):
+        raise StructureError("Huntington's current sale roster columns changed")
+    roster = {}
+    zoning = ""
+    for line in report.splitlines():
+        if line.startswith("Zoning "):
+            zoning = clean(line.removeprefix("Zoning "))
+            continue
+        match = re.match(r"^\s*(06-\d{2}-\d{4}-\d{4}-\d{4})\s+(.+?)\s{2,}(.+?)\s+Vacant\s*$", line)
+        if not match:
+            continue
+        pin, _, address = match.groups()
+        if ", HUNTINGTON " in address and not re.search(r"\b(?:roadway|easement|right.of.way|alley|pending|withdrawn)\b", address, re.I):
+            roster[pin] = (clean(address.split(", HUNTINGTON ", 1)[0]).title(), zoning)
+    return roster
+
+
+def huntington_wv_landbank(fetch, now, warn):
+    page = fetch.text(HUNTINGTON_WV_SALES)
+    report = re.search(r'<a\s+href="(https://www\.cityofhuntington\.com/assets/pdf/LRA_Properties_[^"<>]+\.pdf)"[^>]*>Click here</a>\s*&nbsp;to view properties listed for sale', page, re.I)
+    if not report or HUNTINGTON_WV_DASHBOARD not in page:
+        raise StructureError("Huntington's current sale roster or city map link changed")
+    notice_url = report[1]
+    roster = parse_huntington_wv_notice(pdf_text(fetch, notice_url))
+    webmap = fetch.json(HUNTINGTON_WV_MAP)
+    layers = [layer for base in webmap.get("operationalLayers", []) if base.get("title") == "Available Land Bank Properties"
+              for layer in (base.get("featureCollection") or {}).get("layers", [])]
+    if len(layers) != 1:
+        raise StructureError("Huntington's available land bank map changed")
+    offers = {}
+    for feature in (layers[0].get("featureSet") or {}).get("features", []):
+        item = feature.get("attributes") or {}
+        pin = item.get("PARID")
+        if pin in roster and clean(item.get("VACANT_STRUCTURE")).lower() == "vacant" and clean(item.get("STATUS")).lower() in ("", "available"):
+            offers[pin] = feature
+    if roster and len(offers) < .75 * len(roster):
+        raise StructureError("too few advertised Huntington vacant lots match the city's current sale map")
+    ids = sorted(offers)
+    rows = []
+    for pin in ids:
+        address, zoning = roster[pin]
+        city_feature = offers[pin]
+        city_point = city_feature.get("geometry") or {}
+        lon = lat = None
+        if (city_point.get("spatialReference") or {}).get("latestWkid") == 3857:
+            x, y = city_point.get("x"), city_point.get("y")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                lon = round(math.degrees(x / 6378137), 6)
+                lat = round(math.degrees(math.atan(math.sinh(y / 6378137))), 6)
+        if not (lat and lon and 38 < lat < 39 and -83 < lon < -81):
+            lat = lon = None
+        acres = number(city_feature["attributes"].get("Acres_C"))
+        rows.append({
+            "id": "wv-huntington-lra-" + slug(pin), "source": "huntington-wv-landbank",
+            "title": "%s, Huntington (Land Reuse Agency vacant land)" % address,
+            "state": "WV", "county": "Cabell", "locality": "Huntington", "apn": pin, "address": address,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+            "deadline": None, "url": HUNTINGTON_WV_SALES, "lat": lat, "lon": lon, "geometry": None,
+            "facts": [fact("availability", "Identified as vacant on the agency's current sale roster and available property map", notice_url),
+                      fact("zoning", zoning, notice_url),
+                      fact("geometry_source", "Location and acreage are from the city’s available property map.", HUNTINGTON_WV_DASHBOARD)],
+            "tags": ["land bank"],
+        })
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
+OREGON_DOT_SALES = "https://www.oregon.gov/odot/row/pages/current-listings.aspx"
+OREGON_DOT_SALE_LIST = ("https://www.oregon.gov/odot/ROW/_api/web/GetList(@listUrl)/items?"
+                        "@listUrl=%27%2Fodot%2FROW%2FLists%2FPropSaleCurrentListings%27&%24top=100")
+
+
+def parse_oregon_dot_sales(xml):
+    from xml.etree import ElementTree
+
+    namespaces = {"atom": "http://www.w3.org/2005/Atom", "m": "http://schemas.microsoft.com/ado/2007/08/dataservices/metadata",
+                  "d": "http://schemas.microsoft.com/ado/2007/08/dataservices"}
+    root = ElementTree.fromstring(xml)
+    if root.tag != "{%s}feed" % namespaces["atom"] or root.find('atom:link[@rel="next"]', namespaces) is not None:
+        raise StructureError("Oregon DOT's current listing feed format or pagination changed")
+    rows = []
+    for prop in root.findall(".//m:properties", namespaces):
+        item = {el.tag.split("}", 1)[-1]: clean(el.text) for el in prop}
+        if item.get("Status") != "Active Listing" or item.get("Bid_x0020_Due"):
+            continue
+        description = item.get("Description", "").replace("\u200b", "")
+        acres = re.search(r"\bunimproved\s+([\d,.]+)\s+acres?\b", description, re.I)
+        pin = re.search(r"\b(\d{2}S\d{2}W\d{4})\s+tax lot\s+(\d+)\b", description, re.I)
+        file = item.get("Listing_x0020_Number")
+        if not acres or not pin or not file or not item.get("Address") or not item.get("County"):
+            continue
+        address = re.sub(r"^Land parcel located along\s+", "", item["Address"], flags=re.I)
+        rows.append({
+            "id": "or-odot-" + slug(file), "source": "oregon-dot-property-sales",
+            "title": "%s, %s (ODOT surplus land)" % (address, item["City"]),
+            "state": "OR", "county": item["County"], "locality": item.get("City", ""),
+            "apn": "-".join(pin.groups()), "address": address, "acres": number(acres[1]),
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": OREGON_DOT_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Unimproved land offered by the Oregon Department of Transportation", "="),
+                      fact("sale_number", file, "="), fact("zoning", item.get("Zoning_x0020_type", ""), "="),
+                      fact("sale_terms", "ODOT accepts offers under its standard bid process and may accept or reject any offer.", "=")],
+            "tags": ["state transportation surplus"],
+        })
+    return rows
+
+
+def oregon_dot_property_sales(fetch, now, warn):
+    page = fetch.text(OREGON_DOT_SALES)
+    if "PropSaleCurrentListings" not in page or "Active Listings Using the Standard Bid Process" not in page:
+        raise StructureError("Oregon DOT no longer links its active property sale list")
+    rows = parse_oregon_dot_sales(fetch.text(OREGON_DOT_SALE_LIST))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -7717,8 +7837,20 @@ SOURCES = [
     {"id": "waycross-ga-landbank", "name": "Waycross-Ware Land Bank vacant offers", "agency": "Waycross-Ware County Land Bank Authority",
      "url": WAYCROSS_GA_SALE, "state": "GA", "run": waycross_ga_landbank, "requires_sale_match": True,
      "about": "Vacant parcels actively available in the Land Bank’s separate offers table."},
+    {"id": "huntington-wv-landbank", "name": "Huntington Land Reuse Agency vacant land for sale",
+     "agency": "Huntington Land Reuse Agency", "url": HUNTINGTON_WV_SALES, "state": "WV",
+     "run": huntington_wv_landbank, "requires_sale_match": True,
+     "about": "Vacant lots matched by parcel ID between the city's sale roster and its available property map."},
+    {"id": "oregon-dot-property-sales", "name": "Oregon DOT current surplus land offers",
+     "agency": "Oregon Department of Transportation", "url": OREGON_DOT_SALES, "state": "OR",
+     "run": oregon_dot_property_sales, "requires_sale_match": True,
+     "about": "Unimproved land the state lists for sale through its standard bid process. Appraisals are not listed as prices."},
 ]
 NOT_CARRIED = [
+    ("Sarasota County lands available vendor", "https://sarasota.realtdm.com/public/cases/list",
+     "The vendor returned HTTP 403 for robots.txt."),
+    ("Colorado State Land Board land sales", "https://slb.colorado.gov/land-portfolio/buy-land",
+     "The agency site returned HTTP 403 for robots.txt."),
     ("RTC Washoe sealed-bid document attachments", "https://rtcwashoe.com/property-disposals/",
      "The RTC’s attachment host returned HTTP 403 for robots.txt. The separately published RTC sale terms are carried."),
     ("Rhode Island DOT real property sale catalog", "https://www.dot.ri.gov/business/ridot_property.php",

@@ -16,6 +16,7 @@ import math
 import re
 import urllib.parse
 from collections import Counter, defaultdict
+from zoneinfo import ZoneInfo
 
 from .net import FetchError
 
@@ -222,6 +223,8 @@ def outline_url(listing):
         return one_parcel_url(PARK_CO_STATE_PARCELS, PARK_CO_STATE_MATCH, PARK_CO_STATE_FIELDS)
     if listing["source"] == "windham-ct-surplus" and re.fullmatch(r"\d+(?:-\d+)+", listing["apn"]):
         return one_parcel_url(CT_CAMA_PARCELS, f"Town_Name='Windham' AND Parcel_ID='{listing['apn']}'", "Parcel_ID,Location_1")
+    if listing["source"] == "norwich-ct-city-auction" and re.fullmatch(r"\d{3}-\d{3}-\d{3}\.000-0000", listing["apn"]):
+        return one_parcel_url(CT_CAMA_PARCELS, f"Town_Name='Norwich' AND Parcel_ID='{listing['apn']}'", CT_CAMA_FIELDS)
     if listing["source"] == "wy-osli-sheridan-rfp":
         return SHERIDAN_WY_SALE_MAP
     if listing["source"] == "milford-de-corporate-center" and re.fullmatch(r"5-16-17301-01-\d{4}-00001", listing["apn"]):
@@ -11176,6 +11179,114 @@ CT_CAMA_PARCELS = ("https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/se
                    "Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0/query")
 CT_CAMA_FIELDS = ("Town_Name,Parcel_ID,Parcel_Collection_Year,Location_1,State_Use_Description,Appraised_Land,"
                   "Appraised_Building,Appraised_Outbuilding,Living_Area,Land_Acres")
+NORWICH_CT_SALE = "https://norwichct.gov/589/Auction-of-City-Owned-Property"
+NORWICH_CT_RESOLUTION = "https://norwichct.gov/AgendaCenter/ViewFile/Minutes/_09082026-6997#page=16"
+NORWICH_CT_CUTOFF = datetime.datetime(2026, 12, 4, 10, tzinfo=ZoneInfo("America/New_York"))
+# City Council's September 8 sale resolution (pages 16–17) supplies the exact parcel, area, and zoning.
+# The McKay group has conflicting published areas and no parcel list in the sale resolution.
+NORWICH_CT_PARCELS = {
+    "Baltic Road 2/1/11": ("002-001-011", 0.70, "R80"),
+    "33 West Thames Street": ("109-003-007", 0.98, "MF"),
+    "24-26 Railroad Ave": ("013-001-013", 0.19, "MF"),
+    "125 Talman St": ("110-003-020", 0.62, "MF"),
+    "537 Canterbury Tpke": ("013-001-055", 0.26, "R40"),
+    "29 Sunrise St": ("031-001-021", 0.12, "R40"),
+    "60 Sunrise St": ("031-001-038", 0.09, "R40"),
+    "10 East Pratte Ave": ("047-002-068", 0.35, "R20"),
+    "29 Laporte Dr": ("055-001-045", 0.82, "R20"),
+    "Bolduc Lane 63/1/38": ("063-001-038", 0.18, "GC"),
+    "49 Sturtevant St": ("067-003-014", 0.64, "R20"),
+    "20 Mohegan Rd": ("076-002-017", 1.01, "R40"),
+    "New London Tpke 83/1/54": ("083-001-054", 1.43, "R40"),
+    "32 Lafayette St": ("084-001-063", 0.63, "R20"),
+    "Vine St 85/2/37": ("085-002-037", 0.42, "MF"),
+    "Seventh St 86/3/19": ("086-003-019", 1.58, "MF"),
+    "127 Newton St": ("100-002-015", 0.23, "R20"),
+    "21 Fairmount St": ("101-001-049", 0.44, "MF"),
+    "24 John St": ("101-004-032", 0.39, "MF"),
+    "11 Oak St": ("102-004-003", 0.11, "CC"),
+    "270 West Thames St": ("117-004-056", 0.32, "GC"),
+    "46 Sunnyside Ave": ("118-003-032", 0.11, "R20"),
+    "279 North Main St": ("094-003-039", 0.06, "GC"),
+    "Laurel Hill Rd 131/1/15": ("131-001-015", 0.01, "R20"),
+    "185 Palmer Ext Rear": ("111-001-025", 2.19, "R40"),
+}
+
+
+def norwich_ct_auction(fetch, now, warn):
+    if now >= NORWICH_CT_CUTOFF:
+        return [], {"complete": True, "upstream_total": 0}
+    page = fetch.text(NORWICH_CT_SALE)
+    description = clean(page)
+    if (not re.search(r"DATE OF SALE:\s*December 4, 2026 at 10:00 a\.?m\.?\b", description, re.I)
+            or "PLACE: Norwich City Hall, 100 Broadway, Norwich" not in description
+            or "STARTING BID LIST" not in description):
+        raise StructureError("Norwich auction schedule or sale roster changed")
+    registry = {}
+    for table in re.findall(r"<table\b[^>]*>.*?</table>", page, re.I | re.S):
+        if "Address: Starting Bid: Deposit:" not in clean(table):
+            continue
+        for tr in re.findall(r"<tr\b[^>]*>(.*?)</tr>", table, re.I | re.S):
+            cells = [clean(cell) for cell in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", tr, re.I | re.S)]
+            if not cells or cells == ["Address:", "Starting Bid:", "Deposit:"]:
+                continue
+            if len(cells) != 3 or cells[0] in registry or any(
+                    not re.fullmatch(r"\$\s*[\d,]+\.\d{2}", amount) or not number(amount) for amount in cells[1:]):
+                raise StructureError("Norwich published bid table has an invalid or duplicate row")
+            registry[cells[0]] = cells[1:]
+    if not registry:
+        raise StructureError("Norwich auction bid table was not read")
+
+    eligible = {name: NORWICH_CT_PARCELS[name] for name in registry if name in NORWICH_CT_PARCELS}
+    if not eligible:
+        return [], {"complete": True, "upstream_total": len(registry)}
+    pins = [mbl + ".000-0000" for mbl, _, _ in eligible.values()]
+    where = f"Town_Name='Norwich' AND Parcel_ID IN ({quote_list(pins)})"
+    features = _arcgis_query(fetch, CT_CAMA_PARCELS, where, CT_CAMA_FIELDS, count=len(pins) + 1, post=True)
+    by_pin = {item["attributes"].get("Parcel_ID"): item for item in features}
+    if len(by_pin) != len(features):
+        raise StructureError("Connecticut assessment data repeats a Norwich parcel")
+
+    rows = []
+    for name, (mbl, acres, zoning) in eligible.items():
+        pin = mbl + ".000-0000"
+        feature = by_pin.get(pin, {})
+        attr = feature.get("attributes", {})
+        if (attr.get("Town_Name") != "Norwich" or clean(attr.get("Parcel_Collection_Year")) != "2026"
+                or not number(attr.get("Appraised_Land")) or attr.get("Appraised_Building") != 0
+                or attr.get("Appraised_Outbuilding") != 0 or attr.get("Living_Area") not in (None, 0)):
+            warn(f"Norwich withheld {mbl} pending a current vacant-land assessment match")
+            continue
+        price, deposit = registry[name]
+        address = re.sub(r"\s+\d+/\d+/\d+$", "", name)
+        assessor = one_parcel_url(CT_CAMA_PARCELS, f"Town_Name='Norwich' AND Parcel_ID='{pin}'", CT_CAMA_FIELDS)
+        row = {
+            "id": f"ct-norwich-city-{mbl}", "source": "norwich-ct-city-auction",
+            "title": f"{address}, Norwich (city vacant land auction)", "state": "CT",
+            "county": "Southeastern Connecticut Planning Region",
+            "locality": "Norwich", "apn": pin, "address": address, "acres": acres, "price": number(price),
+            "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+            "deadline": NORWICH_CT_CUTOFF.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "lat": None, "lon": None, "geometry": None, "url": NORWICH_CT_SALE,
+            "facts": [fact("auction_start", "December 4, 2026 at 10:00 a.m. Eastern, Norwich City Hall", "="),
+                      fact("bid_deposit", f"{deposit.replace(' ', '')} by bank or certified check", "="),
+                      fact("parcel_map", f"City Map/Block/Lot {mbl.replace('-', '/')} · {acres:g} approximate acres",
+                           NORWICH_CT_RESOLUTION),
+                      fact("zoning", zoning, NORWICH_CT_RESOLUTION),
+                      fact("land_use", "2026 assessment reports zero building and outbuilding value.", assessor)],
+            "tags": ["vacant land", "municipal property auction"],
+        }
+        rings = (feature.get("geometry") or {}).get("rings", [])
+        mapped_acres = rings_acres(rings) if rings else None
+        if mapped_acres and abs(mapped_acres - acres) > max(0.02, 0.25 * acres):
+            row["facts"].append(fact("acreage_note", f"The city lists {acres:g} approximate acres. The state GIS outline "
+                                     f"encloses {mapped_acres:.3g} acres. Confirm the sale boundary with the city.", assessor))
+        else:
+            apply_geometry(row, rings, CT_CAMA_PARCELS, "Connecticut GIS Office")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(registry)}
+
+
 SUFFIELD_CT_ASSESSOR = "https://suffield.mapxpress.net/ags_map/detail_AGS.asp?UNIQUE_ID="
 SUFFIELD_CT_AUCTIONS = {
     "10 METACOMET LANE": ("See Suffield Assessor Map 6 Block 11 Lot 58-B-2", (("6-11-58-B-2", "R92117"),)),
@@ -12400,6 +12511,10 @@ SOURCES = [
      "agency": "Participating Connecticut Municipal Tax Collectors", "url": CT_MUNICIPAL_TAX_SALE, "state": "CT",
      "run": ct_municipal_tax_sales, "requires_sale_match": True, "timezone": "America/New_York",
      "about": "Current municipal auction notices from the towns’ appointed administrator, matched to state and available local assessment records."},
+    {"id": "norwich-ct-city-auction", "name": "Norwich city vacant property auction",
+     "agency": "City of Norwich Tax Collector, Connecticut", "url": NORWICH_CT_SALE, "state": "CT",
+     "run": norwich_ct_auction, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Published minimum bids, cross-checked with the City Council resolution and state vacant-land assessment records."},
     {"id": "jefferson-tx-sheriff-deed", "name": "Jefferson County Sheriff vacant land tax deeds",
      "agency": "Jefferson County Sheriff, Texas", "url": JEFFERSON_TX_SALE, "state": "TX",
      "run": jefferson_tx_sheriff_sale, "requires_sale_match": True, "timezone": "America/Chicago",

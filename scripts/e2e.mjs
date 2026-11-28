@@ -415,6 +415,10 @@ try {
       const bar = document.querySelector(".mobile-land-agent"), links = document.querySelector(".dossier-metrics .benchmark-pill");
       return bar && getComputedStyle(bar).position === "fixed" && bar.getBoundingClientRect().right <= 375 && !!links;
     })()`), "mobile acquisition bar or county benchmark pill missing");
+    await page.goto(base + "/services/#start-land-agent");
+    await page.waitFor("document.getElementById('start-land-agent').getBoundingClientRect().top < innerHeight");
+    assert(await page.eval("document.getElementById('start-land-agent').getBoundingClientRect().top >= document.querySelector('header').getBoundingClientRect().bottom"),
+      "sticky navigation obscures the Land Agent form heading");
     assert(!bad.length, bad.join("; "));
   });
   await step("zero site console errors", async () => {

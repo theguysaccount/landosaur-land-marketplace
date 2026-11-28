@@ -1241,6 +1241,7 @@ footer p { margin: 0 0 9px; }
 .acquisition-brief { grid-column: 1 / -1; margin-top: 0; }
 .acquisition-brief h3 { margin-top: 0; }
 .brief-target { font-weight: 650; overflow-wrap: anywhere; }
+#start-land-agent, #track-order { scroll-margin-top: 5.5rem; }
 .order-progress {
   padding: 0;
   margin: 1rem 0;
@@ -1267,6 +1268,7 @@ footer p { margin: 0 0 9px; }
 .mobile-land-agent { display: none; }
 
 @media (max-width: 680px) {
+  #start-land-agent, #track-order { scroll-margin-top: 11rem; }
   .order-progress { grid-template-columns: 1fr; }
   .order-progress li { grid-template-columns: minmax(0, 1fr) auto; }
   .mobile-land-agent {

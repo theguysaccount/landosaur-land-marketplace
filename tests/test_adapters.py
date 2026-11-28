@@ -2011,6 +2011,40 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             self.assertEqual(adapters.huachuca_az_monterey_place(
                 fetch, datetime.datetime(2026, 12, 3, 22, tzinfo=datetime.timezone.utc), self.fail)[0], [])
 
+    def test_norwich_joins_current_city_bids_and_assessment_and_withholds_conflicting_outlines(self):
+        fetch = unittest.mock.Mock()
+        lots = [("Baltic Road 2/1/11", "45,300", "4,530"), ("33 West Thames Street", "109,100", "10,910"),
+                ("29 Sunrise St", "2,800", "280"), ("McKay St area", "476,800", "47,680")]
+        fetch.text.return_value = (
+            "<h1>Auction of City-Owned Property</h1><p>DATE OF SALE: December 4, 2026 at 10:00 am</p>"
+            "<p>PLACE: Norwich City Hall, 100 Broadway, Norwich</p><p>STARTING BID LIST</p>"
+            "<table><tr><th>Address:</th><th>Starting Bid:</th><th>Deposit:</th></tr>"
+            + "".join(f"<tr><td>{name}</td><td>$ {price}.00</td><td>$ {deposit}.00</td></tr>"
+                      for name, price, deposit in lots) + "</table>")
+        ring = [[-72.1, 41.55], [-72.1, 41.5505], [-72.0994, 41.5505], [-72.0994, 41.55], [-72.1, 41.55]]
+
+        def assessment(pin, building):
+            return {"attributes": {"Town_Name": "Norwich", "Parcel_ID": pin + ".000-0000",
+                                   "Parcel_Collection_Year": "2026", "Appraised_Land": 45000,
+                                   "Appraised_Building": building, "Appraised_Outbuilding": 0, "Living_Area": 0},
+                    "geometry": {"rings": [ring]}}
+
+        fetch.json.return_value = {"features": [assessment("002-001-011", 0), assessment("109-003-007", 0),
+                                                assessment("031-001-021", 1)]}
+        with patch.object(adapters, "rings_acres", side_effect=[0.70, 0.24]):
+            notes = []
+            rows, info = adapters.norwich_ct_auction(fetch, NOW, notes.append)
+        baltic, thames = rows
+        self.assertEqual(info, {"complete": True, "upstream_total": 4})
+        self.assertEqual((baltic["apn"], baltic["price"], baltic["acres"], baltic["deadline"]),
+                         ("002-001-011.000-0000", 45300, 0.70, "2026-12-04T15:00:00Z"))
+        self.assertTrue(baltic["geometry"])
+        self.assertIsNone(thames["geometry"])
+        self.assertIn("0.24 acres", next(fact["value"] for fact in thames["facts"] if fact["topic"] == "acreage_note"))
+        self.assertIn("031-001-021", notes[0])
+        self.assertNotIn("Owner", fetch.json.call_args.kwargs["form"]["outFields"])
+        self.assertEqual(adapters.norwich_ct_auction(fetch, adapters.NORWICH_CT_CUTOFF, self.fail)[0], [])
+
     def test_sheridan_publishes_one_current_proposal_after_matching_both_vacant_tracts(self):
         from lando.adapters import SHERIDAN_WY_AGENCY, SHERIDAN_WY_CLOSE, SHERIDAN_WY_OPEN, SHERIDAN_WY_TERMS
 

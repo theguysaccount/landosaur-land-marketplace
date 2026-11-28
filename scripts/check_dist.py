@@ -61,7 +61,7 @@ OFFICIAL = {
     "toddcountymn.gov", "jacksoncountyohlandbank.org", "knoxadf.com", "chesterfieldtwp.org", "windhamct.gov", "renvillecountymn.gov",
     "fcidc.com", "loraincountyauditor.gov", "kcgov.us", "claremontnh.com", "providenceri.gov", "cityoflidgerwoodnd.com", "centerville-ia.org",
     "cityofatlantic.com", "cityofclintoniowa.gov", "nevadacountyca.gov", "lands.wyo.gov", "growinmilford.com", "idahofallsidaho.gov",
-    "huachucacityaz.gov",
+    "huachucacityaz.gov", "norwichct.gov",
     "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us", "hokecounty.net", "wsdot.wa.gov", "itascacountymn.gov", "valencia.nm.us", "tax.newmexico.gov", "stlouiscountymn.gov", "fnsb.gov",
 }
 

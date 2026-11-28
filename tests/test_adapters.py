@@ -1072,6 +1072,29 @@ Zoning R-1 Single Family Residential
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
 
+    def test_metro_atlanta_matches_current_vacant_brochures_to_official_parcels(self):
+        root = "https://metroatlantalandbank.org/wp-content/uploads/2024/08/"
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = '<h2>Simple Vacant Lots Available For Purchase</h2>' + ''.join(
+            f'<a href="{root}{name}.pdf">View Lot</a>' for name in ("open", "inconsistent", "image-only"))
+        sales = {"open.pdf": "Vacant Lot For Sale\nParcel ID#: 14 0040  LL0061\nApplication fee: $100",
+                 "inconsistent.pdf": "Vacant Lot For Sale\nParcel ID#: 14 006700050493\n", "image-only.pdf": ""}
+        rings = [[[-84.4, 33.7], [-84.4, 33.701], [-84.399, 33.7], [-84.4, 33.7]]]
+
+        def official_record(pin, units):
+            return {"attributes": {"ParcelID": pin, "Address": "0 LIVERMORE ST SE", "LandAcres": .61,
+                                   "TaxYear": 2026, "LivUnits": units, "ClassCode": "E1", "LUCode": "600"},
+                    "geometry": {"rings": rings}}
+
+        features = [official_record("14 0040  LL0061", 0), official_record("14 006700050493", 1)]
+        with patch.object(adapters, "pdf_text", side_effect=lambda fetch, url: sales[url.rsplit("/", 1)[-1]]), \
+                patch.object(adapters, "arcgis_query", return_value=("https://example.com/gis", features)) as gis:
+            rows, info = adapters.metro_atlanta_landbank(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["apn"], row["acres"], row["price"]), (3, "14 0040  LL0061", .61, None))
+        self.assertTrue(row["geometry"])
+        self.assertNotIn("Owner", gis.call_args.args[3])
+
     def test_denali_uses_the_current_count_and_the_linked_purchase_prices(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = (

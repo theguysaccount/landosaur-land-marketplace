@@ -9165,7 +9165,81 @@ def denali_ak_land(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": total}
 
 
+METRO_ATLANTA_LAND = "https://metroatlantalandbank.org/fee-simple-vacant-lots/"
+METRO_ATLANTA_PARCELS = "https://services.arcgis.com/04HiymDgLlsbhaV4/arcgis/rest/services/COA_Parcels_AddressPoints/FeatureServer/2/query"
+
+
+def metro_atlanta_landbank(fetch, now, warn):
+    from concurrent.futures import ThreadPoolExecutor
+
+    page = fetch.text(METRO_ATLANTA_LAND)
+    if "Simple Vacant Lots Available For Purchase" not in clean(page):
+        raise StructureError("Metro Atlanta Land Bank’s sale section changed")
+    urls = list(dict.fromkeys(
+        url for url, label in re.findall(r'<a\b[^>]*href="([^"]+\.pdf)"[^>]*>(.*?)</a>', page, re.I | re.S)
+        if clean(label).lower() == "view lot"
+        and re.fullmatch(r"https://metroatlantalandbank\.org/wp-content/uploads/\d{4}/\d{2}/[A-Za-z0-9-]+\.pdf", url)
+    ))
+    if not urls:
+        raise StructureError("Metro Atlanta Land Bank’s vacant lot brochures are missing")
+
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        texts = list(workers.map(lambda url: pdf_text(fetch, url), urls))
+    offers = {}
+    for url, text in zip(urls, texts):
+        if not re.search(r"\bVacant Lot For Sale\b", clean(text), re.I):
+            continue
+        identifier = re.search(r"^[ \t]*Parcel ID#?:[ \t]*([0-9A-Z ]+?)[ \t]*$", text, re.I | re.M)
+        pin = identifier[1].strip() if identifier else ""
+        if not re.fullmatch(r"\d{2}[A-Z]?\d{12}|\d{6}LL\d{4}", re.sub(r"\s+", "", pin)):
+            continue
+        if pin in offers:
+            raise StructureError("Metro Atlanta Land Bank’s brochures repeat a parcel")
+        offers[pin] = url
+    if not offers:
+        raise StructureError("No official lot brochures contain vacant sale and parcel records")
+
+    where = ("TaxYear=2026 AND UPPER(Owner) LIKE 'FULTON COUNTY%ATLANTA%LAND BANK AUTHORITY%' "
+             f"AND ParcelID IN ({quote_list(offers)})")
+    gis_url, features = arcgis_query(fetch, METRO_ATLANTA_PARCELS, where,
+                                    "ParcelID,Address,TaxYear,LandAcres,LivUnits,ClassCode,LUCode")
+    counts = Counter(feature["attributes"].get("ParcelID") for feature in features)
+    rows = []
+    for feature in features:
+        parcel = feature["attributes"]
+        pin = parcel.get("ParcelID")
+        area = number(parcel.get("LandAcres"))
+        street = clean(parcel.get("Address"))
+        if (pin not in offers or counts[pin] != 1 or not area or not street or parcel.get("TaxYear") != 2026
+                or parcel.get("LivUnits") != 0 or parcel.get("ClassCode") != "E1"
+                or parcel.get("LUCode") not in {"600", "699"}):
+            continue
+        url = offers[pin]
+        row = {
+            "id": "ga-malb-" + re.sub(r"\s+", "", pin).lower(), "source": "metro-atlanta-landbank",
+            "title": f"{street.title()}, Atlanta (Land Bank vacant lot {pin})", "state": "GA", "county": "Fulton",
+            "locality": "Atlanta", "address": street.title(), "apn": pin, "acres": area, "price": None, "price_kind": "none",
+            "offering": "offer", "status": "listed", "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [
+                fact("availability", "Vacant lot offered through the land bank’s fee-simple purchase program.", METRO_ATLANTA_LAND),
+                fact("parcel_number", pin, url),
+                fact("acreage", f"{area:g} acres in the 2026 parcel roll", gis_url),
+                fact("sale_terms", "See the land bank’s current purchase policy and property-specific development terms.", METRO_ATLANTA_LAND),
+            ],
+            "tags": ["land bank", "development land"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), gis_url, "Atlanta parcel GIS")
+        if row["geometry"]:
+            row["facts"][-1]["url"] = gis_url
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(urls)}
+
+
 SOURCES = [
+    {"id": "metro-atlanta-landbank", "name": "Metro Atlanta Land Bank fee-simple vacant lots",
+     "agency": "Metro Atlanta Land Bank Authority", "url": METRO_ATLANTA_LAND, "state": "GA",
+     "run": metro_atlanta_landbank, "requires_sale_match": True,
+     "about": "Vacant purchase-application properties from the land bank’s fee-simple program, matched to official Atlanta parcel data."},
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
      "about": "City-owned vacant lots marked available in the city's open-data exports. Eligible Side Lot Program properties have an official application price."},

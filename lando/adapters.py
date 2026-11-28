@@ -899,6 +899,94 @@ def alaska_university_otc(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(roster)}
 
 
+KETCHIKAN_LAND = "https://www.kgbak.us/653/Borough-Properties-Lands-for-Sale"
+KETCHIKAN_LIST_PATH = "/DocumentCenter/View/12598/Land-for-Sale"
+KETCHIKAN_BROKER = "https://alpinerealestateak.com/land/"
+KETCHIKAN_PARCELS = ("https://services2.arcgis.com/65jtiGuzdaRB5FxF/arcgis/rest/services/"
+                     "Parcel_Ketchikan/FeatureServer/0/query")
+
+
+def parse_ketchikan_roster(report):
+    if not all(heading in report for heading in ("BOROUGH LAND SALES", "Real Estate Listed Properties", "List Price")):
+        raise StructureError("Ketchikan’s current surplus land roster changed")
+    rows = {}
+    for m in re.finditer(r"^\s*(\d{12})[ \t]+[\d,]+[ \t]+([\d.]+)[ \t]+Betton View, Lot (\d+)[ \t]+(\w+)"
+                         r"[ \t]+\$([\d,]+)[ \t]*$", report, re.M):
+        pin, acres, lot, zoning, price = m.groups()
+        if pin in rows:
+            raise StructureError("Ketchikan’s current surplus land roster repeats a parcel")
+        rows[pin] = (number(acres), lot, zoning, number(price))
+    return rows
+
+
+def parse_ketchikan_broker(page):
+    cards = re.findall(r"<mbb-property-item\b([^>]*)>(.*?)</mbb-property-item>", page, re.S)
+    if not cards:
+        raise StructureError("Ketchikan’s authorized broker inventory changed")
+    rows = {}
+    for attrs, card in cards:
+        status = re.search(r'data-field="property-status"[^>]*>\s*Active\s*<', card)
+        broker = "Alpine Real Estate" in card
+        surplus = "surplus lands by the Ketchikan Gateway Borough" in clean(card)
+        lot = re.search(r"\bLot (\d+) hosts [\d,]+ SF or [\d.]+ acres of wooded undeveloped land\b", clean(card))
+        price = re.search(r'data-field="price"[^>]*>\s*\$([\d,.]+)(m|k)?\s*<', card)
+        link = re.search(r'data-url="(/listing-details/ak3_\d+--[a-zA-Z0-9-]+/)"', attrs)
+        if not status or not broker or not surplus or not lot or not price or not link:
+            continue
+        amount = number(price[1])
+        if not amount:
+            continue
+        if lot[1] in rows:
+            raise StructureError("Ketchikan’s authorized broker repeats an active lot")
+        rows[lot[1]] = round(amount * {None: 1, "k": 1000, "m": 1000000}[price[2]]), link[1]
+    return rows
+
+
+def alaska_ketchikan_surplus(fetch, now, warn):
+    page = fetch.text(KETCHIKAN_LAND)
+    if "Borough Properties & Lands for Sale" not in clean(page):
+        raise StructureError("Ketchikan’s surplus land directory changed")
+    if f'href="{KETCHIKAN_LIST_PATH}"' not in page or "www.alpinerealestateak.com" not in page:
+        return [], {"complete": True, "upstream_total": 0}
+    report_url = urllib.parse.urljoin(KETCHIKAN_LAND, KETCHIKAN_LIST_PATH)
+    roster = parse_ketchikan_roster(pdf_text(fetch, report_url))
+    if not roster:
+        return [], {"complete": True, "upstream_total": 0}
+    broker = parse_ketchikan_broker(fetch.text(KETCHIKAN_BROKER))
+    where = "Parcel_Num IN (%s) AND UPPER(Owner_Name) LIKE '%%KETCHIKAN%%GATEWAY%%BOROUGH%%'" % quote_list(roster)
+    fields = "Parcel_Num,PropUse,Apr_Imps,Apr_Land_V,Total_Appr,No_Units,Year_Built,Total_Area,Asse_Year1,Apr_Imps1"
+    features = _arcgis_query(fetch, KETCHIKAN_PARCELS, where, fields)
+    seen = Counter(f["attributes"].get("Parcel_Num") for f in features)
+    rows = []
+    for feature in features:
+        item = feature["attributes"]
+        pin = item.get("Parcel_Num")
+        if (pin not in roster or seen[pin] != 1 or item.get("PropUse") != "VACANT"
+                or any(item.get(field) != 0 for field in ("Apr_Imps", "No_Units", "Year_Built", "Total_Area", "Apr_Imps1"))
+                or not number(item.get("Apr_Land_V")) or item.get("Apr_Land_V") != item.get("Total_Appr")
+                or item.get("Asse_Year1") != now.year):
+            continue
+        acres, lot, zoning, price = roster[pin]
+        published = broker.get(lot)
+        if not acres or not price or not published or published[0] != price:
+            continue
+        row = {
+            "id": "ak-ketchikan-betton-" + pin, "source": "ketchikan-ak-surplus-land",
+            "title": f"Betton View Lot {lot} (Ketchikan Gateway Borough land)", "state": "AK",
+            "county": "Ketchikan Gateway", "locality": "Ketchikan", "apn": pin, "address": f"Betton View, Lot {lot}",
+            "acres": acres, "price": price, "price_kind": "asking", "offering": "sale", "status": "listed",
+            "deadline": None, "url": report_url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Current vacant surplus lot marketed through the borough’s appointed broker.",
+                           urllib.parse.urljoin(KETCHIKAN_BROKER, published[1])),
+                      fact("zoning", zoning, "=")],
+            "tags": ["borough surplus land", "waterfront"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), KETCHIKAN_PARCELS,
+                       "Ketchikan Gateway Borough")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
 # ------------------------------------------------------------------------------------------- Detroit Land Bank (MI)
 
 DLBA_GIS = "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/DLBA_Owned_Properties/FeatureServer/0/query"
@@ -9689,6 +9777,10 @@ def fulton_ga_tax_deed(fetch, now, warn):
 
 
 SOURCES = [
+    {"id": "ketchikan-ak-surplus-land", "name": "Ketchikan Gateway Borough vacant surplus land",
+     "agency": "Ketchikan Gateway Borough, Alaska", "url": KETCHIKAN_LAND, "state": "AK",
+     "run": alaska_ketchikan_surplus, "requires_sale_match": True,
+     "about": "Borough-owned vacant sale tracts with a current agency price, matching broker status and borough GIS boundary."},
     {"id": "ua-ak-otc-land", "name": "University of Alaska over-the-counter land",
      "agency": "University of Alaska Land Management", "url": UA_LAND, "state": "AK",
      "run": alaska_university_otc, "requires_sale_match": True,

@@ -45,6 +45,32 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_ketchikan_requires_borough_roster_broker_and_vacant_assessment(self):
+        fetch = unittest.mock.Mock()
+        borough = f'Borough Properties &amp; Lands for Sale <a href="{adapters.KETCHIKAN_LIST_PATH}">List</a> www.alpinerealestateak.com'
+        broker = (
+            '<mbb-property-item data-id="ak3_25295" data-url="/listing-details/ak3_25295--Lot-7/">'
+            '<span data-field="property-status">Active</span><span data-field="price">$1.148m</span>'
+            'Lot 7 hosts 337,702 SF or 7.75 acres of wooded undeveloped land. '
+            'Sold as surplus lands by the Ketchikan Gateway Borough. Alpine Real Estate'
+            '</mbb-property-item>'
+        )
+        fetch.text.side_effect = {adapters.KETCHIKAN_LAND: borough, adapters.KETCHIKAN_BROKER: broker}.__getitem__
+        roster = ("BOROUGH LAND SALES\nReal Estate Listed Properties\nList Price\n"
+                  "313710002600 337,702 7.750 Betton View, Lot 7 RS $1,148,000\n")
+        assessor = {"attributes": {"Parcel_Num": "313710002600", "PropUse": "VACANT", "Apr_Imps": 0, "Apr_Imps1": 0,
+                                   "Apr_Land_V": 579600, "Total_Appr": 579600, "Year_Built": 0, "No_Units": 0,
+                                   "Total_Area": 0, "Asse_Year1": 2026}}
+        with patch.object(adapters, "pdf_text", return_value=roster):
+            with patch.object(adapters, "_arcgis_query", return_value=[assessor]) as query:
+                rows, _ = adapters.alaska_ketchikan_surplus(fetch, NOW, self.fail)
+                row, = rows
+                self.assertEqual((row["apn"], row["price"], row["acres"]), ("313710002600", 1148000, 7.75))
+                self.assertNotIn("Owner_Name", query.call_args.args[3])
+                assessor["attributes"]["Apr_Imps"] = 100
+                self.assertEqual(adapters.alaska_ketchikan_surplus(fetch, NOW, self.fail)[0], [])
+        self.assertEqual(adapters.parse_ketchikan_broker(broker.replace(">Active<", ">Under Contract<")), {})
+
     def test_alaska_university_matches_active_land_offers_to_current_details(self):
         header = "parcel_number ,name,location,sale_type,acres,price,parcel_page,land_sale_lease,land_status\n"
         base = "CB.SS.0001,Silver Springs Terrace,Silver Springs,Over-The-Counter Land Sale Program,1.99,45000,"

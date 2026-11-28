@@ -10242,13 +10242,19 @@ def firstpark_me_lots(fetch, now, warn):
             raise StructureError("FirstPark’s official lot detail address changed")
         seen.add(lot[1])
         url = urllib.parse.urljoin(FIRSTPARK_ME, path)
-        detail = clean(fetch.text(url))
-        if not re.search(rf"\bFirstPark Lot {lot[1]}\b", detail) or "For Sale or Build to Suit" not in detail:
+        detail = fetch.text(url)
+        description = clean(detail)
+        if not re.search(rf"\bFirstPark Lot {lot[1]}\b", description) or "For Sale or Build to Suit" not in description:
             continue
+        values = re.findall(r'<div class="fp-lot-spec-label">\s*Price\s*</div>\s*'
+                            r'<div class="fp-lot-spec-value">(.*?)</div>', detail, re.S)
+        amount = clean(values[0]) if len(values) == 1 else ""
+        price = number(amount) if re.fullmatch(r"\$(?:[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)(?:\.\d{2})?", amount) else None
         rows.append({
             "id": "me-firstpark-lot-" + lot_number, "source": "firstpark-me-lots",
             "title": f"FirstPark lot {lot[1]} (Oakland business park)", "state": "ME", "county": "Kennebec",
-            "locality": "Oakland", "address": road, "acres": acres, "price": None, "price_kind": "none",
+            "locality": "Oakland", "address": road, "acres": acres, "price": price,
+            "price_kind": "asking" if price is not None else "none",
             "offering": "offer", "status": "listed", "deadline": None, "url": url,
             "lat": None, "lon": None, "geometry": None,
             "facts": [
@@ -12613,7 +12619,7 @@ SOURCES = [
     {"id": "firstpark-me-lots", "name": "FirstPark vacant business park lots",
      "agency": "Kennebec Regional Development Authority, Maine", "url": FIRSTPARK_ME, "state": "ME",
      "run": firstpark_me_lots, "requires_sale_match": True,
-     "about": "Available development lots from the authority’s current lot map with published total and buildable acreage."},
+     "about": "Available development lots from the authority’s current lot map with published asking prices and total and buildable acreage."},
     {"id": "hampden-me-business-park", "name": "Hampden municipal business park lots",
      "agency": "Town of Hampden, Maine", "url": HAMPDEN_ME_PARK, "state": "ME",
      "run": hampden_me_business_park, "requires_sale_match": True,

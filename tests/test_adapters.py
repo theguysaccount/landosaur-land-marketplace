@@ -1931,15 +1931,21 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
 
         directory = adapters.FIRSTPARK_ME
         fetch = unittest.mock.Mock()
+        price_label = '<div class="fp-lot-spec-label">Price</div>'
         fetch.text.side_effect = {
-            directory: lot_marker(4, "available") + lot_marker(5, "available") + lot_marker(6, "sold"),
-            directory + "firstpark-lot-4/": "<h1>FirstPark Lot 4</h1><p>For Sale or Build to Suit</p>",
+            directory: (lot_marker(4, "available") + lot_marker(5, "available")
+                        + lot_marker(6, "sold") + lot_marker(7, "available")),
+            directory + "firstpark-lot-4/": ("<h1>FirstPark Lot 4</h1><p>For Sale or Build to Suit</p>"
+                                            + price_label + '<div class="fp-lot-spec-value">$108,000</div>'),
             directory + "firstpark-lot-5/": "<h1>FirstPark Lot 50</h1><p>For Sale or Build to Suit</p>",
+            directory + "firstpark-lot-7/": ("<h1>FirstPark Lot 7</h1><p>For Sale or Build to Suit</p>"
+                                            + price_label + '<div class="fp-lot-spec-value">$5,000 annually</div>'),
         }.__getitem__
         rows, info = adapters.firstpark_me_lots(fetch, NOW, self.fail)
-        row, = rows
-        self.assertEqual((info["upstream_total"], row["id"], row["acres"], row["price"]),
-                         (3, "me-firstpark-lot-4", 10.4, None))
+        row, unpriced = rows
+        self.assertEqual((info["upstream_total"], row["id"], row["acres"], row["price"], row["price_kind"]),
+                         (4, "me-firstpark-lot-4", 10.4, 108000, "asking"))
+        self.assertIsNone(unpriced["price"])
         self.assertIn("5.4 buildable acres in the authority’s lot directory",
                       [fact["value"] for fact in row["facts"]])
         self.assertIsNone(row["geometry"])

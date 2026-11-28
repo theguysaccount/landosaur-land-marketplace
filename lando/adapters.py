@@ -123,7 +123,7 @@ NOTES = {  # long notes repeated on many listings are stored by key and expanded
     "auburn_me": "Unimproved municipal land parcel (undeveloped, commercial, industrial, or house-lot land) in City of Auburn GIS. Confirm tax-acquired or surplus sale status on auburnmaine.gov.",
     "portland_me": "Municipal land bank / vacant land parcel published in City of Portland, Maine GIS. Confirm surplus sale or redevelopment RFP availability on portlandmaine.gov.",
     "philly_lb": "Vacant land parcel held by the Philadelphia Land Bank in official City of Philadelphia Open Data GIS (OPA / L&I Vacant Indicators). Confirm side-lot, competitive-sale, or development application terms on phdcphila.org.",
-    "cleveland_lb": "Vacant land bank parcel held by the City of Cleveland Land Bank in Cleveland Open Data GIS. Confirm side-yard, new-construction, or commercial disposition rules on clevelandohio.gov.",
+    "cleveland_lb": "The city’s application map identifies this vacant parcel for a purchase program. Apply through the city and confirm project eligibility and terms.",
     "dallas_lb": "Unimproved vacant land parcel in the City of Dallas Land Bank GIS inventory (LAND ONLY class). Confirm current lot availability, housing/development covenants, and purchase process on dallascityhall.com.",
     "milwaukee_vac": "Actively advertised City of Milwaukee Department of City Development vacant lot (Status: Acquired / Advertised / Dispose) in Milwaukee GIS. Confirm purchase price, side-lot discount, or proposal rules on city.milwaukee.gov.",
     "detroit_comm": "Actively listed City of Detroit vacant land parcel with published asking price in Detroit Open Data GIS. Confirm deed covenants, zoning, and purchase terms on detroitmi.gov.",
@@ -159,6 +159,9 @@ def expand_url(listing, url):
 
 
 def outline_url(listing):
+    if (listing["source"] == "cleveland-landbank" and listing["status"] == "proposal_open"
+            and re.fullmatch(r"\d{8}", listing["apn"])):
+        return one_parcel_url(CLEVELAND_LB_GIS, f"parcelpin='{listing['apn']}'", "parcelpin,parcel_acreage")
     if listing["source"] == "st-louis-lra":
         return one_parcel_url(STL_GIS, "ParcelId='%s'" % listing["apn"])
     if listing["source"] == "arkansas-cosl":
@@ -4800,58 +4803,104 @@ def philly_landbank(fetch, now, warn):
 
 
 # --- City of Cleveland Land Bank (OH) ---
-CLEVELAND_LB_GIS = "https://services3.arcgis.com/dty2kHktVXHrqO8i/arcgis/rest/services/City_Landbank/FeatureServer/0/query"
-CLEVELAND_LB_URL = "https://www.clevelandohio.gov/city-hall/departments/community-development/divisions/land-bank"
+CLEVELAND_LB_GIS = ("https://services3.arcgis.com/dty2kHktVXHrqO8i/arcgis/rest/services/"
+                    "Land_Bank_Application_Layer_V2/FeatureServer/0/query")
+CLEVELAND_LB_URL = "https://www.clevelandohio.gov/city-hall/departments/economic-development/land-bank"
+CLEVELAND_LB_PORTAL = "https://experience.arcgis.com/experience/f66836b717fc43feaf78ff1ec69db22d/"
+CLEVELAND_LB_APP = ("https://www.arcgis.com/sharing/rest/content/items/f66836b717fc43feaf78ff1ec69db22d"
+                    "/resources/config/config.json")
+CLEVELAND_LB_MAP = "https://www.arcgis.com/sharing/rest/content/items/79a5886894ee4c03a5908e79fcec5e50/data?f=json"
+CLEVELAND_LB_DEVELOPMENT = "(FinalUse IN ('123F','COM','IND','MF','TOD')) OR (FinalUse IS NULL)"
+CLEVELAND_LB_YARD = "(FinalUse = 'SY') OR (FinalUse IS NULL)"
+CLEVELAND_LB_WARDS = "Ward_2026 NOT IN ('7')"
+CLEVELAND_LB_USE = {None: "Development or yard expansion", "SY": "Yard expansion",
+                    "123F": "Residential development", "COM": "Commercial development",
+                    "IND": "Industrial development", "MF": "Multifamily development",
+                    "TOD": "Transit-oriented development"}
+CLEVELAND_LB_IMPROVEMENTS = ("res_bldg_count", "com_bldg_count", "gross_certified_building",
+                             "certified_exempt_building", "tax_assessed_improvement")
+CLEVELAND_LB_FIELDS = ("OBJECTID,parcelpin,par_addr_all,parcel_acreage,parcel_type,FinalUse,"
+                       "Ward_2026,landBankHoldAreas,AvailabilityStatus," + ",".join(CLEVELAND_LB_IMPROVEMENTS))
 
 
-def parse_cleveland_lb_features(features, warn):
-    out, seen = [], set()
+def parse_cleveland_lb_features(features):
+    counts = Counter((feature.get("attributes") or {}).get("parcelpin") for feature in features)
+    rows = []
     for f in features:
         a = f.get("attributes") or {}
-        pin = clean(str(a.get("parcelpin") or a.get("OBJECTID") or ""))
-        if not pin or pin in seen:
+        pin = a.get("parcelpin")
+        use = a.get("FinalUse")
+        if (not isinstance(pin, str) or not re.fullmatch(r"\d{8}", pin) or counts[pin] != 1
+                or use not in CLEVELAND_LB_USE or a.get("parcel_type") != "LAND"
+                or a.get("Ward_2026") in (None, "", "7") or a.get("landBankHoldAreas") is not None
+                or a.get("AvailabilityStatus") not in (None, "Available")
+                or any(a.get(field) != 0 for field in CLEVELAND_LB_IMPROVEMENTS)):
             continue
-        seen.add(pin)
-        raw_addr = clean(str(a.get("par_addr_all") or ""))
-        addr = raw_addr.split(",")[0].strip().title() if raw_addr else ""
+        addr = clean(a.get("par_addr_all", "")).split(",")[0].strip().title()
         if addr.startswith("0 "):
             addr = addr[2:].strip()
-        lb_type = clean(str(a.get("cityLandBankType") or "Vacant Land"))
         rings = (f.get("geometry") or {}).get("rings") or []
-        acres = rings_acres(rings) if rings else None
         facts = [
-            fact("availability", "City of Cleveland Land Bank (%s)" % lb_type, CLEVELAND_LB_URL, "cleveland_lb"),
-            fact("parcel_number", pin, CLEVELAND_LB_URL),
+            fact("availability", "Cleveland Land Bank purchase applications: " + CLEVELAND_LB_USE[use],
+                 CLEVELAND_LB_PORTAL, "cleveland_lb"),
+            fact("parcel_number", pin, "="),
         ]
-        if acres:
-            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, CLEVELAND_LB_URL, "gis_area"))
-        front = number(a.get("total_legal_front"))
-        if front:
-            facts.append(fact("frontage", "%g ft" % round(front, 1), CLEVELAND_LB_URL))
+        acres = number(a.get("parcel_acreage"))
+        if acres is not None:
+            facts.append(fact("acreage", "%g acres in the city application map’s parcel record" % acres, CLEVELAND_LB_PORTAL))
+        elif rings:
+            acres = rings_acres(rings)
+            if acres is not None:
+                facts.append(fact("acreage", "%g acres from the reference parcel outline" % acres, CLEVELAND_LB_PORTAL, "gis_area"))
         title_loc = "%s (%s)" % (addr, pin) if addr else ("PIN " + pin)
         row = {
             "id": "oh-cle-%s" % slug(pin), "source": "cleveland-landbank",
             "title": "%s, Cleveland (Land Bank lot)" % title_loc,
             "state": "OH", "county": "Cuyahoga", "locality": "Cleveland", "apn": pin,
-            "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
-            "status": "listed", "deadline": None, "url": CLEVELAND_LB_URL,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "proposal",
+            "status": "proposal_open", "deadline": None, "url": CLEVELAND_LB_URL,
             "address": addr, "lat": None, "lon": None, "geometry": None, "facts": facts,
-            "tags": ["land bank", "vacant lot", "ohio"],
+            "tags": ["land bank", "vacant lot", CLEVELAND_LB_USE[use].lower()],
         }
-        if rings:
-            apply_geometry(row, rings, one_parcel_url(CLEVELAND_LB_GIS, "parcelpin='%s'" % pin.replace("'", "''")), "City of Cleveland GIS")
-        out.append(row)
-    return out
+        apply_geometry(row, rings, outline_url(row), "City of Cleveland")
+        if row["geometry"]:
+            rows.append(row)
+    return rows
 
 
 def cleveland_landbank(fetch, now, warn):
-    feats = _arcgis_paged(fetch, CLEVELAND_LB_GIS, "cityLandBankType IN ('Residential','Commercial','Industrial')",
-                          "OBJECTID,parcelpin,par_addr_all,total_legal_front,total_square_ft,cityLandBankType",
-                          max_total=1600, page_size=500, extra={"orderByFields": "total_square_ft DESC"})
-    rows = parse_cleveland_lb_features(feats, warn)
-    if len(rows) < 200:
-        raise StructureError("only %d Cleveland Land Bank parcels" % len(rows))
-    return rows, {"complete": True, "upstream_total": len(rows)}
+    if CLEVELAND_LB_PORTAL.rstrip("/") not in fetch.text(CLEVELAND_LB_URL):
+        raise StructureError("Cleveland changed its official land bank application link")
+    layer = CLEVELAND_LB_GIS.removesuffix("/query")
+    app = fetch.json(CLEVELAND_LB_APP)
+    purchase_filters = set()
+    for source in app.get("dataSources", {}).values():
+        if source.get("label") not in {"Dev - Land Bank App Map", "SY - Land Bank App Map"}:
+            continue
+        for child in source.get("childDataSourceJsons", {}).values():
+            if child.get("url") == layer:
+                purchase_filters.add(((child.get("query") or {}).get("where") or {}).get("sql"))
+    webmap = fetch.json(CLEVELAND_LB_MAP)
+    ward_filters = {x.get("layerDefinition", {}).get("definitionExpression")
+                    for x in webmap.get("operationalLayers", []) if x.get("url") == layer}
+    if purchase_filters != {CLEVELAND_LB_DEVELOPMENT, CLEVELAND_LB_YARD} or ward_filters != {CLEVELAND_LB_WARDS}:
+        raise StructureError("Cleveland’s live land bank map selection needs renewed verification")
+    where = " AND ".join((
+        CLEVELAND_LB_WARDS, f"(({CLEVELAND_LB_DEVELOPMENT}) OR ({CLEVELAND_LB_YARD}))",
+        "parcel_type = 'LAND'", "landBankHoldAreas IS NULL",
+        "(AvailabilityStatus IS NULL OR AvailabilityStatus = 'Available')",
+        *(f"{field} = 0" for field in CLEVELAND_LB_IMPROVEMENTS),
+    ))
+    query = urllib.parse.urlencode({"f": "json", "where": where, "returnCountOnly": "true"})
+    count = fetch.json(CLEVELAND_LB_GIS + "?" + query).get("count")
+    if type(count) is not int or count < 0:
+        raise StructureError("Cleveland’s application layer did not return a parcel count")
+    features = _arcgis_paged(fetch, CLEVELAND_LB_GIS, where, CLEVELAND_LB_FIELDS,
+                            max_total=count + 1, page_size=1000, extra={"orderByFields": "OBJECTID ASC"})
+    ids = {f["attributes"].get("OBJECTID") for f in features}
+    if len(features) != count or len(ids) != count or None in ids:
+        raise StructureError("Cleveland’s application layer returned an incomplete parcel selection")
+    return parse_cleveland_lb_features(features), {"complete": True, "upstream_total": count}
 
 
 # --- City of Dallas Land Bank Vacant Lots (TX) ---
@@ -12990,8 +13039,8 @@ SOURCES = [
      "url": PHILLY_LB_URL, "state": "PA", "run": philly_landbank, "requires_sale_match": True,
      "about": "Philadelphia Land Bank parcels marked available on the official sale map and matched to its vacant land layer."},
     {"id": "cleveland-landbank", "name": "City of Cleveland Land Bank vacant land", "agency": "City of Cleveland Land Bank",
-     "url": CLEVELAND_LB_URL, "state": "OH", "run": cleveland_landbank,
-     "about": "Largest residential, commercial, and industrial vacant lots in the City of Cleveland Land Bank with GIS parcel outlines."},
+     "url": CLEVELAND_LB_URL, "state": "OH", "run": cleveland_landbank, "requires_sale_match": True,
+     "about": "Vacant lots from the city’s public development and yard-expansion purchase application maps, with hold areas and recorded improvements excluded."},
     {"id": "dallas-landbank", "name": "City of Dallas Land Bank vacant lots", "agency": "City of Dallas Land Bank",
      "url": DALLAS_LB_URL, "state": "TX", "run": dallas_landbank, "historical_only": True,
      "about": "The former feed shows potential Land Bank acquisitions. Its parcels are withheld from active inventory."},

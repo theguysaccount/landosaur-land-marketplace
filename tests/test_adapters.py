@@ -2074,6 +2074,69 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("Owner", fetch.json.call_args.kwargs["form"]["outFields"])
         self.assertEqual(adapters.norwich_ct_auction(fetch, adapters.NORWICH_CT_CUTOFF, self.fail)[0], [])
 
+    def test_cleveland_uses_current_purchase_maps_and_keeps_only_confirmed_vacancy(self):
+        from urllib.parse import parse_qs, urlsplit
+
+        layer = adapters.CLEVELAND_LB_GIS.removesuffix("/query")
+        official_filters = {
+            "Dev - Land Bank App Map": adapters.CLEVELAND_LB_DEVELOPMENT,
+            "SY - Land Bank App Map": adapters.CLEVELAND_LB_YARD,
+        }
+        app = {"dataSources": {label: {
+            "label": label,
+            "childDataSourceJsons": {"parcel": {"url": layer, "query": {"where": {"sql": sql}}}},
+        } for label, sql in official_filters.items()}}
+        webmap = {"operationalLayers": [{"url": layer, "layerDefinition": {
+            "definitionExpression": adapters.CLEVELAND_LB_WARDS,
+        }}]}
+        ring = [[-81.6, 41.51], [-81.6003, 41.51], [-81.6, 41.5103], [-81.6, 41.51]]
+        attrs = {
+            "parcelpin": "12119157", "par_addr_all": "2328 E 103 ST, CLEVELAND, OH, 44106",
+            "parcel_acreage": 0.0299, "parcel_type": "LAND", "FinalUse": None, "Ward_2026": "6",
+            "landBankHoldAreas": None, "AvailabilityStatus": None,
+            **dict.fromkeys(adapters.CLEVELAND_LB_IMPROVEMENTS, 0),
+        }
+        cases = [
+            {},
+            {"parcelpin": "12131018", "landBankHoldAreas": "League Park"},
+            {"parcelpin": "12319080", "Ward_2026": "7"},
+            {"parcelpin": "12319123", "FinalUse": "NBS"},
+            {"parcelpin": "12320085", "com_bldg_count": 1},
+            {"parcelpin": "12321042", "AvailabilityStatus": "Pending"},
+            {"parcelpin": "12321052", "parcel_type": "ROAD"},
+            {"parcelpin": "12321141", "res_bldg_count": None},
+        ]
+        features = [{"attributes": dict(attrs, OBJECTID=i, **patch), "geometry": {"rings": [ring]}}
+                    for i, patch in enumerate(cases, 1)]
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = f'<a href="{adapters.CLEVELAND_LB_PORTAL}">Land Bank Application Portal</a>'
+
+        def payload(url):
+            if url == adapters.CLEVELAND_LB_APP:
+                return app
+            if url == adapters.CLEVELAND_LB_MAP:
+                return webmap
+            args = parse_qs(urlsplit(url).query)
+            if args.get("returnCountOnly"):
+                return {"count": len(features)}
+            self.assertIn("landBankHoldAreas IS NULL", args["where"][0])
+            self.assertIn("gross_certified_building = 0", args["where"][0])
+            self.assertNotIn("owner", args["outFields"][0].lower())
+            return {"features": features}
+
+        fetch.json.side_effect = payload
+        rows, info = adapters.cleveland_landbank(fetch, None, self.fail)
+        row, = rows
+        self.assertEqual(info["upstream_total"], len(cases))
+        self.assertEqual((row["id"], row["price"], row["status"], row["acres"]),
+                         ("oh-cle-12119157", None, "proposal_open", 0.0299))
+        self.assertEqual(row["url"], adapters.CLEVELAND_LB_URL)
+        self.assertIn("parcelpin", adapters.outline_url(row))
+        self.assertNotIn("owner", adapters.outline_url(row).lower())
+        webmap["operationalLayers"][0]["layerDefinition"]["definitionExpression"] = "1=1"
+        with self.assertRaisesRegex(adapters.StructureError, "needs renewed verification"):
+            adapters.cleveland_landbank(fetch, None, self.fail)
+
     def test_skowhegan_checks_current_availability_and_does_not_use_the_brochure_price(self):
         page = (
             'Southgate Industrial Park <h2>Lots Available</h2><table><tr><th>Lot Number</th><th>Acres</th></tr>'

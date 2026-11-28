@@ -254,7 +254,7 @@ def build_llms_txt(cat, site, updated):
     lines = [
         "# Landosaur — Official U.S. Land Map, 50-State Land Price Observatory & Valuation Workbench",
         "",
-        "Last reviewed: 2026-11-27",
+        "Last reviewed: 2026-11-28",
         "",
         ("> Landosaur maps official public-agency land offerings across U.S. states and counties "
          "(tax-sale auctions, surplus state trust land, municipal land banks, and state redevelopment notices), "
@@ -262,11 +262,12 @@ def build_llms_txt(cat, site, updated):
          "%d source-cited buyer research guides, and a deterministic land deal & off-grid power analyzer." % (
              site.market.latest_year, len(site.guides))),
         "",
-        "## Platform Comparison (Landosaur vs. LandWatch, LandSearch, Land.com & Zillow Land)",
+        "## Platform Comparison (Landosaur vs. LandWatch, Land.com & LandSearch)",
         "",
-        "Published on the homepage (%s/#land-platform-comparison):" % base,
-        "- **Inventory & source transparency**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, LandSearch, Land.com, and Zillow Land primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
+        "Published on the homepage (%s/#land-platform-comparison) and %s/landwatch-alternatives/:" % (base, base),
+        "- **Clean map + zero broker spam**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, Land.com, and LandSearch primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
             "{:,}".format(len(cur)), b["agency_count"], b["state_count"]),
+        "- **3,115-county raw land $/acre benchmarks**: Every priced parcel compares against 3,115 county USDA/FHFA benchmarks (`vs_bench_pct`), paired with state & acreage hubs (%s/land-prices/states/, %s/land-prices/by-acreage/, %s/land-prices/iowa/, %s/land-prices/texas/)." % (base, base, base, base),
         "- **Due-diligence & GIS visibility**: Landosaur includes a free Parcel X-Ray (%s/xray/) covering USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood & National Risk Index hazards, USFWS wetlands, USDA SSURGO soil/bedrock depth, Census roads, USGS PAD-US public lands, NASA solar and USDA hardiness, EIA electric utilities, and 3,115-county USDA/FHFA benchmarks; commercial listing portals leave federal GIS hazard and soil screening to external research." % base,
         "- **Deal modes, fees & open data**: Landosaur separates Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings, keeps search, listing, X-Ray, valuation modeling, CSV/JSON exports, and `/api/search/` free, and offers an optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisitions) at %s/services/." % base,
         "",
@@ -307,6 +308,10 @@ def build_llms_txt(cat, site, updated):
         "- [Land for Sale by State (50-State Directory)](%s/land-for-sale/)" % base,
         "- [50-State Land Price Observatory](%s/land-prices/)" % base,
         "- [50-State Land Price Rankings](%s/land-prices/states/)" % base,
+        "- [Land Prices by Acreage Band](%s/land-prices/by-acreage/)" % base,
+        "- [Iowa Farmland & County Land Prices](%s/land-prices/iowa/)" % base,
+        "- [Texas Land Prices & 20-Acre Benchmark](%s/land-prices/texas/)" % base,
+        "- [LandWatch, Land.com & LandSearch Alternatives](%s/landwatch-alternatives/)" % base,
         "- [Cheapest Official Land Per Acre](%s/land-prices/cheapest-land-per-acre/)" % base,
         "- [U.S. Land Price History (2010-%d)](%s/land-prices/history/)" % (site.market.latest_year, base),
         "- [Land Deal, Electricity & Valuation Analyzer](%s/analyze/)" % base,
@@ -537,6 +542,7 @@ def build(dist, data_dir=None, now=None, log=print):
     w.page("/closing-soon/", site.closing(), indexable=True, group="core")
     w.page("/sources/", site.sources_page(), indexable=True, group="core")
     w.page("/about/", site.about(), indexable=True, group="core")
+    w.page("/landwatch-alternatives/", site.alternatives_page(), indexable=True, group="core")
     w.write("404.html", site.not_found())
 
     # 50-State Land Price Observatory (56 pages)

@@ -809,6 +809,8 @@ def alaska_dnr(fetch, now, warn):
 
 
 UA_LAND = "https://www.alaska.edu/ualand/land/listings/index.php"
+UA_PARCELS = ("https://services.arcgis.com/2j08Y1PuezhQEfCz/arcgis/rest/services/"
+              "University_of_Alaska_Investment_and_Educational_Properties_All_Regions/FeatureServer/0/query")
 UA_SALE_FIELDS = {"parcel_number", "name", "location", "sale_type", "acres", "price",
                   "parcel_page", "land_sale_lease", "land_status"}
 UA_VACANCY_IMAGES = {
@@ -885,8 +887,8 @@ def alaska_university_otc(fetch, now, warn):
         raise StructureError("The University of Alaska’s published spreadsheet link changed")
     feed_url = sheet[1] + "/gviz/tq?" + urllib.parse.urlencode({"gid": sheet[2], "tqx": "out:csv"})
     roster = parse_ua_sale_feed(fetch.text(feed_url))
-    rows = []
-    for item in roster.values():
+    rows = {}
+    for pin, item in roster.items():
         url = urllib.parse.urljoin(UA_LAND, item["parcel_page"])
         try:
             page = fetch.text(url)
@@ -895,8 +897,19 @@ def alaska_university_otc(fetch, now, warn):
                 continue
             raise
         if row := parse_ua_sale_detail(item, page):
-            rows.append(row)
-    return rows, {"complete": True, "upstream_total": len(roster)}
+            rows[pin] = row
+    if rows:
+        where = f"Property_Number IN ({quote_list(rows)}) AND Status = 'Investment'"
+        features = _arcgis_query(fetch, UA_PARCELS, where, "Property_Number,Acres")
+        seen = Counter(f["attributes"].get("Property_Number") for f in features)
+        for feature in features:
+            item = feature["attributes"]
+            pin = item.get("Property_Number")
+            if pin not in rows or seen[pin] != 1 or number(item.get("Acres")) != rows[pin]["acres"]:
+                continue
+            apply_geometry(rows[pin], (feature.get("geometry") or {}).get("rings", []), UA_PARCELS,
+                           "University of Alaska Land Management")
+    return list(rows.values()), {"complete": True, "upstream_total": len(roster)}
 
 
 KETCHIKAN_LAND = "https://www.kgbak.us/653/Borough-Properties-Lands-for-Sale"
@@ -9776,7 +9789,114 @@ def fulton_ga_tax_deed(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(FULTON_GA_DECEMBER_VACANT)}
 
 
+SAN_JOAQUIN_CA_SALE = "https://www.sjgov.org/department/ttc/tax/redemption/public-auction"
+SAN_JOAQUIN_CA_PARCELS = ("https://services2.arcgis.com/GQhSReJEO6f7tsvy/arcgis/rest/services/"
+                          "Parcels/FeatureServer/0/query")
+SAN_JOAQUIN_VACANT_USES = {
+    "1A": "Vacant residential lot with utilities",
+    "2A": "Vacant lot with constraints that preclude residential construction",
+    "50": "Vacant rural residential homesite",
+    "100": "Undeveloped commercial land",
+    "101": "Vacant commercial land with utilities",
+}
+
+
+def parse_san_joaquin_auction(report, schedule):
+    headings = " ".join(report.split())
+    if not all(value in headings for value in ("San Joaquin County", "Tax Sale List", schedule, "Minimum Bid", "Comments")):
+        raise StructureError("San Joaquin County's active auction report changed")
+    roster = {}
+    parsed = 0
+    for line in report.splitlines():
+        match = re.match(r"^\s*(\d+)\s+(\d{3}-\d{3}-\d{3}-\d{3})\s+DEF-\d{3}-\d{3}-\d{3}\b", line)
+        if not match:
+            continue
+        parsed += 1
+        item, pin = match.groups()
+        # The assessor's GIS uses the first eight digits for whole assessment parcels.
+        key = re.fullmatch(r"(\d{3})-(\d{3})-(\d{2})0-000", pin)
+        if not key or re.search(r"\b(?:redeemed|withdrawn|cancelled|canceled|removed|see note \d+)\b", line, re.I):
+            continue
+        short_id = "".join(key.groups())
+        if short_id in roster:
+            raise StructureError("San Joaquin County's auction report repeats an assessment parcel")
+        price = re.search(r"[ \t]{2,}\$[ \t]*([\d,]+\.\d{2})(?:[ \t]{2,}|\s*$)", line)
+        roster[short_id] = (item, pin, number(price[1]) if price else None)
+    if not parsed:
+        raise StructureError("San Joaquin County's auction report has no readable parcel records")
+    return roster, parsed
+
+
+def san_joaquin_ca_auction(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(SAN_JOAQUIN_CA_SALE)
+    date_range = re.search(r"Date of Auction:\s*(([A-Za-z]+) (\d{1,2})(?:[-–](\d{1,2}))?, (\d{4}))", clean(page))
+    if not date_range:
+        raise StructureError("San Joaquin County's public auction calendar changed")
+    schedule, month, first, last, year = date_range.groups()
+    local_date = now.astimezone(ZoneInfo("America/Los_Angeles")).date()
+    close = datetime.datetime.strptime(f"{month} {last or first}, {year}", "%B %d, %Y").date()
+    if close < local_date:
+        return [], {"complete": True, "upstream_total": 0}
+    reports = [
+        urllib.parse.urljoin(SAN_JOAQUIN_CA_SALE, html.unescape(href))
+        for href, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S)
+        if clean(label).startswith(f"{month} {year} Auction List")
+    ]
+    if len(reports) != 1 or urllib.parse.urlsplit(reports[0]).hostname != "www.sjgov.org":
+        raise StructureError("San Joaquin County's current auction list link changed")
+    url, = reports
+    roster, parsed = parse_san_joaquin_auction(pdf_text(fetch, url), schedule)
+    fields = ("APN,LANDSIZE_ACRES,LANDSIZE_SQFT,VALUE_ROLL_YEAR,LAND_VALUE,STRUCTURE_VALUE,FIXED_EQUIP_VALUE,"
+              "TREE_VINE_VALUE,PERS_PROP_VALUE,IMPROVEMENT_VALUE,YEAR_BUILT,TOTALLIV_AREA,NUMBER_UNITS,"
+              "OUTBLDGSSQFT,MOBILEHOME_DECAL,USECODE,RETIRE_CODE")
+    features = []
+    ids = list(roster)
+    for index in range(0, len(ids), 50):
+        where = f"APN IN ({quote_list(ids[index:index + 50])})"
+        features.extend(_arcgis_query(fetch, SAN_JOAQUIN_CA_PARCELS, where, fields, post=True))
+    seen = Counter(feature["attributes"].get("APN") for feature in features)
+    rows = []
+    for feature in features:
+        attr = feature["attributes"]
+        key = attr.get("APN")
+        use = SAN_JOAQUIN_VACANT_USES.get(attr.get("USECODE"))
+        values = ("STRUCTURE_VALUE", "FIXED_EQUIP_VALUE", "TREE_VINE_VALUE", "PERS_PROP_VALUE", "IMPROVEMENT_VALUE")
+        buildings = ("YEAR_BUILT", "TOTALLIV_AREA", "NUMBER_UNITS", "OUTBLDGSSQFT", "MOBILEHOME_DECAL")
+        if (key not in roster or seen[key] != 1 or not use or attr.get("RETIRE_CODE") != 0
+                or attr.get("VALUE_ROLL_YEAR") not in {str(local_date.year), str(local_date.year - 1)}
+                or not number(attr.get("LAND_VALUE")) or any(attr.get(field) != 0 for field in values)
+                or any(attr.get(field) not in ("", None, 0, "0") for field in buildings)):
+            continue
+        item, pid, price = roster[key]
+        acres = number(attr.get("LANDSIZE_ACRES"))
+        if not acres and (square_feet := number(attr.get("LANDSIZE_SQFT"))):
+            acres = round(square_feet / 43560, 4)
+        row = {
+            "id": "ca-san-joaquin-deed-" + slug(pid), "source": "san-joaquin-ca-tax-deed",
+            "title": f"San Joaquin County parcel {pid} (California tax-deed sale)",
+            "state": "CA", "county": "San Joaquin", "locality": "", "apn": pid, "address": "",
+            "acres": acres, "price": price, "price_kind": "min_bid" if price else "none", "offering": "auction",
+            "status": "auction_terms", "deadline": None, "offer_close_date": close.isoformat(),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", f"Individual parcel listed in the county's {schedule} public auction.", "="),
+                      fact("auction_item", item, "="), fact("land_use", use, SAN_JOAQUIN_CA_SALE),
+                      fact("sale_terms", "Registration, deposit, item closing times and withdrawals are governed by the county's current sale terms.",
+                           SAN_JOAQUIN_CA_SALE)],
+            "tags": ["vacant land", "tax deed auction"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), SAN_JOAQUIN_CA_PARCELS,
+                       "San Joaquin County Assessor")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": parsed}
+
+
 SOURCES = [
+    {"id": "san-joaquin-ca-tax-deed", "name": "San Joaquin County vacant land tax deeds",
+     "agency": "San Joaquin County Treasurer-Tax Collector, California", "url": SAN_JOAQUIN_CA_SALE, "state": "CA",
+     "run": san_joaquin_ca_auction, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Individually offered vacant tax-deed parcels matched to the county’s assessment classification and parcel boundaries."},
     {"id": "ketchikan-ak-surplus-land", "name": "Ketchikan Gateway Borough vacant surplus land",
      "agency": "Ketchikan Gateway Borough, Alaska", "url": KETCHIKAN_LAND, "state": "AK",
      "run": alaska_ketchikan_surplus, "requires_sale_match": True,
@@ -9784,7 +9904,7 @@ SOURCES = [
     {"id": "ua-ak-otc-land", "name": "University of Alaska over-the-counter land",
      "agency": "University of Alaska Land Management", "url": UA_LAND, "state": "AK",
      "run": alaska_university_otc, "requires_sale_match": True,
-     "about": "The university’s active land offers, with minimum offers and acreage confirmed on each parcel’s sale page."},
+     "about": "The university’s active land offers with parcel-page minimums and acreage, and matching university GIS outlines."},
     {"id": "lincoln-or-tax-foreclosed", "name": "Lincoln County vacant tax-foreclosed property",
      "agency": "Lincoln County Property Management, Oregon", "url": LINCOLN_OR_LAND, "state": "OR",
      "run": lincoln_or_tax_foreclosed, "requires_sale_match": True,

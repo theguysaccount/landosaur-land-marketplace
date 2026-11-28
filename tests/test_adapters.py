@@ -45,6 +45,37 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_san_joaquin_uses_current_ungrouped_sale_and_vacant_assessment(self):
+        report = (
+            "San Joaquin County\nMarch 17-18, 2027 Tax Sale List\nAssessee  Minimum Bid  Comments\n"
+            "1  117-170-090-000  DEF-210-000-001  PRIVATE NAME  NO SITUS\n"
+            "2  117-235-110-000  DEF-210-000-002  PRIVATE NAME     $  2,500.00\n"
+            "3  139-060-280-000  DEF-210-000-003  PRIVATE NAME     $  5,000.00  Redeemed 11/20/26\n"
+            "4  137-180-080-000  DEF-210-000-004  PRIVATE NAME     See Note 1\n"
+            "Note 1 - Item numbers 4 and 5 will be offered together.\n"
+        )
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = (
+            '<a href="/docs/auction/report.pdf">March 2027 Auction List (11-20-2026)</a>'
+            ' Date of Auction: March 17-18, 2027'
+        )
+        vacancy = {"APN": "11717009", "USECODE": "2A", "RETIRE_CODE": 0, "VALUE_ROLL_YEAR": "2026",
+                   "LAND_VALUE": 59000, "STRUCTURE_VALUE": 0, "IMPROVEMENT_VALUE": 0, "FIXED_EQUIP_VALUE": 0,
+                   "TREE_VINE_VALUE": 0, "PERS_PROP_VALUE": 0, "LANDSIZE_SQFT": 9300}
+        building = dict(vacancy, APN="11723511", IMPROVEMENT_VALUE=20)
+        features = [{"attributes": item} for item in (vacancy, building)]
+        with patch.object(adapters, "pdf_text", return_value=report), patch.object(
+            adapters, "_arcgis_query", return_value=features
+        ) as query:
+            rows, meta = adapters.san_joaquin_ca_auction(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual(meta["upstream_total"], 4)
+        self.assertEqual((row["apn"], row["price"], row["offer_close_date"]), ("117-170-090-000", None, "2027-03-18"))
+        self.assertNotIn("PRIVATE NAME", json.dumps(row))
+        self.assertNotIn("13718008", query.call_args.args[2])
+        self.assertNotIn("Assessee", query.call_args.args[3])
+        self.assertEqual(adapters.parse_san_joaquin_auction(report, "March 17-18, 2027")[0]["11723511"][2], 2500)
+
     def test_ketchikan_requires_borough_roster_broker_and_vacant_assessment(self):
         fetch = unittest.mock.Mock()
         borough = f'Borough Properties &amp; Lands for Sale <a href="{adapters.KETCHIKAN_LIST_PATH}">List</a> www.alpinerealestateak.com'
@@ -89,6 +120,19 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertIsNone(adapters.parse_ua_sale_detail(item, page.replace("45,000", "42,500")))
         self.assertIsNone(adapters.parse_ua_sale_detail(item, page.replace("An undeveloped lot.", "Sale pending.")))
         self.assertIsNone(adapters.parse_ua_sale_detail(item, page.replace("An undeveloped lot.", "Existing house.")))
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [
+            '<script src="ualand.js"></script> Land Listings',
+            'var gsheet = "https://docs.google.com/spreadsheets/d/test/edit#gid=1"',
+            header + active + sold + lease,
+            page,
+        ]
+        outline = {"attributes": {"Property_Number": "CB.SS.0001", "Acres": "1.990"},
+                   "geometry": {"rings": [[[-134.5, 58.3], [-134.499, 58.3], [-134.5, 58.301], [-134.5, 58.3]]]}}
+        with patch.object(adapters, "_arcgis_query", return_value=[outline]) as query:
+            rows, _ = adapters.alaska_university_otc(fetch, NOW, self.fail)
+            self.assertTrue(rows[0]["geometry"])
+            self.assertEqual(query.call_args.args[3], "Property_Number,Acres")
 
     def test_lincoln_county_sale_ignores_past_bid_and_requires_current_vacancy(self):
         roster = (

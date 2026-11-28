@@ -509,7 +509,7 @@
     "/api/concierge/": {
       "get": {
         "operationId": "getLandAgentOrder",
-        "summary": "Read Land Agent pricing or a tracked order",
+        "summary": "Read Land Agent pricing, verify a listed parcel, or track an order",
         "responses": {
           "200": {
             "description": "Success",
@@ -541,6 +541,9 @@
                     },
                     "order": {
                       "$ref": "#/components/schemas/Order"
+                    },
+                    "parcel": {
+                      "$ref": "#/components/schemas/AcquisitionParcel"
                     }
                   }
                 }
@@ -565,6 +568,14 @@
             "schema": {
               "type": "string",
               "pattern": "^AGT-[0-9A-F]{8}$"
+            }
+          },
+          {
+            "name": "parcel_id",
+            "in": "query",
+            "description": "Active Landosaur listing ID. With no order code, returns public listing details and the published price where available.",
+            "schema": {
+              "type": "string"
             }
           }
         ]
@@ -1419,7 +1430,8 @@
             "type": "string"
           },
           "parcel_id": {
-            "type": "string"
+            "type": "string",
+            "description": "An active Landosaur listing ID. The server verifies its published price, acreage and coordinates."
           },
           "parcel_title": {
             "type": "string"
@@ -1461,7 +1473,9 @@
           },
           "official_price": {
             "type": "number",
-            "exclusiveMinimum": 0
+            "exclusiveMinimum": 0,
+            "deprecated": true,
+            "description": "Legacy estimate for an unlisted parcel. Use max_budget for new requests."
           },
           "max_budget": {
             "type": "number",
@@ -1527,6 +1541,42 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "official_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "seller_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_base_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "concierge_fee_10pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_turnkey_total": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "price_kind": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         }
@@ -1602,6 +1652,42 @@
                 "type": "null"
               }
             ]
+          },
+          "official_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "seller_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_base_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "concierge_fee_10pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_turnkey_total": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "price_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -1666,6 +1752,63 @@
           },
           "criteria": {
             "$ref": "#/components/schemas/AlertInput"
+          }
+        }
+      },
+      "AcquisitionParcel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "county": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "apn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acres": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lat": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "lon": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Current published agency or direct seller amount. Zero denotes a published zero-dollar program price."
+          },
+          "price_kind": {
+            "type": "string"
+          },
+          "is_direct": {
+            "type": "boolean"
           }
         }
       }

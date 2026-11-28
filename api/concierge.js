@@ -4,7 +4,12 @@
 
 import { get, put } from "@vercel/blob";
 import crypto from "node:crypto";
+import { LISTING_PREFIX, readDirect } from "../lib/direct-store.js";
+import { loadOfficialInventory } from "../lib/official-inventory.mjs";
+import "../site/availability.js";
 import { geocodeUS, runXray } from "./xray.js";
+
+const { closeExpired } = globalThis.LandosaurAvailability;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -94,6 +99,23 @@ function posNum(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+async function readAcquisitionParcel(id) {
+  if (!/^[a-z0-9][a-z0-9-]{0,119}$/.test(id)) return null;
+  if (id.startsWith("dir-")) {
+    const listing = (await readDirect(`${LISTING_PREFIX}${id}.json`))?.value;
+    if (listing?.id !== id || listing.status !== "active") return null;
+    const auction = listing.sale_mode === "auction";
+    if (auction && !(Date.parse(listing.deadline) > Date.now())) return null;
+    const { title, state, county, apn, acres, lat, lon } = listing;
+    return { id, title, state, county, apn, acres, lat, lon,
+      price: posNum(listing.price), price_kind: auction ? "min_bid" : "cash", is_direct: true };
+  }
+  const row = (await loadOfficialInventory()).find((item) => item[0] === id);
+  if (!row || !closeExpired(row, Date.now())[8]) return null;
+  const [, lat, lon, state, price, price_kind, acres, , , title, county, apn] = row;
+  return { id, title, state, county, apn, acres, lat, lon, price, price_kind, is_direct: false };
+}
+
 function buildStripeUrl(orderId, buyerEmail, parcelLabel) {
   const base = (process.env.STRIPE_LAND_AGENT_LINK || "").trim();
   if (!base || !base.startsWith("https://")) return null;
@@ -115,6 +137,10 @@ export async function GET(request) {
     const configured = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
     const stripeReady = Boolean((process.env.STRIPE_LAND_AGENT_LINK || "").trim());
 
+    if (!code && url.searchParams.has("parcel_id")) {
+      const parcel = await readAcquisitionParcel(url.searchParams.get("parcel_id").trim().toLowerCase());
+      return parcel ? jsonResp({ ok: true, parcel }) : jsonResp({ error: "Active Landosaur parcel not found." }, 404);
+    }
     if (!code) {
       return jsonResp({
         ok: true,
@@ -144,7 +170,9 @@ export async function GET(request) {
         state: order.state,
         apn: order.apn,
         official_price: order.official_price,
-        estimated_base_price: order.official_price || order.max_budget || null,
+        seller_price: order.seller_price ?? null,
+        price_kind: order.price_kind ?? null,
+        estimated_base_price: order.official_price ?? order.seller_price ?? order.max_budget ?? null,
         concierge_fee_10pct: order.concierge_fee_10pct,
         estimated_turnkey_total: order.estimated_turnkey_total,
         initiation_fee_usd: order.initiation_fee_usd,
@@ -173,9 +201,12 @@ function drawnBoundary(value) {
   return value.every((point) => Array.isArray(point) && point.length === 2 && coordinates(point[1], point[0])) ? value : null;
 }
 
-export async function POST(request) {
+export async function openOrder(request, {
+  configured = Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+  lookup = readAcquisitionParcel, xrayAt = runXray, write = writeOrder,
+} = {}) {
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    if (!configured) {
       return jsonResp({ error: "Concierge order storage is not configured." }, 503);
     }
     let body;
@@ -199,21 +230,26 @@ export async function POST(request) {
       return jsonResp({ error: "Provide your full name and a valid email address." }, 400);
     }
 
-    const parcelId = cleanStr(body.parcel_id, 120) || null;
-    const apn = cleanStr(body.apn, 100) || null;
-    let county = cleanStr(body.county, 80) || "";
-    let state = cleanStr(body.state, 20).toUpperCase().slice(0, 2) || "";
+    const parcelId = cleanStr(body.parcel_id).toLowerCase() || null;
+    const parcel = parcelId ? await lookup(parcelId) : null;
+    if (parcelId && !parcel) return jsonResp({ error: "Active Landosaur parcel not found. Check the ID or enter an off-market location." }, 404);
+
+    const apn = parcel?.apn || cleanStr(body.apn, 100) || null;
+    let county = parcel?.county || cleanStr(body.county, 80);
+    let state = parcel?.state || cleanStr(body.state, 20).toUpperCase().slice(0, 2);
     const location = cleanStr(body.location || body.address, 220);
-    let parcelTitle = cleanStr(body.parcel_title, 200);
-    const officialPrice = posNum(body.official_price);
-    const maxBudget = posNum(body.max_budget || body.offer_amount);
-    const acres = posNum(body.acres);
+    let parcelTitle = parcel?.title || cleanStr(body.parcel_title, 200);
+    const officialPrice = parcel && !parcel.is_direct ? parcel.price : null;
+    const sellerPrice = parcel?.is_direct ? parcel.price : null;
+    // Older clients may send their own estimate in official_price for an unlisted property.
+    const maxBudget = posNum(body.max_budget || body.offer_amount) ?? (parcel ? null : posNum(body.official_price));
+    const acres = parcel?.acres ?? posNum(body.acres);
     const notes = cleanStr(body.notes, 1500);
     const boundary = drawnBoundary(body.boundary);
     const financing = cleanStr(body.financing || "cash", 40);
     const submittedByAgent = cleanStr(body.submitted_by_agent, 80) || "landosaur-web";
 
-    let point = coordinates(body.lat, body.lon);
+    let point = coordinates(parcel?.lat, parcel?.lon) || coordinates(body.lat, body.lon);
     if (!parcelId && !apn && !location && !point && serviceType !== "custom_sourcing") {
       return jsonResp({ error: "Provide a Landosaur parcel ID, county APN, address/town, or map coordinates." }, 400);
     }
@@ -225,7 +261,7 @@ export async function POST(request) {
     const [lat, lon] = point ? point.map((v) => Math.round(v * 100000) / 100000) : [null, null];
     let xraySummary = null;
     if (point) {
-      const xray = await runXray(lat, lon).catch(() => null);
+      const xray = await xrayAt(lat, lon).catch(() => null);
       if (xray) {
         if (!county && xray.county?.county_name) county = xray.county.county_name;
         if (!state && xray.county?.state_code) state = xray.county.state_code;
@@ -249,9 +285,9 @@ export async function POST(request) {
       else parcelTitle = `Custom Land Acquisition Request (${state || "US"})`;
     }
 
-    const baseAmount = officialPrice || maxBudget || null;
-    const conciergeFee = baseAmount ? Math.round(baseAmount * 0.1 * 100) / 100 : null;
-    const turnkeyTotal = baseAmount ? Math.round((baseAmount + conciergeFee) * 100) / 100 : null;
+    const baseAmount = officialPrice ?? sellerPrice ?? maxBudget;
+    const conciergeFee = baseAmount != null ? Math.round(baseAmount * 0.1 * 100) / 100 : null;
+    const turnkeyTotal = baseAmount != null ? Math.round((baseAmount + conciergeFee) * 100) / 100 : null;
     const confirmationCode = `AGT-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
     const nowIso = new Date().toISOString();
 
@@ -263,7 +299,7 @@ export async function POST(request) {
       concierge_fee_pct: 10,
       parcel_id: parcelId,
       parcel_title: parcelTitle,
-      parcel_url: parcelId ? (serviceType === "direct_closing" ? `https://landosaur.com/direct/?id=${encodeURIComponent(parcelId)}` :
+      parcel_url: parcelId ? (parcel.is_direct ? `https://landosaur.com/direct/?id=${encodeURIComponent(parcelId)}` :
         `https://landosaur.com/land/${encodeURIComponent(parcelId)}/`) : null,
       apn,
       location: location || null,
@@ -274,6 +310,8 @@ export async function POST(request) {
       acres,
       ...(boundary ? { boundary } : {}),
       official_price: officialPrice,
+      seller_price: sellerPrice,
+      price_kind: parcel?.price_kind ?? null,
       max_budget: maxBudget,
       concierge_fee_10pct: conciergeFee,
       estimated_turnkey_total: turnkeyTotal,
@@ -288,7 +326,7 @@ export async function POST(request) {
       timeline: [{ step: "dossier_opened", at: nowIso }],
     };
 
-    await writeOrder(order);
+    await write(order);
 
     const stripeCheckoutUrl = buildStripeUrl(confirmationCode, buyerEmail, parcelTitle);
 
@@ -300,6 +338,9 @@ export async function POST(request) {
         initiation_fee_usd: 20,
         concierge_fee_pct: 10,
         official_price: officialPrice,
+        seller_price: sellerPrice,
+        price_kind: order.price_kind,
+        estimated_base_price: baseAmount,
         concierge_fee_10pct: conciergeFee,
         estimated_turnkey_total: turnkeyTotal,
         stripe_checkout_url: stripeCheckoutUrl,
@@ -320,3 +361,5 @@ export async function POST(request) {
     return jsonResp({ error: "Unable to record acquisition request right now." }, 502);
   }
 }
+
+export const POST = (request) => openOrder(request);

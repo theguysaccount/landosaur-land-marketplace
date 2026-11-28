@@ -21,7 +21,7 @@
     },
     "api/concierge.js": {
       "maxDuration": 30,
-      "includeFiles": "data/{usda/land-index-counties.json,utilities/county-utilities.json}"
+      "includeFiles": "data/{official-inventory.json,usda/land-index-counties.json,utilities/county-utilities.json}"
     },
     "api/stripe-webhook.js": {
       "maxDuration": 15

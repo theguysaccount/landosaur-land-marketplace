@@ -132,8 +132,14 @@ try {
     }
   });
   await step("Land Agent /services/ and 50-state /land-atlas/ charts load cleanly", async () => {
-    await page.goto(base + "/services/?parcel=ks-snco-0973604015014000&price=1510&state=KS");
-    assert(await page.eval("!!document.getElementById('concierge-form') && document.getElementById('fee-breakdown-live').innerText.includes('$1,661')"), "missing $1,661 (+10%) turnkey breakdown on /services/");
+    await page.goto(base + "/services/?parcel=ks-snco-0973604015014000&price=1&state=AK&lat=60&lon=-150");
+    await page.waitFor("document.getElementById('fee-breakdown-live').innerText.includes('$1,661')", 12000);
+    assert(await page.eval(`(() => {
+      const form = document.getElementById('concierge-form');
+      return form.state.value === 'KS' && form.apn.value === '0973604015014000' &&
+        Math.abs(Number(form.lat.value) - 39.047502) < 0.00001 &&
+        document.getElementById('selected-parcel-banner').innerText.includes('Shawnee County');
+    })()`), "parcel details on /services/ differ from the official inventory");
     await page.goto(base + "/land-atlas/");
     await page.waitFor("document.querySelectorAll('#atlas-cartogram .us-tile').length === 50", 12000);
     assert(await page.eval("document.querySelectorAll('#atlas-compare-chart svg path').length >= 2"), "missing multi-state SVG comparison paths");

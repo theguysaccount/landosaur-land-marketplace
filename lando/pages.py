@@ -901,7 +901,6 @@ class Site(object):
             '<label><span>Longitude (auto-filled by pin)</span><input name="lon" type="number" step="any" placeholder="-95.69"></label>'
             '<label><span>Parcel Title / Short Label</span><input name="parcel_title" type="text" placeholder="Optional parcel label"></label>'
             '<label><span>Stated Acres (optional)</span><input name="acres" type="number" step="any" min="0" placeholder="e.g. 5"></label>'
-            '<label><span>Official Agency Price / Min Bid ($)</span><input name="official_price" type="number" step="any" min="0" placeholder="Leave blank if unlisted / unpriced"></label>'
             '<label><span>Your Max Offer / Budget ($)</span><input name="max_budget" type="number" step="any" min="0" placeholder="e.g. 15000"></label>'
             '<label><span>Funding Type</span><select name="financing"><option value="cash">All cash / wire at closing</option><option value="land_loan">Land loan</option><option value="seller_financing">Open to seller financing</option></select></label>'
             '<label><span>Your Full Name</span><input name="buyer_name" type="text" required placeholder="Full legal name for closing"></label>'

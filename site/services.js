@@ -26,17 +26,25 @@
   var outBox = document.getElementById("concierge-result");
   var submitBtn = document.getElementById("concierge-submit");
   var serviceCards = Array.prototype.slice.call(document.querySelectorAll("[data-select-service]"));
+  var quotedParcel = null, quoteRequest = 0;
+
+  function listedPriceLabel(kind, isDirect) {
+    if (kind === "min_bid") return isDirect ? "Seller minimum bid" : "Official minimum bid";
+    if (kind === "application") return "Official program price";
+    return isDirect ? "Seller asking price" : "Official agency price";
+  }
 
   function updateFeePreview() {
     if (!feePreview || !form) return;
-    var official = parseFloat(form.official_price.value);
+    var listedPrice = quotedParcel ? quotedParcel.price : null;
     var budget = parseFloat(form.max_budget.value);
-    var baseAmt = (!isNaN(official) && official > 0) ? official : ((!isNaN(budget) && budget > 0) ? budget : null);
-    if (baseAmt) {
+    var baseAmt = listedPrice != null ? listedPrice : (budget > 0 ? budget : null);
+    if (baseAmt != null) {
       var fee10 = Math.round(baseAmt * 0.1 * 100) / 100;
       var total = Math.round((baseAmt + fee10) * 100) / 100;
+      var label = listedPrice != null ? listedPriceLabel(quotedParcel.price_kind, quotedParcel.is_direct) : "Target offer / budget";
       feePreview.innerHTML =
-        "<div class='fee-line'><span>Base parcel price / target offer</span><strong>" + money(baseAmt) + "</strong></div>" +
+        "<div class='fee-line'><span>" + label + "</span><strong>" + money(baseAmt) + "</strong></div>" +
         "<div class='fee-line'><span>Landosaur Land Agent Acquisition &amp; Transfer Fee (10% on close)</span><strong>+" + money(fee10) + "</strong></div>" +
         "<div class='fee-line total'><span>Estimated Turnkey All-In Total</span><strong>" + money(total) + "</strong></div>" +
         "<div class='fee-line due'><span>Due today to initiate full verification &amp; acquisition</span><strong>$20.00</strong></div>";
@@ -55,7 +63,8 @@
       c.classList.toggle("active-service", c.getAttribute("data-select-service") === svc);
     });
     if (mapWrap) {
-      mapWrap.hidden = svc === "listed_acquisition" && Boolean(form.parcel_id.value);
+      mapWrap.hidden = Boolean(quotedParcel && quotedParcel.lat != null && quotedParcel.lon != null);
+      if (locBtn) locBtn.disabled = mapWrap.hidden;
       if (!mapWrap.hidden && pinMap) setTimeout(function () { pinMap.invalidateSize(); }, 80);
     }
     updateFeePreview();
@@ -118,6 +127,7 @@
 
   var pinBoundary = null, pinRequest = 0;
   function setPin(lat, lon, runX) {
+    if (runX && quotedParcel && quotedParcel.lat != null && quotedParcel.lon != null) return;
     lat = Math.round(Number(lat) * 100000) / 100000;
     lon = Math.round(Number(lon) * 100000) / 100000;
     if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
@@ -180,26 +190,67 @@
   try { lastCode = sessionStorage.getItem("lando_last_agt") || ""; } catch (e) {}
 
   var pId = sp.get("parcel") || "";
-  var pTitle = sp.get("title") || "";
-  var pPrice = sp.get("price") || "";
-  var pAcres = sp.get("acres") || "";
-  var pCounty = sp.get("county") || "";
-  var pState = sp.get("state") || "";
-  var pApn = sp.get("apn") || "";
   var pMode = sp.get("mode") || "";
-  var pLat = sp.get("lat") || "";
-  var pLon = sp.get("lon") || "";
   var pSvc = sp.get("service") || (pId ? (pMode === "auction" ? "auction_proxy" : (pMode === "landbank" ? "landbank_application" : "listed_acquisition")) : "unlisted_outreach");
+  var parcelFields = { parcel_title: "title", acres: "acres", county: "county", state: "state", apn: "apn", lat: "lat", lon: "lon" };
+
+  function refreshParcel() {
+    var id = form.parcel_id.value.trim().toLowerCase();
+    var revision = ++quoteRequest;
+    if (quotedParcel && pinMarker) {
+      pinMap.removeLayer(pinMarker);
+      pinMarker = null;
+    }
+    quotedParcel = null;
+    Object.keys(parcelFields).forEach(function (field) {
+      if (form[field].readOnly) form[field].value = "";
+      form[field].readOnly = false;
+    });
+    setActiveService(form.service_type.value, false);
+    if (banner && !returningFromCheckout) {
+      banner.hidden = !id;
+      banner.textContent = id ? "Checking current parcel availability…" : "";
+    }
+    if (!id) return;
+    function current() {
+      return revision === quoteRequest && form.parcel_id.value.trim().toLowerCase() === id;
+    }
+    function showError(message) {
+      if (current() && banner && !returningFromCheckout) banner.textContent = message;
+    }
+    fetch(base + "/api/concierge/?parcel_id=" + encodeURIComponent(id))
+      .then(function (response) { return response.json(); })
+      .then(function (result) {
+        if (!current()) return;
+        if (!result.parcel) { showError(result.error || "Could not check current parcel availability."); return; }
+        var parcel = quotedParcel = result.parcel;
+        Object.keys(parcelFields).forEach(function (field) {
+          var value = parcel[parcelFields[field]];
+          if (value != null && value !== "") {
+            form[field].value = value;
+            form[field].readOnly = true;
+          }
+        });
+        if (parcel.lat != null && parcel.lon != null) setPin(parcel.lat, parcel.lon, false);
+        setActiveService(form.service_type.value, false);
+        if (banner && !returningFromCheckout) {
+          banner.innerHTML = "<h3>" + esc(parcel.title) + "</h3><p>" +
+            esc([parcel.county, parcel.state].filter(Boolean).join(", ")) +
+            (parcel.apn ? " · APN " + esc(parcel.apn) : "") +
+            (parcel.acres != null ? " · " + esc(parcel.acres) + " ac" : "") + "</p>";
+        }
+      })
+      .catch(function () { showError("Could not check current parcel availability."); });
+  }
 
   if (form) {
-    if (pId) form.parcel_id.value = pId;
-    if (pTitle) form.parcel_title.value = pTitle;
-    if (pPrice) form.official_price.value = pPrice;
-    if (pAcres) form.acres.value = pAcres;
-    if (pCounty) form.county.value = pCounty;
-    if (pState) form.state.value = pState;
-    if (pApn) form.apn.value = pApn;
-    if (pLat && pLon) setPin(parseFloat(pLat), parseFloat(pLon), false);
+    form.parcel_id.value = pId;
+    if (!pId) {
+      Object.keys(parcelFields).forEach(function (field) {
+        form[field].value = sp.get(parcelFields[field]) || "";
+      });
+      if (form.lat.value && form.lon.value) setPin(form.lat.value, form.lon.value, false);
+    }
     if (boundary.length && pinMap) {
       pinBoundary = L.polygon(boundary.map(function (point) { return [point[1], point[0]]; }), { color: "#176e41", weight: 3, interactive: false }).addTo(pinMap);
       setTimeout(function () { if (pinBoundary) pinMap.fitBounds(pinBoundary.getBounds(), { padding: [20, 20], maxZoom: 17 }); }, 100);
@@ -211,26 +262,9 @@
       banner.innerHTML = "<h3>Check your Land Agent payment</h3><p>Payment status comes from the order record. Use your confirmation code below to check for Stripe verification.</p><a href='#track-order'>Go to the order tracker ↓</a>";
     }
 
-    if (pId && banner && !returningFromCheckout) {
-      var pr = parseFloat(pPrice);
-      var fee10 = (!isNaN(pr) && pr > 0) ? Math.round(pr * 0.1 * 100) / 100 : null;
-      var tot = fee10 != null ? Math.round((pr + fee10) * 100) / 100 : null;
-      banner.hidden = false;
-      banner.innerHTML =
-        "<div class='eyebrow'>Selected Parcel Locked In for Land Agent Acquisition</div>" +
-        "<h3 style='margin:4px 0 6px'>" + esc(pTitle || ("Parcel " + pId)) + "</h3>" +
-        "<p style='margin:0'>" +
-        (pCounty || pState ? ("<strong>Location:</strong> " + esc([pCounty, pState].filter(Boolean).join(", ")) + " · ") : "") +
-        (pApn ? ("<strong>APN:</strong> <code>" + esc(pApn) + "</code> · ") : "") +
-        (pAcres ? ("<strong>Acres:</strong> " + esc(pAcres) + " ac · ") : "") +
-        (tot != null
-          ? ("<strong>Official:</strong> " + money(pr) + " + <strong>10% Land Agent:</strong> " + money(fee10) + " = <strong>Est. Turnkey: " + money(tot) + "</strong>")
-          : "<strong>Land Agent Fee:</strong> 10% only on close · <strong>$20 to initiate today</strong>") +
-        "</p>";
-    }
-
+    if (pId) refreshParcel();
+    form.parcel_id.addEventListener("change", refreshParcel);
     form.service_type.addEventListener("change", function () { setActiveService(form.service_type.value, false); });
-    form.official_price.addEventListener("input", updateFeePreview);
     form.max_budget.addEventListener("input", updateFeePreview);
     form.addEventListener("input", updateBrief);
 
@@ -253,7 +287,6 @@
         lon: form.lon.value ? parseFloat(form.lon.value) : undefined,
         acres: form.acres.value ? parseFloat(form.acres.value) : undefined,
         boundary: boundary.length ? boundary : undefined,
-        official_price: form.official_price.value ? parseFloat(form.official_price.value) : undefined,
         max_budget: form.max_budget.value ? parseFloat(form.max_budget.value) : undefined,
         financing: form.financing.value,
         buyer_name: form.buyer_name.value.trim(),
@@ -280,8 +313,8 @@
           var stripeHtml = d.stripe_checkout_url
             ? "<p style='margin-top:12px'><a class='button' href='" + esc(d.stripe_checkout_url) + "'>Pay $20 Land Agent Initiation on Stripe →</a></p>"
             : "<p class='small' style='margin-top:8px'>Your order is queued in our Land Agent ledger under confirmation code <code>" + esc(d.confirmation_code) + "</code>. Watch your inbox for the $20 Stripe initiation checkout link.</p>";
-          var estHtml = d.estimated_turnkey_total
-            ? "<p class='small'><strong>Itemized Estimate:</strong> Base " + money(d.official_price || payload.max_budget) + " + 10% Land Agent Fee (" + money(d.concierge_fee_10pct) + ") = <strong>" + money(d.estimated_turnkey_total) + "</strong> · $20 due today.</p>"
+          var estHtml = d.estimated_turnkey_total != null
+            ? "<p class='small'><strong>Itemized Estimate:</strong> Base " + money(d.estimated_base_price) + " + 10% Land Agent Fee (" + money(d.concierge_fee_10pct) + ") = <strong>" + money(d.estimated_turnkey_total) + "</strong> · $20 due today.</p>"
             : "";
           outBox.innerHTML =
             "<h3>Land Agent Dossier Opened · <code>" + esc(d.confirmation_code) + "</code></h3>" +
@@ -332,7 +365,9 @@
       if (findings.length) html += "<p><strong>Recorded Parcel X-Ray</strong><br>" + esc(findings.join(" · ")) + "</p>";
     }
     if (order.estimated_turnkey_total != null) {
-      html += "<div class='fee-ledger order-fees'><div class='fee-line'><span>" + (order.official_price ? "Parcel price in order" : "Target offer / budget") +
+      var label = order.seller_price != null || order.official_price != null
+        ? listedPriceLabel(order.price_kind, order.seller_price != null) : "Target offer / budget";
+      html += "<div class='fee-ledger order-fees'><div class='fee-line'><span>" + label +
         "</span><strong>" + money(order.estimated_base_price) + "</strong></div>" +
         "<div class='fee-line'><span>Land Agent fee on close (10%)</span><strong>" + money(order.concierge_fee_10pct) + "</strong></div>" +
         "<div class='fee-line total'><span>Estimated parcel price plus closing fee</span><strong>" + money(order.estimated_turnkey_total) + "</strong></div></div>";

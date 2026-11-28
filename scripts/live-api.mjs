@@ -6,6 +6,9 @@ const checks = [
   ["/api/offers/", 400, (body) => typeof body.error === "string"],
   ["/api/concierge/", 200, (body) => body.ok && body.storage_configured && body.stripe_checkout_configured &&
       body.initiation_fee_usd === 20 && body.concierge_fee_pct === 10],
+  ["/api/concierge/?parcel_id=ks-snco-0973604015014000", 200, (body) => body.parcel?.price === 1510 &&
+      body.parcel.price_kind === "cash" && body.parcel.state === "KS" && body.parcel.is_direct === false],
+  ["/api/concierge/?parcel_id=wi-s1112", 404, (body) => typeof body.error === "string"],
   ["/api/alerts/", 200, (body) => body.ok && body.storage_configured],
   ["/api/xray/?lat=35.42&lon=-92.45", 200, (body) => body.usgs?.elevation_ft > 0 &&
     body.county?.fips === "05141" && body.utility?.providers.some((provider) =>

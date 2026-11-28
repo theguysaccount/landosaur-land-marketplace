@@ -7557,6 +7557,47 @@ def idaho_falls_water_avenue(fetch, now, warn):
     return ([row] if row["geometry"] else []), {"complete": True, "upstream_total": 1}
 
 
+HUACHUCA_AZ_NOTICE = "https://huachucacityaz.gov/notice-of-invitation-for-bids-for-purchase-of-real-property/"
+HUACHUCA_AZ_PLAT = "https://docs.cochise.az.gov/GIS/Docs/MapsAndPlats/Bk012/Bk012Pg051Cplats.jpg"
+HUACHUCA_AZ_NOTICE_SHA256 = "3f552e28f6b823996d085e018c01bebf70685e5554e6da6c45430f0f8c36df4d"
+
+
+def huachuca_az_monterey_place(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(HUACHUCA_AZ_NOTICE)
+    terms = clean(page)
+    if re.search(r"\b(?:sale|solicitation|invitation|bid opening) (?:is |has been )?(?:cancelled|canceled|withdrawn|closed)\b", terms, re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    schedule = re.search(r"\bBids must be submitted by (\w+ \d{1,2}, \d{4}), at (\d{1,2}:\d{2} [ap]m)\b", terms, re.I)
+    if not schedule or not all(value in terms for value in ("MONTEREY PLACE BID", "undeveloped right-of-way",
+                                                            "Huachuca Commercial Center at Campstone", "Book 12, pages 51-51C")):
+        raise StructureError("Huachuca City’s Monterey Place bid terms could not be verified")
+    deadline = datetime.datetime.strptime(" ".join(schedule.groups()), "%B %d, %Y %I:%M %p")
+    deadline = deadline.replace(tzinfo=ZoneInfo("America/Phoenix"))
+    if deadline <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    notice = re.search(r'<a\b[^>]*href="([^\"]+\.pdf(?:\?[^\"]*)?)"[^>]*>\s*Monterey Place', page, re.I)
+    if not notice:
+        raise StructureError("Huachuca City’s Monterey Place bid packet link changed")
+    packet = urllib.parse.urljoin(HUACHUCA_AZ_NOTICE, html.unescape(notice[1]))
+    if urllib.parse.urlsplit(packet).netloc != "huachucacityaz.gov" or hashlib.sha256(fetch.bytes(packet)).hexdigest() != HUACHUCA_AZ_NOTICE_SHA256:
+        raise StructureError("Huachuca City’s Monterey Place bid packet needs renewed verification")
+    return [{
+        "id": "az-huachuca-city-monterey-place", "source": "huachuca-az-monterey-place",
+        "title": "Monterey Place (Huachuca City sealed-bid land sale)", "state": "AZ", "county": "Cochise",
+        "locality": "Huachuca City", "address": "Monterey Place near Highway 90 and Mustang Road", "apn": "",
+        "acres": None, "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+        "deadline": deadline.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": HUACHUCA_AZ_NOTICE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The town invites sealed cash bids for a dedicated, undeveloped right-of-way.", "="),
+                  fact("bid_deadline", deadline.strftime("%B %d, %Y at %-I:%M %p Arizona time"), "="),
+                  fact("sale_terms", "Use the town’s sealed bid instructions. The as-is sale is subject to Town Council approval.", "="),
+                  fact("recorded_plat", "Monterey Place is labeled on the amended plat in Book 12, page 51C. The town notice identifies adjacent parcel numbers separately.", HUACHUCA_AZ_PLAT)],
+        "tags": ["sealed bid", "undeveloped right-of-way"],
+    }], {"complete": True, "upstream_total": 1}
+
+
 DELDOT_AUCTIONS = "https://deldot.gov/Business/auctions/"
 # The vacancy is visible in the sale notice's official aerial and survey, not stated in its text.
 DELDOT_K303_SHA256 = "93435aa46f4c83a1ff0050b324d084bed18ae2102ed3740e187622b8f71e5180"
@@ -12926,6 +12967,10 @@ SOURCES = [
      "agency": "City of Idaho Falls", "url": IDAHO_FALLS_WATER_SALE, "state": "ID",
      "run": idaho_falls_water_avenue, "requires_sale_match": True,
      "about": "City sale terms matched to the current authorized listing and the Bonneville County parcel record."},
+    {"id": "huachuca-az-monterey-place", "name": "Huachuca City Monterey Place sealed bids",
+     "agency": "Town of Huachuca City, Arizona", "url": HUACHUCA_AZ_NOTICE, "state": "AZ", "timezone": "America/Phoenix",
+     "run": huachuca_az_monterey_place, "requires_sale_match": True,
+     "about": "A municipal sealed-bid offering for the undeveloped right-of-way identified in the recorded Cochise County plat."},
     {"id": "riverton-wy-industrial", "name": "Riverton vacant industrial lots on Piper Drive",
      "agency": "City of Riverton, Wyoming", "url": RIVERTON_WY_DOCS["terms"][0], "state": "WY",
      "run": riverton_wy_industrial, "requires_sale_match": True,

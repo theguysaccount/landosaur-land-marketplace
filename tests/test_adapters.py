@@ -1988,6 +1988,29 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertAlmostEqual(lat, 43.493382, places=6)
         self.assertAlmostEqual(adapters.rings_acres([ring]), .08, places=3)
 
+    def test_huachuca_uses_local_cutoff_and_does_not_assign_an_adjacent_parcel(self):
+        fetch = unittest.mock.Mock()
+        page = ('<p>Bids must be submitted by December 3, 2026, at 3:00 pm. MONTEREY PLACE BID.</p>'
+                '<p>The undeveloped right-of-way in Huachuca Commercial Center at Campstone, Book 12, pages 51-51C, '
+                'is adjacent to 106-47-152W. Private prior holder.</p>'
+                '<a href="/notice.pdf?version=1">Monterey Place bid packet</a>')
+        fetch.text.return_value = page
+        packet = b"Reviewed notice"
+        fetch.bytes.return_value = packet
+        with patch.object(adapters, "HUACHUCA_AZ_NOTICE_SHA256", hashlib.sha256(packet).hexdigest()):
+            rows, _ = adapters.huachuca_az_monterey_place(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["acres"], row["deadline"]),
+                             ("", None, None, "2026-12-03T22:00:00Z"))
+            self.assertIsNone(row["geometry"])
+            self.assertNotIn("106-47-152W", repr(row))
+            self.assertNotIn("Private prior holder", repr(row))
+            fetch.bytes.return_value = b"Changed notice"
+            with self.assertRaises(adapters.StructureError):
+                adapters.huachuca_az_monterey_place(fetch, NOW, self.fail)
+            self.assertEqual(adapters.huachuca_az_monterey_place(
+                fetch, datetime.datetime(2026, 12, 3, 22, tzinfo=datetime.timezone.utc), self.fail)[0], [])
+
     def test_sheridan_publishes_one_current_proposal_after_matching_both_vacant_tracts(self):
         from lando.adapters import SHERIDAN_WY_AGENCY, SHERIDAN_WY_CLOSE, SHERIDAN_WY_OPEN, SHERIDAN_WY_TERMS
 

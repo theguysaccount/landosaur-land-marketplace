@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T14:07:16Z",
+ "checked": "2026-11-28T14:21:35Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1444,6 +1444,24 @@
    "state": "SC",
    "upstream_total": 1322,
    "url": "https://www.horrycountysc.gov/departments/treasurer/delinquent-tax"
+  },
+  "huachuca-az-monterey-place": {
+   "about": "A municipal sealed-bid offering for the undeveloped right-of-way identified in the recorded Cochise County plat.",
+   "agency": "Town of Huachuca City, Arizona",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T14:21:35Z",
+   "last_success": "2026-11-28T14:21:35Z",
+   "message": "",
+   "name": "Huachuca City Monterey Place sealed bids",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 2,
+   "state": "AZ",
+   "upstream_total": 1,
+   "url": "https://huachucacityaz.gov/notice-of-invitation-for-bids-for-purchase-of-real-property/"
   },
   "huntington-wv-landbank": {
    "about": "Vacant lots matched by parcel ID between the city's sale roster and its available property map.",

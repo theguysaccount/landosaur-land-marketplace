@@ -8071,6 +8071,61 @@ def kootenai_id_unsold(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+CLAREMONT_NH_SALES = "https://www.claremontnh.com/opportunityzone"
+CLAREMONT_NH_ROSTER = "https://www.claremontnh.com/index.php?docid=254&section=procurement"
+CLAREMONT_NH_GIS = "https://nhgeodata.unh.edu/hosting/rest/services/Hosted/CAD_ParcelMosaic/FeatureServer/1/query"
+CLAREMONT_NH_CARD = "https://gis.vgsi.com/claremontnh/Parcel.aspx?Pid="
+
+
+def claremont_nh_industrial(fetch, now, warn):
+    sale = clean(fetch.text(CLAREMONT_NH_SALES))
+    if not re.search(r"Commercial Industrial Lots for Sale in .*? Syd Clarke Industrial Park", sale, re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    roster = clean(fetch.text(CLAREMONT_NH_ROSTER))
+    section = re.search(r"Syd Clarke Drive\s*:\s*(.*?)\s+Ashleys Landing", roster, re.I)
+    if not section:
+        raise StructureError("Claremont Development Authority's parcel roster changed")
+    # The parent tract is outside the lot sizes marketed on the sale page.
+    lots = set(re.findall(r"\b187-2-\d+\b", section[1]))
+    if not lots:
+        raise StructureError("Claremont's industrial park roster did not identify any numbered lots")
+    where = "town='CLAREMONT' AND pid IN (%s)" % quote_list(sorted(lots))
+    features = _arcgis_query(fetch, CLAREMONT_NH_GIS, where, "pid,u_id,streetaddress")
+    if {f["attributes"].get("pid") for f in features} != lots:
+        raise StructureError("Claremont's advertised industrial lots did not match the state parcel map")
+    rows = []
+    for feature in features:
+        item = feature["attributes"]
+        pin = item["pid"]
+        uid = re.fullmatch(r"4042-(\d+)", item.get("u_id") or "")
+        if not uid:
+            raise StructureError("Claremont's parcel match lacks its assessor record ID")
+        card = CLAREMONT_NH_CARD + uid[1]
+        assessment = clean(fetch.text(card))
+        valuation = re.search(r"Current Value Appraisal Valuation Year Improvements Land Total\s+\d{4}\s+\$([\d,.]+)\s+\$([\d,.]+)", assessment)
+        district = re.search(r"Land Use Use Code\s+928V\s+Description\s+CDA MDL-00\s+Zone\s+(I3)\b", assessment)
+        if (not valuation or number(valuation[1]) is not None or not number(valuation[2]) or not district
+                or "Living Area: 0" not in assessment or "No Data for Outbuildings" not in assessment
+                or "No Data for Extra Features" not in assessment):
+            continue
+        acreage = re.search(r"Line Valuation Size \(Acres\)\s*([\d.]+)", assessment)
+        street = clean(item.get("streetaddress")).title()
+        row = {
+            "id": "nh-claremont-syd-clarke-" + pin, "source": "claremont-nh-industrial",
+            "title": "Syd Clarke Industrial Park parcel " + pin,
+            "state": "NH", "county": "Sullivan", "locality": "Claremont", "apn": pin, "address": street,
+            "acres": number(acreage[1]) if acreage else None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CLAREMONT_NH_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The development authority markets lots in the park and names this parcel in its sale marketing roster.", CLAREMONT_NH_ROSTER),
+                      fact("land_use", "The city’s assessment reports land value and no building or outbuilding.", card),
+                      fact("sale_terms", "The property is subject to park covenants. Contact the development authority for current purchase terms.", "=")],
+            "tags": ["industrial land", "local development authority"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings") or [], CLAREMONT_NH_GIS, "New Hampshire GRANIT")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(lots)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -8513,6 +8568,10 @@ SOURCES = [
      "agency": "Kootenai County Treasurer", "url": KOOTENAI_ID_PROPERTY, "state": "ID",
      "run": kootenai_id_unsold, "requires_sale_match": True,
      "about": "Bare land still offered on the county’s current unsold property list. Road strips, right-of-way pieces and other ambiguous entries are excluded."},
+    {"id": "claremont-nh-industrial", "name": "Claremont Development Authority vacant industrial land",
+     "agency": "Claremont Development Authority", "url": CLAREMONT_NH_SALES, "state": "NH",
+     "run": claremont_nh_industrial, "requires_sale_match": True,
+     "about": "Individual Syd Clarke Industrial Park lots named in the authority's marketing roster and checked against the assessor."},
 ]
 NOT_CARRIED = [
     ("Claremont Development Authority price schedules and site plans", "https://www.claremontnh.com/opportunityzone",

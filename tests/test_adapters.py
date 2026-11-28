@@ -1069,6 +1069,24 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_claremont_requires_current_marketing_and_a_vacant_assessment(self):
+        sale = '<h2>Commercial Industrial Lots for Sale in the Syd Clarke Industrial Park</h2>'
+        roster = '<p>Syd Clarke Drive: 187-2, 187-2-5, 187-2-6</p><p>Ashleys Landing: 163-3</p>'
+        card = ('Current Value Appraisal Valuation Year Improvements Land Total 2026 $0 $24,000 '
+                'Land Use Use Code 928V Description CDA MDL-00 Zone I3 Living Area: 0 '
+                'No Data for Outbuildings No Data for Extra Features Line Valuation Size (Acres) 2.08')
+        features = [{"attributes": {"pid": "187-2-" + lot, "u_id": "4042-" + lot, "streetaddress": "SYD CLARKE DR"}}
+                    for lot in ("5", "6")]
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [sale, roster, card, card.replace("$0", "$12,000")]
+        with patch.object(adapters, "_arcgis_query", return_value=features) as query:
+            rows, info = adapters.claremont_nh_industrial(fetch, NOW, self.fail)
+        self.assertEqual(info["upstream_total"], 2)
+        self.assertEqual([(row["apn"], row["acres"], row["price"]) for row in rows], [("187-2-5", 2.08, None)])
+        self.assertNotIn("163-3", query.call_args.args[2])
+        fetch.text.side_effect = ['<h2>Syd Clarke Industrial Park</h2>']
+        self.assertEqual(adapters.claremont_nh_industrial(fetch, NOW, self.fail)[0], [])
+
     def test_todd_vacant_land_preserves_cash_price_without_inferring_a_minimum_bid(self):
         property_text = ("31-0004800  4th Street\n"
                          "  Appraised Value: $6,900.00\n"

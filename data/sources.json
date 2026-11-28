@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T09:12:22Z",
+ "checked": "2026-11-28T09:27:48Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1048,19 +1048,19 @@
    "url": "https://www.ci.florence.or.us/220/Pacific-View-Business-Park"
   },
   "fnsb-chatanika-otc": {
-   "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases.",
+   "about": "Current over-the-counter prices matched to borough-held vacant lots, recorded acreage and borough GIS outlines.",
    "agency": "Fairbanks North Star Borough Natural Resources Development",
    "complete": true,
    "count": 21,
    "failures": 0,
-   "last_attempt": "2026-11-27T22:37:59Z",
-   "last_success": "2026-11-27T22:37:59Z",
+   "last_attempt": "2026-11-28T09:27:48Z",
+   "last_success": "2026-11-28T09:27:48Z",
    "message": "",
    "name": "Fairbanks North Star Borough West Chatanika over-the-counter lots",
    "notes": [],
    "ok": true,
    "read": 21,
-   "seconds": 2,
+   "seconds": 3,
    "state": "AK",
    "upstream_total": 21,
    "url": "https://www.fnsb.gov/1295/West-Chatanika-River-Recreation-Subdivis"
@@ -2776,6 +2776,24 @@
    "state": "AK",
    "upstream_total": 8,
    "url": "https://www.alaska.edu/ualand/land/listings/index.php"
+  },
+  "underwood-nd-westridge": {
+   "about": "City-advertised Westridge Estates homesites, matched to individual municipal parcels with zero recorded structures.",
+   "agency": "City of Underwood, North Dakota",
+   "complete": true,
+   "count": 10,
+   "failures": 0,
+   "last_attempt": "2026-11-28T09:26:43Z",
+   "last_success": "2026-11-28T09:26:43Z",
+   "message": "",
+   "name": "Underwood Westridge Estates vacant homesites",
+   "notes": [],
+   "ok": true,
+   "read": 10,
+   "seconds": 4,
+   "state": "ND",
+   "upstream_total": 12,
+   "url": "https://www.underwoodnd.org/housing-1"
   },
   "utah-udot": {
    "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data.",

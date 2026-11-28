@@ -45,6 +45,31 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_underwood_requires_city_count_and_excludes_residual_or_improved_lots(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = ("Lots for Sale The City of Underwood currently owns 3 lots east of "
+                                   "Westridge Golf Course (the Westridge Estates). Lots are ready for home construction "
+                                   "and there are incentives to purchase these lots. A number of other lots")
+        tax, shapes = [], []
+        for lot, structures in (("4R", 0), ("7R", 0), ("10R", 1)):
+            pin = f"802303000{lot[:-1]:0>2}000"
+            a = {"ParcelID": pin, "UniqueGISID": f"38055-{pin}", "Lot": lot, "Block": "3",
+                 "SubdivisionPlat": adapters.UNDERWOOD_SUBDIVISION, "TaxRollYear": NOW.year,
+                 "NumberStructures": structures, "ResidentialStructureValue": 0, "CommercialStructureValue": 0,
+                 "ExemptStructureValue": 0, "LegalDescription": f"LOT {lot} BLK 3"}
+            tax.append({"attributes": a})
+            shapes.append({"attributes": dict(a, GISID=pin, CalculatedAcres=0.91319907),
+                           "geometry": {"rings": [[[-101.2, 47.4], [-101.199, 47.4], [-101.2, 47.401], [-101.2, 47.4]]]}})
+        with patch.object(adapters, "_arcgis_query", side_effect=[tax, shapes]):
+            rows, info = adapters.underwood_nd_westridge(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["acres"], row["price"]), ("80230300004000", 0.9132, None))
+        self.assertEqual(info["upstream_total"], 3)
+        warnings = []
+        with patch.object(adapters, "_arcgis_query", return_value=tax[:1]):
+            self.assertEqual(adapters.underwood_nd_westridge(fetch, NOW, warnings.append)[0], [])
+        self.assertTrue(warnings)
+
     def test_killdeer_checks_current_marked_map_and_only_carries_vacant_offers(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = f'<img src="{adapters.KILLDEER_ND_MAP}"><h1>Lot Map</h1>'
@@ -2066,7 +2091,25 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
 
     def test_fairbanks_offers_only_named_lot_sheets_at_published_price(self):
         page = ('Available lots are sold at their established fair market value.'
+                '<a href="/DocumentCenter/View/1/WCRR-Lot-1-FMV-10000">WCRR Lot 1 (FMV $10,000)</a>'
+                '<section><h2>Available Properties</h2><ol>'
                 '<a target="_blank" href="/DocumentCenter/View/27480/WCRR-Lot-7-FMV-12300">WCRR Lot 7 (FMV $12,300)</a>'
-                '<a href="/DocumentCenter/View/27481/WCRR-Lot-8-FMV-11500">WCRR Lot 8 (sold)</a>')
-        rows = adapters.parse_fnsb_chatanika(page)
-        self.assertEqual([(row["id"], row["price"]) for row in rows], [("ak-fnsb-chatanika-7", 12300)])
+                '<a href="/DocumentCenter/View/27481/WCRR-Lot-8-FMV-11500">WCRR Lot 8 (sold)</a></ol><ol>'
+                '<a href="/DocumentCenter/View/27482/WCRR-Lot-9-FMV-11300">WCRR Lot 9 (FMV $11,300)</a></ol></section>')
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = page
+        attributes = {"PARCEL_SUB": "WEST CHATANIKA RIVER RECREATIONAL", "LRM_GEOM_DOC_AREA": 6.151,
+                      "LRM_GEOM_DOC_UNITS": "acres", "Assessing_Primary_Use": "Vacant Land",
+                      "Tax_Status": "FNSB & PARKS", "PARCEL_TYPE": "Lot"}
+        features = [
+            {"attributes": dict(attributes, PAN=713085 + lot * 10, PARCEL_LOT=str(lot), Improvements=improv),
+             "geometry": {"rings": [[[-148.03, 65.05], [-148.029, 65.05], [-148.03, 65.051], [-148.03, 65.05]]]}}
+            for lot, improv in ((1, 0), (7, 0), (8, None), (9, 100))
+        ]
+        with patch.object(adapters, "_arcgis_query", return_value=features):
+            rows, info = adapters.fnsb_chatanika(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["id"], row["price"], row["apn"], row["acres"]),
+                         ("ak-fnsb-chatanika-7", 12300, "713155", 6.151))
+        self.assertEqual(info["upstream_total"], 2)
+        self.assertTrue(row["geometry"])

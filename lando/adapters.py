@@ -200,6 +200,10 @@ def outline_url(listing):
         return one_parcel_url(NJ_COMPOSITE_PARCELS, "PIN_NODUP='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "killdeer-nd-north-prairie":
         return one_parcel_url(KILLDEER_ND_GIS, "PID='%s'" % listing["apn"].replace("'", "''"), KILLDEER_ND_FIELDS)
+    if listing["source"] == "fnsb-chatanika-otc":
+        return one_parcel_url(FNSB_PARCELS, "PAN=%s" % listing["apn"], FNSB_FIELDS)
+    if listing["source"] == "underwood-nd-westridge":
+        return one_parcel_url(ND_PARCEL_MAP, "UniqueGISID='38055-%s'" % listing["apn"], UNDERWOOD_MAP_FIELDS)
     if listing["source"] == "centerville-sd-harvest-pointe":
         return one_parcel_url(CENTERVILLE_SD_GIS, "PARCEL='%s'" % listing["apn"].replace("'", "''"), CENTERVILLE_SD_FIELDS)
     if listing["source"] == "conrad-mt-industrial-park":
@@ -5268,13 +5272,20 @@ def stlouis_mn_land(fetch, now, warn):
 
 
 FNSB_SALE = "https://www.fnsb.gov/1295/West-Chatanika-River-Recreation-Subdivis"
+FNSB_PARCELS = "https://services.arcgis.com/f4rR7WnIfGBdVYFd/arcgis/rest/services/Tax_Parcels/FeatureServer/0/query"
+FNSB_FIELDS = ("PAN,PARCEL_SUB,PARCEL_LOT,LRM_GEOM_DOC_AREA,LRM_GEOM_DOC_UNITS,"
+               "Improvements,Assessing_Primary_Use,Tax_Status,PARCEL_TYPE")
 
 
 def parse_fnsb_chatanika(page):
     if "Available lots are sold at their established fair market value" not in clean(page):
         raise StructureError("Fairbanks North Star Borough did not confirm the over-the-counter sale price rule")
+    section = re.search(r"<h2\b[^>]*>\s*Available Properties\s*</h2>(.*?)</section>", page, re.I | re.S)
+    if not section:
+        raise StructureError("Fairbanks North Star Borough’s Available Properties section is missing")
+    lists = re.findall(r"<ol\b[^>]*>(.*?)</ol>", section[1], re.I | re.S)
     rows = []
-    for href, label in re.findall(r'<a\b[^>]*?href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+    for href, label in re.findall(r'<a\b[^>]*?href="([^"]+)"[^>]*>(.*?)</a>', "".join(lists), re.I | re.S):
         match = re.fullmatch(r"WCRR Lot (\d+) \(FMV \$([\d,]+)\)", clean(label))
         url = urllib.parse.urljoin(FNSB_SALE, html.unescape(href))
         if not match or urllib.parse.urlsplit(url).netloc != "www.fnsb.gov":
@@ -5293,14 +5304,42 @@ def parse_fnsb_chatanika(page):
                       fact("sale_program", "First-come, first-served at the published fair market value. Borough processing fees are separate.", FNSB_SALE)],
             "tags": ["recreation", "borough land", "over the counter"],
         })
-    if not rows:
-        raise StructureError("Fairbanks North Star Borough's current lot sheets were not found")
+    if len({row["id"] for row in rows}) != len(rows):
+        raise StructureError("Fairbanks North Star Borough has conflicting current lot sheets")
     return rows
 
 
 def fnsb_chatanika(fetch, now, warn):
-    rows = parse_fnsb_chatanika(fetch.text(FNSB_SALE))
-    return rows, {"complete": True, "upstream_total": len(rows)}
+    offers = parse_fnsb_chatanika(fetch.text(FNSB_SALE))
+    if not offers:
+        return [], {"complete": True, "upstream_total": 0}
+    subdivision = "WEST CHATANIKA RIVER RECREATIONAL"
+    where = (f"PARCEL_SUB='{subdivision}' AND Tax_Status='FNSB & PARKS' "
+             "AND (UPPER(Owner1) LIKE '%FAIRBANKS%NORTH%STAR%' OR UPPER(Owner1)='FNSB')")
+    cadastral = defaultdict(list)
+    for item in _arcgis_query(fetch, FNSB_PARCELS, where, FNSB_FIELDS):
+        cadastral[item["attributes"].get("PARCEL_LOT")].append(item)
+    rows = []
+    for row in offers:
+        lot = row["id"].rsplit("-", 1)[-1]
+        matches = cadastral[lot]
+        if len(matches) != 1:
+            continue
+        item = matches[0]
+        a = item["attributes"]
+        pin, acres = str(a.get("PAN")), number(a.get("LRM_GEOM_DOC_AREA"))
+        if (not pin.isdigit() or not acres or a.get("LRM_GEOM_DOC_UNITS") != "acres"
+                or a.get("PARCEL_SUB") != subdivision or a.get("PARCEL_TYPE") != "Lot"
+                or a.get("Assessing_Primary_Use") != "Vacant Land" or a.get("Tax_Status") != "FNSB & PARKS"
+                or a.get("Improvements") not in (None, 0)):
+            continue
+        row.update(apn=pin, acres=acres)
+        row["facts"][0] = fact("parcel_number", pin, one_parcel_url(FNSB_PARCELS, f"PAN={pin}", FNSB_FIELDS))
+        row["facts"].append(fact("acreage", "Recorded subdivision plat acreage.", "@outline"))
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), FNSB_PARCELS, "Fairbanks North Star Borough")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
 
 
 URLS.update({
@@ -10737,7 +10776,74 @@ def killdeer_nd_north_prairie(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(KILLDEER_ND_SQFT)}
 
 
+UNDERWOOD_SALES = "https://www.underwoodnd.org/housing-1"
+ND_PARCEL_MAP = "https://services1.arcgis.com/GOcSXpzwBHyk2nog/arcgis/rest/services/NDGISHUB_Parcels/FeatureServer/0/query"
+ND_PARCEL_TAX = ND_PARCEL_MAP.replace("/0/query", "/1/query")
+UNDERWOOD_TAX_FIELDS = ("ParcelID,UniqueGISID,Lot,Block,SubdivisionPlat,TaxRollYear,PropertyAddress,LegalDescription,"
+                        "NumberStructures,ResidentialStructureValue,CommercialStructureValue,ExemptStructureValue")
+UNDERWOOD_MAP_FIELDS = "GISID,UniqueGISID,Lot,Block,SubdivisionPlat,CalculatedAcres"
+UNDERWOOD_SUBDIVISION = "UNDERWOOD-WESTRIDGE ESTATES"
+
+
+def underwood_nd_westridge(fetch, now, warn):
+    text = clean(fetch.text(UNDERWOOD_SALES))
+    notice = re.search(r"Lots for Sale The City of Underwood currently owns (\d+) lots east of "
+                       r"Westridge Golf Course \(the Westridge Estates\)\. (.*?) A number of other lots", text)
+    if not notice or "purchase these lots" not in notice[2] or "ready for home construction" not in notice[2]:
+        raise StructureError("Underwood’s Westridge Estates sale notice changed")
+    published_count = int(notice[1])
+    holders = ("CITY OF UNDERWOOD", "UNDERWOOD CITY OF", "UNDERWOOD, CITY OF", "UNDERWOOD CITY",
+               "CITY OF UNDERWOOD, ND", "CITY OF UNDERWOOD ND")
+    where = (f"CountyFIPS='38055' AND SubdivisionPlat='{UNDERWOOD_SUBDIVISION}' "
+             f"AND UPPER(OwnerName) IN ({quote_list(holders)})")
+    assessment = _arcgis_query(fetch, ND_PARCEL_TAX, where, UNDERWOOD_TAX_FIELDS, extra={"returnGeometry": "false"})
+    if len(assessment) != published_count:
+        warn("The state tax roll no longer matches the number of Westridge Estates homesites advertised by Underwood.")
+        return [], {"complete": True, "upstream_total": published_count}
+    parcels = defaultdict(list)
+    for item in _arcgis_query(fetch, ND_PARCEL_MAP, f"SubdivisionPlat='{UNDERWOOD_SUBDIVISION}'", UNDERWOOD_MAP_FIELDS):
+        parcels[item["attributes"].get("UniqueGISID")].append(item)
+    tax_fields = ("NumberStructures", "ResidentialStructureValue", "CommercialStructureValue", "ExemptStructureValue")
+    ids = Counter(item["attributes"].get("ParcelID") for item in assessment)
+    rows = []
+    for item in assessment:
+        a = item["attributes"]
+        pin, key = str(a.get("ParcelID")), a.get("UniqueGISID")
+        lot, block = clean(a.get("Lot")), clean(a.get("Block"))
+        if (not pin.isdigit() or ids[pin] != 1 or key != f"38055-{pin}" or len(parcels[key]) != 1
+                or a.get("TaxRollYear") != now.year or any(a.get(field) != 0 for field in tax_fields)
+                or not re.fullmatch(r"\d+R?", lot) or not block.isdigit()
+                or clean(a.get("LegalDescription")) != f"LOT {lot} BLK {block}"
+                or (block, lot) == ("3", "7R")):  # sub-0.05 acre residual lot without a standalone sale confirmation
+            continue
+        parcel = parcels[key][0]
+        shape = parcel["attributes"]
+        acres = number(shape.get("CalculatedAcres"))
+        if (not acres or str(shape.get("GISID")) != pin or shape.get("SubdivisionPlat") != UNDERWOOD_SUBDIVISION
+                or clean(shape.get("Lot")) != lot or clean(shape.get("Block")) != block):
+            continue
+        row = {
+            "id": "nd-underwood-westridge-" + pin, "source": "underwood-nd-westridge",
+            "title": f"Westridge Estates, Block {block}, Lot {lot}, Underwood", "state": "ND", "county": "McLean",
+            "locality": "Underwood", "apn": pin, "address": clean(a.get("PropertyAddress")), "acres": round(acres, 4),
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": UNDERWOOD_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city advertises its Westridge Estates lots for home construction.", "="),
+                      fact("acreage", "Calculated acreage from the state GIS parcel record.", "@outline", "gis_area"),
+                      fact("sale_terms", "Underwood publishes residential construction incentives. Ask the city for the current asking price and terms.", "=")],
+            "tags": ["vacant homesite", "city development"],
+        }
+        apply_geometry(row, (parcel.get("geometry") or {}).get("rings", []), ND_PARCEL_MAP, "North Dakota GIS Hub")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": published_count}
+
+
 SOURCES = [
+    {"id": "underwood-nd-westridge", "name": "Underwood Westridge Estates vacant homesites",
+     "agency": "City of Underwood, North Dakota", "url": UNDERWOOD_SALES, "state": "ND",
+     "run": underwood_nd_westridge, "requires_sale_match": True,
+     "about": "City-advertised Westridge Estates homesites, matched to individual municipal parcels with zero recorded structures."},
     {"id": "killdeer-nd-north-prairie", "name": "Killdeer North Prairie Addition vacant homesites",
      "agency": "City of Killdeer, North Dakota", "url": KILLDEER_ND_SALE, "state": "ND",
      "run": killdeer_nd_north_prairie, "requires_sale_match": True,
@@ -11030,7 +11136,8 @@ SOURCES = [
      "about": "St. Louis County's active available-property booklet for unimproved tracts offered at published prices. Sold and withdrawn tracts are excluded."},
     {"id": "fnsb-chatanika-otc", "name": "Fairbanks North Star Borough West Chatanika over-the-counter lots",
      "agency": "Fairbanks North Star Borough Natural Resources Development", "url": FNSB_SALE, "state": "AK",
-     "run": fnsb_chatanika, "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases."},
+     "run": fnsb_chatanika, "requires_sale_match": True,
+     "about": "Current over-the-counter prices matched to borough-held vacant lots, recorded acreage and borough GIS outlines."},
     {"id": "south-suburban-landbank", "name": "South Suburban Land Bank available vacant land",
      "agency": "South Suburban Land Bank and Development Authority", "url": SSLBDA_URL, "state": "IL",
      "run": south_suburban_landbank, "requires_sale_match": True,
@@ -11333,6 +11440,8 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("McLean County assessor property-card search", "https://mclean.northdakotaassessors.com/search/res/",
+     "The property search returned HTTP 403. The independently published North Dakota GIS Hub parcel and tax-roll services are carried."),
     ("Dunn County assessor property-card search", "https://dunn.northdakotaassessors.com/search/res/",
      "The property search returned HTTP 403. The official county ArcGIS parcel layer is carried."),
     ("Chamberlain’s old Smokey Groves plat hostname", "https://chamberlainwebpage.users.midstatesd.net/",

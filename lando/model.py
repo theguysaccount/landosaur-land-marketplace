@@ -114,7 +114,7 @@ class Catalog(object):
                 return "St. Louis City"
             if r["state"] == "LA" and not c.lower().endswith("parish"):
                 return c + " Parish"
-            return c if re.search(r"(County|City|Borough|Parish)$", c) else c + " County"
+            return c if re.search(r"(County|City|Borough|Parish|Planning Region)$", c) else c + " County"
         if r["state"]:
             return "%s (statewide programs)" % STATE_NAMES.get(r["state"], r["state"])
         return "County not stated"

@@ -28,7 +28,8 @@ STATUS = {  # status -> (label, still available to buy)
     "pending": ("Sale pending", False),
     "auction_closed": ("Bidding closed", False),
 }
-PRICE_KIND = {"cash": "Price", "min_bid": "Minimum bid", "application": "Program price", "none": "No price published"}
+PRICE_KIND = {"cash": "Price", "min_bid": "Minimum bid", "asking": "Asking price",
+              "application": "Program price", "none": "No price published"}
 
 
 class StructureError(Exception):
@@ -5866,6 +5867,177 @@ def rawlins_wy_surplus(fetch, now, warn):
     return ([row] if row else []), {"complete": True, "upstream_total": int(row is not None)}
 
 
+MULTNOMAH_OR_AUCTION = "https://multco.us/info/secondary-auction-december-2-2026"
+MULTNOMAH_OR_RESOURCES = "https://multco.us/info/auction-december-2-2026-resources"
+
+
+def multnomah_pdf(page, name):
+    path = r"/file/" + re.escape(name) + r"(?:-\d+)?/download"
+    links = re.findall(r'\bhref="((?:https://multco\.us)?' + path + r')"', page, re.I)
+    if len(set(links)) != 1:
+        raise StructureError("Multnomah County has no unique link for " + name)
+    return urllib.parse.urljoin(MULTNOMAH_OR_AUCTION, links[0])
+
+
+def parse_multnomah_auction(report, classification, url, classification_url, now):
+    from zoneinfo import ZoneInfo
+
+    heading = r"MULTNOMAH COUNTY TAX TITLE AUCTION LIST:\s*DECEMBER 2, 2026"
+    if not re.search(heading, report) or not re.search(heading, classification):
+        raise StructureError("Multnomah County auction documents refer to different sales")
+    start = re.search(r"AUCTION COMMENCES\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)", report, re.I)
+    if not start:
+        raise StructureError("Multnomah County auction opening time is missing")
+    close = datetime.datetime.strptime("2026-12-02 " + "".join(start[1].split()), "%Y-%m-%d %I:%M%p")
+    close = close.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    if close <= now:
+        return []
+
+    current = {}
+    blocks = re.split(r"(?m)^\s*\d+\s+(?=(?:RMLS|VERTICAL)\b)", report)
+    for block in blocks[1:]:
+        apn = re.match(r"RMLS\s+(R\d+)\b", block)
+        bid = re.search(r"\b20\d{2}\s+\$([\d,.]+)", block)
+        if apn and bid and not re.search(r"\b(?:withdrawn|cancelled|canceled|redeemed|removed|sold|occupied|occupant)\b", block, re.I):
+            if apn[1] in current:
+                raise StructureError("duplicate parcel in Multnomah County offering package: " + apn[1])
+            current[apn[1]] = number(bid[1])
+    if not current:
+        raise StructureError("no readable Multnomah County auction records")
+
+    lines = classification.splitlines()
+    columns = next((line for line in lines if re.search(r"\bTYPE\s+LISTING\s+ACCT\s+LEGAL\s+SITUS\s+FCL\b", line)), None)
+    if not columns:
+        raise StructureError("Multnomah County auction resources have no parcel type column")
+    legal_col, situs_col, year_col = (columns.index(label) for label in ("LEGAL", "SITUS", "FCL"))
+    rows = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*\d+\s+LAND\s+RMLS\s+(R\d+)\b.*?\b20\d{2}\s+\$([\d,.]+)", line)
+        if not match:
+            continue
+        apn, bid = match.groups()
+        bid = number(bid)
+        if bid is None or current.get(apn) != bid:
+            continue
+        following = lines[index + 1] if index + 1 < len(lines) else ""
+        continuation = following if following[:legal_col].isspace() else ""
+        loc = line[situs_col:year_col].strip()
+        place = r"\b(PORTLAND|GRESHAM)\b"
+        city = re.search(place, loc + " " + continuation[situs_col:year_col], re.I)
+        if not city and re.fullmatch(r"OR\s+\d{5}", loc) and lines[index - 1][:legal_col].isspace():
+            city = re.search(place, lines[index - 1][situs_col:year_col], re.I)
+        if not city:
+            continue
+        legal = line[legal_col:situs_col] + " " + continuation[legal_col:situs_col]
+        acres = re.search(r"\b(\d+(?:\.\d+)?)\s+ACRES\b", legal, re.I)
+        locality = city[1].title()
+        address = "" if re.match(r"(?:LEVY CODE|OR\s+\d{5})", loc) else loc.split(",", 1)[0].lstrip("/").strip()
+        rows.append({
+            "id": "or-multnomah-" + slug(apn), "source": "multnomah-or-tax-title",
+            "title": "%s, %s (county tax title auction)" % (address or apn, locality),
+            "state": "OR", "county": "Multnomah", "locality": locality, "apn": apn,
+            "address": address, "acres": number(acres[1]) if acres else None,
+            "price": bid, "price_kind": "min_bid", "offering": "tax_sale", "status": "auction_terms",
+            "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": MULTNOMAH_OR_AUCTION, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("sale_program", "Multnomah County sells the interest it acquired by foreclosure, as is", url),
+                      fact("availability", "County identifies parcel as land in its auction resources", classification_url)],
+            "tags": ["tax-foreclosed land", "public auction"],
+        })
+    return rows
+
+
+def multnomah_or_tax_title(fetch, now, warn):
+    if now >= datetime.datetime(2026, 12, 3, tzinfo=datetime.timezone.utc):
+        return [], {"complete": True, "upstream_total": 0}
+    url = multnomah_pdf(fetch.text(MULTNOMAH_OR_AUCTION), "flier-auction-properties-2026-secondary-vem.pdf")
+    classification = multnomah_pdf(fetch.text(MULTNOMAH_OR_RESOURCES), "flier-auction-properties-2026-secondary-12.4.2026.pdf")
+    rows = parse_multnomah_auction(pdf_text(fetch, url, extraction_mode="plain"), pdf_text(fetch, classification),
+                                   url, classification, now)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+CTDOT_SALE = "https://portal.ct.gov/dot/properties/active-public-bids"
+CTDOT_MANSFIELD = CTDOT_SALE + "/0032-0032-005a-mansfield-item-no-795"
+CTDOT_REGIONS = {"Mansfield": "Capitol Planning Region", "Torrington": "Northwest Hills Planning Region"}
+
+
+def parse_ctdot_bid(page, url, now, require_date=False):
+    from zoneinfo import ZoneInfo
+
+    fields = {}
+    for paragraph in re.findall(r"<p\b[^>]*>(.*?)</p>", page, re.I | re.S):
+        key, sep, value = clean(paragraph).partition(":")
+        key = key.strip()
+        if sep and key in ("Bid Date", "Location", "Lot Size", "Style", "Asking Price", "Minimum Bid", "Zone"):
+            fields[key] = value.strip()
+    heading = re.search(r"<h[13]\b[^>]*>([^<>]*Item No\.[^<>]+)</h[13]>", page, re.I)
+    if not heading:
+        return None
+    text = clean(heading[1])
+    item = re.match(r"([\dA-Z-]+)\s*-\s*([A-Z][a-z ]+)\s*-\s*Item No\.\s*(\d+)", text, re.I)
+    if not item or re.search(r"\b(?:deposit|sold|withdrawn|cancelled|canceled)\b", text, re.I):
+        return None
+    ref, place, number_id = item.groups()
+    place = place.strip().title()
+    if place not in CTDOT_REGIONS or "PUBLIC BID" not in page or "Department of Transportation" not in page:
+        return None
+    size = fields.get("Lot Size", "")
+    land = fields.get("Style", "") + " " + size
+    if not re.search(r"\bvacant land\b", land, re.I) or re.search(r"\b(?:improved|tower|shed|house|building)\b", land, re.I):
+        return None
+    area = re.match(r"([\d,.]+)\s*(?:±|\+/-)?\s*(acres?|square feet|sq\.? ft\.?)\b", size, re.I)
+    acres = number(area[1]) if area else None
+    if acres is not None and not area[2].lower().startswith("acre"):
+        acres = round(acres / 43560, 6)
+    date = fields.get("Bid Date", "")
+    end = re.fullmatch(r"([A-Za-z]+ \d{1,2}, \d{4})\s*[-–]\s*(\d{1,2}:\d{2}\s*[AP]M)", date, re.I)
+    close = None
+    if end:
+        close = datetime.datetime.strptime(end[1] + " " + "".join(end[2].split()), "%B %d, %Y %I:%M%p")
+        close = close.replace(tzinfo=ZoneInfo("America/New_York"))
+        if close <= now:
+            return None
+    elif require_date or not re.fullmatch(r"Still Available(?:, Accepting Offers)?", date, re.I):
+        return None
+    minimum = re.fullmatch(r"\$([\d,.]+)", fields.get("Minimum Bid", ""))
+    ask = re.fullmatch(r"\$([\d,.]+)\*?", fields.get("Asking Price", ""))
+    bid = number(minimum[1]) if minimum else number(ask[1]) if ask else None
+    address = fields.get("Location", "")
+    facts = [fact("parcel_number", "ConnDOT file %s, item %s" % (ref, number_id), "="),
+             fact("title_terms", "Municipal right of first refusal applies", "=")]
+    if fee := re.search(r"(\$[\d,.]+)\s+administrative fee", clean(page), re.I):
+        facts.append(fact("price", fee[1] + " separate administrative fee", "="))
+    if fields.get("Zone"):
+        facts.append(fact("zoning", fields["Zone"], "="))
+    return {
+        "id": "ct-dot-" + number_id, "source": "connecticut-dot-land",
+        "title": "%s, %s (ConnDOT public bid)" % (address or ("ConnDOT item " + number_id), place),
+        "state": "CT", "county": CTDOT_REGIONS[place], "locality": place, "apn": "",
+        "address": address, "acres": acres, "price": bid,
+        "price_kind": ("min_bid" if minimum else "asking") if bid is not None else "none",
+        "offering": "auction", "status": "auction_terms",
+        "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if close else None,
+        "url": url, "lat": None, "lon": None, "geometry": None, "facts": facts,
+        "tags": ["state transportation surplus", "public bid"],
+    }
+
+
+def connecticut_dot_land(fetch, now, warn):
+    directory = fetch.text(CTDOT_SALE)
+    if 'id="resultsPanel"' not in directory or "Active Public Bids" not in directory:
+        raise StructureError("Connecticut DOT public bid directory layout changed")
+    pattern = r'\bhref="((?:https://portal\.ct\.gov)?/dot/properties/active-public-bids/[a-z0-9-]+)'
+    urls = {urllib.parse.urljoin(CTDOT_SALE, link.lower()) for link in re.findall(pattern + '"', directory, re.I)}
+    # This separate official notice has a hard future deadline, even when omitted from the directory.
+    archived = {urllib.parse.urljoin(CTDOT_SALE, link.lower()) for link in re.findall(pattern + r'\?archived=true"', directory, re.I)}
+    rows = []
+    for url in sorted((urls | {CTDOT_MANSFIELD}) - archived):
+        if row := parse_ctdot_bid(fetch.text(url), url, now, require_date=url not in urls):
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -6152,6 +6324,14 @@ SOURCES = [
      "agency": "City of Rawlins, Wyoming", "url": RAWLINS_WY_SALE, "state": "WY",
      "run": rawlins_wy_surplus, "requires_sale_match": True,
      "about": "One vacant paved city parcel posted for sealed bids. The official package provides the reserve and deed terms."},
+    {"id": "multnomah-or-tax-title", "name": "Multnomah County, Oregon tax title land auction",
+     "agency": "Multnomah County Tax Title", "url": MULTNOMAH_OR_AUCTION, "state": "OR",
+     "run": multnomah_or_tax_title, "requires_sale_match": True,
+     "about": "County-classified land matched by account number and minimum bid to the current tax title offering package."},
+    {"id": "connecticut-dot-land", "name": "Connecticut DOT vacant land public bids",
+     "agency": "Connecticut Department of Transportation", "url": CTDOT_SALE, "state": "CT",
+     "run": connecticut_dot_land, "requires_sale_match": True,
+     "about": "Explicitly vacant sites accepting public bids on the state transportation department’s active and scheduled notices."},
 ]
 NOT_CARRIED = [
     ("West Des Moines sealed-bid real estate", "https://www.wdm.iowa.gov/home/showpublisheddocument/46357",

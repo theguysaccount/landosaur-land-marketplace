@@ -1062,6 +1062,7 @@ class Site(object):
         kinds = (
             ("cash", "Fixed-price listings", "See each agency’s published purchase requirements."),
             ("min_bid", "Tax sales and other auctions", "The agency figure is an opening or minimum bid. The winning amount may be higher."),
+            ("asking", "Published asking prices", "Check the agency bid or offer terms and applicable fees."),
             ("application", "Land bank and program prices", "Eligibility, application review and permitted uses vary by program."),
         )
         sections = []
@@ -2442,7 +2443,8 @@ class Site(object):
         kpi_ppa = esc(money(r["price"])) if has_price else (
             esc(money(cv["value"]) + "/ac") if (cv and cv.get("value")) else "–"
         )
-        kpi_ppa_lbl = ("Official Min Bid" if r["price_kind"] == "min_bid" else "Official Agency Price") if has_price else "County Benchmark"
+        price_label = {"min_bid": "Official Min Bid", "asking": "Agency Asking Price"}
+        kpi_ppa_lbl = price_label.get(r["price_kind"], "Official Agency Price") if has_price else "County Benchmark"
         kpi_ppa_sub = (
             esc(money(r["price"] / r["acres"]) + "/ac official") if (has_price and r.get("acres"))
             else (esc(adapters.PRICE_KIND.get(r["price_kind"], "Agency figure")) if has_price

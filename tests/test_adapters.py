@@ -274,6 +274,46 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertEqual((row["price"], row["acres"], row["deadline"]), (59800, 0.39, "2026-12-03T21:00:00Z"))
         self.assertNotIn("65,029.76", repr(row))
 
+    def test_multnomah_requires_current_land_classification_and_matching_bid(self):
+        title = "MULTNOMAH COUNTY TAX TITLE AUCTION LIST: DECEMBER 2, 2026\n"
+        report = (title + "AUCTION COMMENCES-10:00 AM\n"
+                  "1 RMLS R100000 TEST ADDR 2023 $23,000 $5,000\n"
+                  "2 RMLS R100001 TEST ADDR 2023 $3,100 MIN. BID Withdrawn\n"
+                  "3 VERTICAL EMAIL R100002 PARKING UNIT 2023 $3,200\n"
+                  "4 RMLS R100003 TEST ADDR 2023 $4,100\n"
+                  "5 RMLS R100004 IMPROVED HOME 2023 $5,100\n")
+
+        def classification(index, category, id_, price):
+            # Mirror the PDF's layout columns and show acreage on the next line.
+            label = f"{index}   {category:17}RMLS         {id_}"
+            return f"{label:48}{'LOT 1':35}{'123 TEST ST, PORTLAND,':33}2023   ${price}\n"
+
+        classifications = (title + f"{'    TYPE             LISTING      ACCT':48}{'LEGAL':35}{'SITUS':33}FCL\n" +
+                           classification(1, "LAND", "R100000", "23,000") + " " * 48 + "0.29 ACRES\n" +
+                           classification(2, "LAND", "R100001", "3,100") +
+                           classification(4, "LAND", "R100003", "4,099") +
+                           classification(5, "IMPROVED", "R100004", "5,100"))
+        rows = adapters.parse_multnomah_auction(report, classifications, adapters.MULTNOMAH_OR_AUCTION,
+                                                adapters.MULTNOMAH_OR_RESOURCES, NOW)
+        self.assertEqual([(r["apn"], r["price"], r["acres"], r["deadline"]) for r in rows],
+                         [("R100000", 23000, 0.29, "2026-12-02T18:00:00Z")])
+
+    def test_connecticut_asking_price_separate_from_deposit_and_after_deadline(self):
+        page = ("<h1>143-152-001A-Torrington-Item No. 858-Bid Date: Still Available</h1>"
+                "<p>PUBLIC BID</p><p>State Department of Transportation</p><p>Bid Date: Still Available</p>"
+                "<p><strong>Location</strong>: Test Route</p><p><strong>Lot Size</strong>: 7,935&plusmn; square feet of vacant land</p>"
+                "<p><strong>Asking Price</strong>: $41,000.00</p><p>$1,000.00 administrative fee</p><p>Deposit: 10%</p>")
+        row = adapters.parse_ctdot_bid(page, adapters.CTDOT_SALE, NOW)
+        self.assertEqual((row["price"], row["price_kind"], row["acres"], row["county"], row["apn"]),
+                         (41000, "asking", round(7935 / 43560, 6), "Northwest Hills Planning Region", ""))
+        self.assertIn("$1,000.00 separate administrative fee", repr(row))
+        dated = page.replace("<p>Bid Date: Still Available</p>", "<p>Bid Date: January 13, 2027 - 2:00 PM</p>")
+        row = adapters.parse_ctdot_bid(dated, adapters.CTDOT_SALE, NOW, require_date=True)
+        self.assertEqual(row["deadline"], "2027-01-13T19:00:00Z")
+        self.assertIsNone(adapters.parse_ctdot_bid(dated, adapters.CTDOT_SALE, NOW + datetime.timedelta(days=120)))
+        self.assertIsNone(adapters.parse_ctdot_bid(page.replace("vacant land", "vacant land improved with a tower"),
+                                                  adapters.CTDOT_SALE, NOW))
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,

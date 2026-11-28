@@ -9,7 +9,7 @@
   var countEl = document.getElementById("map-count");
   var results = document.getElementById("results");
   var scope = box.getAttribute("data-scope");
-  var KIND = { application: "Program price", cash: "Buy It Now", min_bid: "Auction · Min bid", none: "Offer / app" };
+  var KIND = { application: "Program price", asking: "Asking price", cash: "Buy It Now", min_bid: "Auction · Min bid", none: "Offer / app" };
   var STATUS = { availability_unverified: "Sale availability unconfirmed",
     listed: "Buy / Apply", auction_open: "Auction open", auction_terms: "Auction terms",
     proposal_open: "Proposals open", pending: "Sale pending", auction_closed: "Closed"
@@ -461,9 +461,10 @@
     if (openBtn) openBtn.disabled = compareIds.length < 1;
   }
   function acquisitionHref(r) {
+    const isAuction = r[5] === "min_bid" || r[7] === "auction_open" || r[7] === "auction_terms";
     const params = { parcel: r[0], title: r[9], county: r[10], state: r[3], apn: r[11],
       price: r[4], acres: r[6], lat: r[1], lon: r[2], service: r[13] ? "direct_closing" : null,
-      mode: r[13] ? "direct" : r[5] === "min_bid" ? "auction" : r[5] === "cash" ? "buy_now" : "landbank" };
+      mode: r[13] ? "direct" : isAuction ? "auction" : r[5] === "cash" ? "buy_now" : "landbank" };
     return base + "/services/?" + new URLSearchParams(Object.entries(params).filter((entry) => entry[1] != null)) + "#start-land-agent";
   }
   function openCompare() {

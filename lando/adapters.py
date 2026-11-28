@@ -200,6 +200,8 @@ def outline_url(listing):
         return one_parcel_url(NJ_COMPOSITE_PARCELS, "PIN_NODUP='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "conrad-mt-industrial-park":
         return one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "grays-harbor-wa-tax-title":
+        return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     return ""
 
 
@@ -7455,6 +7457,168 @@ def oregon_dot_property_sales(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+GRAYS_HARBOR_WA_SALE = "https://www.graysharbor.gov/departments/foresty-tax-title/purchase-surplus-tax-title-property/"
+GRAYS_HARBOR_WA_ROSTER = "https://cms5.revize.com/revize/graysharborcounty/Forestry/2026%20Available%20Properties%20to%20Purchase_OTC.pdf"
+GRAYS_HARBOR_WA_PARCELS = "https://services3.arcgis.com/CxYgmwdx507LY5lO/arcgis/rest/services/Parcels___Grays_Harbor_County/FeatureServer/1/query"
+
+
+def parse_grays_harbor_wa_roster(report, today):
+    if not re.search(r"Parcel Number\s+Legal Desc\s+Situs Address.*?Assessed Value\s+Purchase Price\s+Available Until", report):
+        raise StructureError("Grays Harbor County's purchase-price and availability columns changed")
+    roster = {}
+    for match in re.finditer(r"^\s*(\d{12})[ \t]+([^\n]+?)[ \t]+\$[\d,.]+[ \t]+\$([\d,.]+)[ \t]+(\d{1,2}/\d{1,2}/\d{4})[ \t]*$", report, re.M):
+        pin, land, price, until = match.groups()
+        if re.search(r"\b(?:sold|roadway|right.of.way|alley|easement|und\s+\d+/\d+|[NSEW]\s+\d{1,2}'\s+OF)\b", land, re.I):
+            continue
+        day = datetime.datetime.strptime(until, "%m/%d/%Y").date()
+        amount = number(price)
+        if day >= today and amount:
+            roster[pin] = (amount, day.isoformat())
+    return roster
+
+
+def grays_harbor_wa_tax_title(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    policy = clean(fetch.text(GRAYS_HARBOR_WA_SALE))
+    if "County Treasurer is the only person authorized" not in policy:
+        raise StructureError("Grays Harbor County's published tax title sale information changed")
+    roster = parse_grays_harbor_wa_roster(pdf_text(fetch, GRAYS_HARBOR_WA_ROSTER),
+                                         now.astimezone(ZoneInfo("America/Los_Angeles")).date())
+    if not roster:
+        return [], {"complete": True, "upstream_total": 0}
+    where = "ORIG_PARCE IN (%s)" % quote_list(sorted(roster))
+    parcels = _arcgis_query(fetch, GRAYS_HARBOR_WA_PARCELS, where, "ORIG_PARCE,VALUE_BLDG,VALUE_LAND,SITUS_CITY,SITUS_ADDR")
+    seen = Counter(feature["attributes"].get("ORIG_PARCE") for feature in parcels)
+    if len(seen.keys() & roster.keys()) < .75 * len(roster):
+        raise StructureError("too few Grays Harbor County OTC parcels match the assessor map")
+    rows = []
+    for feature in parcels:
+        item = feature["attributes"]
+        pin = item.get("ORIG_PARCE")
+        rings = (feature.get("geometry") or {}).get("rings")
+        if (pin not in roster or seen[pin] != 1 or not rings or item.get("VALUE_BLDG") != 0
+                or not number(item.get("VALUE_LAND")) or not (acres := rings_acres(rings))):
+            continue
+        price, date = roster[pin]
+        address = clean(item.get("SITUS_ADDR")).title()
+        row = {
+            "id": "wa-grays-harbor-tax-title-" + pin, "source": "grays-harbor-wa-tax-title",
+            "title": "%s, Grays Harbor County (over-the-counter tax-title land)" % (address or "Parcel " + pin),
+            "state": "WA", "county": "Grays Harbor", "locality": clean(item.get("SITUS_CITY")).title(),
+            "apn": pin, "address": address, "acres": acres, "price": price, "price_kind": "cash", "offering": "sale",
+            "status": "listed", "deadline": None, "offer_close_date": date, "url": GRAYS_HARBOR_WA_SALE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Listed at the county’s current over-the-counter purchase price through %s. Deed fees are separate." % date, GRAYS_HARBOR_WA_ROSTER),
+                      fact("acreage", "%g acres calculated from the published parcel outline" % acres, GRAYS_HARBOR_WA_SALE, "gis_area")],
+            "tags": ["tax-title land", "over the counter"],
+        }
+        apply_geometry(row, rings, one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % pin), "Grays Harbor County parcel GIS")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
+CONEJOS_CO_NOTICE = "https://alpha.creativecirclecdn.com/valley/files/20261110-124354-d9d-11-11-2026%20Valley%20Courier.pdf"
+CONEJOS_CO_NOTICE_SHA256 = "2fd54cf8ee01575cd7e98f675817ac1c2c1389161a492053c20776eabeca41aa"
+# These are the collector's vacant-land auction notices in the November 11 legal publication.
+CONEJOS_CO_AUCTIONS = (
+    ("2026-6", "R571703300023", "Section 3, Township 35, Range 7", datetime.date(2026, 12, 2), 24),
+    ("2026-9", "R556335202072", "Alamosa River Estates, Block B Lot 20", datetime.date(2026, 12, 9), 23),
+)
+
+
+def parse_conejos_co_notices(digest, now):
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/Denver")
+    auctions = [item for item in CONEJOS_CO_AUCTIONS if now.astimezone(zone).date() < item[3]]
+    if not auctions:
+        return []
+    if digest != CONEJOS_CO_NOTICE_SHA256:
+        raise StructureError("Conejos County's published legal notices require renewed verification")
+    rows = []
+    for deed, account, title, day, page in auctions:
+        url = CONEJOS_CO_NOTICE + "#page=%s" % page
+        rows.append({
+            "id": "co-conejos-treasurer-" + deed, "source": "conejos-co-treasurer-sale",
+            "title": "%s (Conejos County treasurer’s deed auction)" % title,
+            "state": "CO", "county": "Conejos", "locality": "", "apn": account, "address": "",
+            "acres": None, "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+            "deadline": None, "auction_day": day.isoformat(),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Vacant land offered in the county treasurer’s public auction notice", "="),
+                      fact("auction_item", deed, "="), fact("auction_date", day.strftime("%B %d, %Y"), "="),
+                      fact("sale_terms", "Registration is required. Confirm the auction time and terms with the county treasurer.", "=")],
+            "tags": ["treasurer’s deed auction", "registration required"],
+        })
+    return rows
+
+
+def conejos_co_treasurer_sale(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    if now.astimezone(ZoneInfo("America/Denver")).date() >= CONEJOS_CO_AUCTIONS[-1][3]:
+        return [], {"complete": True, "upstream_total": 0}
+    rows = parse_conejos_co_notices(hashlib.sha256(fetch.bytes(CONEJOS_CO_NOTICE)).hexdigest(), now)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+ELK_PA_REPOSITORY = "https://countyofelkpa.gov/elk-county-offices/tax-claim-bureau/repository-properties/"
+ELK_PA_ROSTER = "https://countyofelkpa.gov/repository-sale-properties/"
+
+
+def parse_elk_pa_repo_parcel(page, url):
+    heading = re.search(r"<h1\b[^>]*>(.*?)</h1>", page, re.I | re.S)
+    title = clean(heading[1]) if heading else ""
+    place = re.search(r"\bLocated in\s+([A-Z .'-]+\b(?:Township|Borough|City))$", title, re.I)
+    if not title.upper().startswith("VACANT LAND") or not place:
+        return None
+    if re.search(r"\b(?:sold|pending|withdrawn|removed|easement|lease|right.of.way|undivided)\b", title, re.I):
+        return None
+    pin = re.search(r"\bParcel Number:\s*(\d{2}-\d{2}-\d{3}-\d{4})\s*/\s*(\d{6})\b", clean(page), re.I)
+    if not pin:
+        raise StructureError("Elk County's active repository listing lacks the expected parcel identifiers")
+    street = re.search(r">\s*Address:\s*([^<>]*)</p>", page, re.I)
+    locality = clean(place[1]).title()
+    address = clean(street[1]).title() if street else ""
+    return {
+        "id": "pa-elk-repository-" + slug(pin[1] + "-" + pin[2]), "source": "elk-pa-repository",
+        "title": "%s, %s (Elk County vacant repository land)" % (address or "Parcel " + pin[1], locality),
+        "state": "PA", "county": "Elk", "locality": locality, "apn": pin[1] + "/" + pin[2], "address": address,
+        "acres": None, "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+        "url": url, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "Advertised as vacant in the county’s currently offered repository list.", "="),
+                  fact("sale_terms", "Submit a purchase application to the county. Approvals and fees apply.", ELK_PA_REPOSITORY)],
+        "tags": ["tax repository"],
+    }
+
+
+def elk_pa_repository(fetch, now, warn):
+    policy = fetch.text(ELK_PA_REPOSITORY)
+    if "available at any time to bid on" not in clean(policy) or 'href="/repository-sale-properties/"' not in policy:
+        raise StructureError("Elk County's current repository offer and listing policy changed")
+    pending, visited = {ELK_PA_ROSTER}, set()
+    links = set()
+    while pending:
+        url = min(pending)
+        pending.remove(url)
+        visited.add(url)
+        page = fetch.text(url)
+        cards = re.findall(r'<a href="(https://countyofelkpa\.gov/repositorysaleproper/[a-z0-9-]+/)">\s*<h4\b[^>]*>(.*?)</h4>',
+                           page, re.I | re.S)
+        if not cards:
+            raise StructureError("Elk County's repository offer index changed")
+        links.update(href for href, title in cards if clean(title).upper().startswith("VACANT LAND"))
+        pages = re.findall(r'<a class="page-numbers" href="(' + re.escape(ELK_PA_ROSTER) + r'page/\d+/)"', page)
+        pending.update(set(pages) - visited)
+    rows = {}
+    for url in sorted(links):
+        if row := parse_elk_pa_repo_parcel(fetch.text(url), url):
+            rows.setdefault(row["id"], row)
+    return list(rows.values()), {"complete": True, "upstream_total": len(links)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -7845,8 +8009,28 @@ SOURCES = [
      "agency": "Oregon Department of Transportation", "url": OREGON_DOT_SALES, "state": "OR",
      "run": oregon_dot_property_sales, "requires_sale_match": True,
      "about": "Unimproved land the state lists for sale through its standard bid process. Appraisals are not listed as prices."},
+    {"id": "grays-harbor-wa-tax-title", "name": "Grays Harbor County over-the-counter tax-title land",
+     "agency": "Grays Harbor County Treasurer", "url": GRAYS_HARBOR_WA_SALE, "state": "WA", "timezone": "America/Los_Angeles",
+     "run": grays_harbor_wa_tax_title, "requires_sale_match": True,
+     "about": "Currently listed tax-title tracts with published purchase prices and no assessed building value."},
+    {"id": "conejos-co-treasurer-sale", "name": "Conejos County vacant land treasurer’s deed auctions",
+     "agency": "Conejos County Treasurer", "url": CONEJOS_CO_NOTICE, "state": "CO", "timezone": "America/Denver",
+     "run": conejos_co_treasurer_sale, "requires_sale_match": True,
+     "about": "Vacant land in the county treasurer’s legal auction notices. Confirm registration and timing with the treasurer."},
+    {"id": "elk-pa-repository", "name": "Elk County vacant repository land",
+     "agency": "Elk County Tax Claim Bureau", "url": ELK_PA_REPOSITORY, "state": "PA",
+     "run": elk_pa_repository, "requires_sale_match": True,
+     "about": "Vacant parcels in the county's live repository index. Consult the county for offer terms and any applicable minimum."},
 ]
 NOT_CARRIED = [
+    ("Conejos County treasurer’s government website", "https://conejoscounty.colorado.gov/treasurer",
+     "The website returned HTTP 403 for robots.txt. The separately published county legal notices are carried."),
+    ("Arapahoe County treasurer deed sale list", "https://www.arapahoeco.gov/your_county/county_departments/treasurer/treasurer_deed_sales.php",
+     "The county website’s robots.txt disallows this path."),
+    ("Town of Hudson administrative surplus sale notices", "https://www.hudsonnh.gov/administration",
+     "The town’s robots.txt disallows this section."),
+    ("Grand Isle dated sale notice flipbook text", "https://online.fliphtml5.com/xjioc/Website-The-Islander-November-19-2026/",
+     "The legal issue’s host disallows its full issue data path in robots.txt."),
     ("Sarasota County lands available vendor", "https://sarasota.realtdm.com/public/cases/list",
      "The vendor returned HTTP 403 for robots.txt."),
     ("Colorado State Land Board land sales", "https://slb.colorado.gov/land-portfolio/buy-land",

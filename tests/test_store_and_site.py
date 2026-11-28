@@ -101,6 +101,25 @@ class RefreshAndBuildTest(unittest.TestCase):
         self.assertEqual([fact["topic"] for fact in catalog.by_id[archived["id"]]["facts"]], ["parcel_number"])
         self.assertEqual(Catalog(self.data, now=still_open + datetime.timedelta(hours=8)).current(), [])
 
+    def test_auction_with_only_a_date_stops_at_start_of_local_sale_day(self):
+        row = listing(1, source="conejos-co-treasurer-sale", status="auction_terms", auction_day="2026-12-02")
+        store.save_listings(row["source"], [row], self.data)
+        store.save_status({"sources": {row["source"]: {"last_success": "2026-11-28T12:00:00Z"}}}, self.data)
+        start = datetime.datetime(2026, 12, 2, 7, tzinfo=datetime.timezone.utc)
+        current, = Catalog(self.data, now=start - datetime.timedelta(seconds=1)).current()
+        self.assertIsNone(current["deadline"])
+        self.assertEqual(current["closes_at_ms"], int(start.timestamp() * 1000))
+        self.assertEqual(Catalog(self.data, now=start).current(), [])
+
+    def test_static_budget_preserves_dated_auction_and_large_dossiers(self):
+        rows = [
+            listing(1, available=True, price=500),
+            listing(2, available=True, acres=1.2),
+            listing(3, available=True, status="auction_terms", offering="auction", auction_day="2026-12-02"),
+            listing(4, available=True),
+        ]
+        self.assertEqual(build.static_dossier_ids(rows, budget=3), {row["id"] for row in rows[:3]})
+
     def test_failing_source_keeps_last_good_data_and_site_builds_with_sitemap_index(self):
         good = {"id": "st-louis-lra", "name": "STL", "agency": "City", "url": "https://x", "state": "MO", "about": "a",
                 "run": lambda fetch, now, warn: ([listing(1), listing(2, status="auction_open", price=500.0, price_kind="min_bid",

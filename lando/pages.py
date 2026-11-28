@@ -69,7 +69,8 @@ def date_text(iso):
 
 def listing_is_indexable(r):
     """Focus search crawl budget on priced or deadline-bearing active parcels rather than unpriced municipal lot grids."""
-    return bool(r.get("available") and (r.get("price") is not None or r.get("deadline")))
+    return bool(r.get("available") and (r.get("price") is not None or r.get("deadline") or r.get("auction_day")
+                                       or r.get("offer_close_date")))
 
 
 class Site(object):

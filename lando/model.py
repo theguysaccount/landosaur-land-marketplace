@@ -74,9 +74,14 @@ class Catalog(object):
                     )]
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
                 cutoff = parse_time(r.get("deadline")) if r["status"] in ("auction_open", "auction_terms", "proposal_open") else None
-                if available and sale_zone and r.get("offer_close_date"):
-                    day_after = datetime.date.fromisoformat(r["offer_close_date"]) + datetime.timedelta(days=1)
-                    day_cutoff = datetime.datetime.combine(day_after, datetime.time.min, tzinfo=sale_zone)
+                offer_day = r.get("offer_close_date")
+                auction_day = r.get("auction_day")
+                if available and sale_zone and (offer_day or auction_day):
+                    # A dated auction without a published time leaves the map at the start of the sale day.
+                    day = datetime.date.fromisoformat(offer_day or auction_day)
+                    if offer_day:
+                        day += datetime.timedelta(days=1)
+                    day_cutoff = datetime.datetime.combine(day, datetime.time.min, tzinfo=sale_zone)
                     cutoff = min(cutoff, day_cutoff) if cutoff else day_cutoff
                 if available and cutoff and cutoff <= self.now:
                     r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]

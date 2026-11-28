@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T02:10:40Z",
+ "checked": "2026-11-28T02:22:27Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -507,6 +507,24 @@
    "upstream_total": 1988,
    "url": "https://colletoncounty.org/delinquent-tax/tax-sale"
   },
+  "conejos-co-treasurer-sale": {
+   "about": "Vacant land in the county treasurer\u2019s legal auction notices. Confirm registration and timing with the treasurer.",
+   "agency": "Conejos County Treasurer",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:21:08Z",
+   "last_success": "2026-11-28T02:21:08Z",
+   "message": "",
+   "name": "Conejos County vacant land treasurer\u2019s deed auctions",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 1,
+   "state": "CO",
+   "upstream_total": 2,
+   "url": "https://alpha.creativecirclecdn.com/valley/files/20261110-124354-d9d-11-11-2026%20Valley%20Courier.pdf"
+  },
   "connecticut-dot-land": {
    "about": "Explicitly vacant sites accepting public bids on the state transportation department\u2019s active and scheduled notices.",
    "agency": "Connecticut Department of Transportation",
@@ -687,6 +705,24 @@
    "upstream_total": 28077,
    "url": "https://buildingdetroit.org/properties"
   },
+  "elk-pa-repository": {
+   "about": "Vacant parcels in the county's live repository index. Consult the county for offer terms and any applicable minimum.",
+   "agency": "Elk County Tax Claim Bureau",
+   "complete": true,
+   "count": 6,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:22:27Z",
+   "last_success": "2026-11-28T02:22:27Z",
+   "message": "",
+   "name": "Elk County vacant repository land",
+   "notes": [],
+   "ok": true,
+   "read": 6,
+   "seconds": 54,
+   "state": "PA",
+   "upstream_total": 19,
+   "url": "https://countyofelkpa.gov/elk-county-offices/tax-claim-bureau/repository-properties/"
+  },
   "fnsb-chatanika-otc": {
    "about": "Current lot sheets with published West Chatanika prices for over-the-counter purchases.",
    "agency": "Fairbanks North Star Borough Natural Resources Development",
@@ -740,6 +776,24 @@
    "state": "ME",
    "upstream_total": 3,
    "url": "https://gorhammaine.org/about/gorham-industrial-park/"
+  },
+  "grays-harbor-wa-tax-title": {
+   "about": "Currently listed tax-title tracts with published purchase prices and no assessed building value.",
+   "agency": "Grays Harbor County Treasurer",
+   "complete": true,
+   "count": 17,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:21:08Z",
+   "last_success": "2026-11-28T02:21:08Z",
+   "message": "",
+   "name": "Grays Harbor County over-the-counter tax-title land",
+   "notes": [],
+   "ok": true,
+   "read": 17,
+   "seconds": 4,
+   "state": "WA",
+   "upstream_total": 17,
+   "url": "https://www.graysharbor.gov/departments/foresty-tax-title/purchase-surplus-tax-title-property/"
   },
   "greenburgh-ny-auctions": {
    "about": "Vacant residential land in the town's linked auction catalog with published starting bids and individual closing times.",

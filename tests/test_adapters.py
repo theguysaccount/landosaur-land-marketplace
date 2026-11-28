@@ -1037,6 +1037,37 @@ Zoning R-1 Single Family Residential
         self.assertEqual((row["apn"], row["acres"], row["price"]), ("17S04W2733-1300", 1.87, None))
 
 
+    def test_grays_harbor_uses_purchase_price_and_excludes_sold_and_fractional_interests(self):
+        text = """Parcel Number   Legal Desc    Situs Address (if any)   Assessed Value   Purchase Price   Available Until
+026000601000    PORTLAND LOTS 10-18 INC BLK 6 - SOLD     $2,300.00   $1,741.61   12/2/2026
+830501200500    ABER WAX EAST LOT 5 BLK 12   $609.00   $1,758.39   12/2/2026
+029301700103    WAX & BENNS NLY 6' OF SLY 56' OF LOTS 1-3 INC BLK 17 UND 1/2 INT    $490.00    $375.00   9/14/2027
+"""
+        self.assertEqual(adapters.parse_grays_harbor_wa_roster(text, datetime.date(2026, 11, 27)), {
+            "830501200500": (1758.39, "2026-12-02"),
+        })
+        self.assertEqual(adapters.parse_grays_harbor_wa_roster(text, datetime.date(2026, 12, 3)), {})
+
+    def test_conejos_keeps_verified_vacant_auction_dates_without_guessing_bid_or_time(self):
+        with self.assertRaises(adapters.StructureError):
+            adapters.parse_conejos_co_notices("changed", NOW)
+        rows = adapters.parse_conejos_co_notices(adapters.CONEJOS_CO_NOTICE_SHA256, NOW)
+        self.assertEqual([(r["apn"], r["auction_day"], r["deadline"], r["price"]) for r in rows], [
+            ("R571703300023", "2026-12-02", None, None), ("R556335202072", "2026-12-09", None, None),
+        ])
+
+
+    def test_elk_carries_named_vacant_parcel_without_assessment_or_prior_owner(self):
+        text = """<h1>VACANT LAND – 40X IRR – Located in RIDGWAY TOWNSHIP</h1>
+        <p>Address: 603 W MAIN ST</p><p>Parcel Number: 09-12-245-2459 &nbsp; /011950</p>
+        <p>Owner: PRIVATE PERSON</p><p>Assessed Value: $10,985.76</p>"""
+        row = adapters.parse_elk_pa_repo_parcel(text, adapters.ELK_PA_REPOSITORY)
+        self.assertEqual((row["apn"], row["address"], row["locality"], row["price"]),
+                         ("09-12-245-2459/011950", "603 W Main St", "Ridgway Township", None))
+        self.assertNotIn("PRIVATE PERSON", repr(row))
+        self.assertIsNone(adapters.parse_elk_pa_repo_parcel(text.replace("VACANT LAND", "BUILDING ONLY"), row["url"]))
+
+
 class OfficialInventoryExtensionTest(unittest.TestCase):
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
         attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,

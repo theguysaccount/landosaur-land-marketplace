@@ -31,6 +31,7 @@ from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 STATIC = ["style.css", "theme.js", "geo.js", "availability.js", "watchlist.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 ARCHIVED_PARCELS = "data/archived-parcels"
 STATIC_DOSSIER_LIMIT = 54000
+STATIC_HTML_TARGET = 55000
 
 
 def agent_download(w):
@@ -118,13 +119,14 @@ def init_listing_worker(site, static_ids):
     _static_dossier_ids = static_ids
 
 
-def static_dossier_ids(listings):
+def static_dossier_ids(listings, budget=STATIC_DOSSIER_LIMIT):
     active = [row for row in listings if row["available"]]
-    if len(active) <= STATIC_DOSSIER_LIMIT:
+    if len(active) <= budget:
         return {row["id"] for row in active}
 
-    # Preserve indexable and rural dossiers on disk. Give each agency a share of the remaining slots.
-    required = {row["id"] for row in active if listing_is_indexable(row) or (row.get("acres") or 0) >= 1}
+    # Preserve indexed, auction and rural dossiers on disk. Each agency gets a share of the remaining slots.
+    required = {row["id"] for row in active if listing_is_indexable(row) or row.get("offering") == "auction"
+                or (row.get("acres") or 0) >= 1}
     by_source = {}
     for row in active:
         if row["id"] not in required:
@@ -133,7 +135,7 @@ def static_dossier_ids(listings):
     for source, rows in by_source.items():
         rows.sort(key=lambda row: (row.get("lat") is None, -(row.get("acres") or 0), row["id"]))
         candidates.extend((rank, source, row["id"]) for rank, row in enumerate(rows))
-    limit = max(0, STATIC_DOSSIER_LIMIT - len(required))
+    limit = max(0, budget - len(required))
     return required | {parcel_id for _, _, parcel_id in sorted(candidates)[:limit]}
 
 
@@ -161,7 +163,9 @@ def write_listings(writer, site):
     listings = site.cat.listings
     if len(site.cat.by_id) != len(listings):
         raise ValueError("listing IDs must be unique across all official sources")
-    static_ids = static_dossier_ids(listings)
+    # The 404 template and data hub are counted separately from the hub pages already in the writer.
+    hub_count = len(writer.pages) + 2
+    static_ids = static_dossier_ids(listings, min(STATIC_DOSSIER_LIMIT, STATIC_HTML_TARGET - hub_count))
     workers = min(os.cpu_count() or 1, 4)
     if len(listings) < 5000 or workers < 2 or "fork" not in multiprocessing.get_all_start_methods():
         archived = write_listing_pages(writer, site, listings, static_ids)

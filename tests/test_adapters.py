@@ -1930,6 +1930,43 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("Private prior holder", repr(row))
         self.assertEqual(pdf.call_count, 3)
 
+    def test_sheridan_publishes_one_current_proposal_after_matching_both_vacant_tracts(self):
+        from lando.adapters import SHERIDAN_WY_AGENCY, SHERIDAN_WY_CLOSE, SHERIDAN_WY_OPEN, SHERIDAN_WY_TERMS
+
+        lot = {"id": 168930, "status": "Active", "auctionType": "RequestForProposal", "startingBid": "0.0",
+               "biddingEndDate": SHERIDAN_WY_CLOSE, "acreage": "Gross Acres: 1.7",
+               "legalDescription": "Tracts A and B, Holly Ponds Planned Unit Development Unit No. 9, per recorded plat"}
+        sale = {"id": 7633, "agencyName": SHERIDAN_WY_AGENCY, "status": "Active", "canRegister": True,
+                "openingDate": SHERIDAN_WY_OPEN, "closingDate": SHERIDAN_WY_CLOSE, "lots": [lot]}
+        ring = [[-106.981, 44.807], [-106.98, 44.807], [-106.98, 44.8078], [-106.981, 44.8078], [-106.981, 44.807]]
+        geometry = {"type": "Polygon", "coordinates": [ring]}
+        shape = {"properties": {"id": lot["id"]}, "geometry": geometry}
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = f'<a href="{SHERIDAN_WY_TERMS}">Sheridan Request For Proposals</a>'
+        fetch.json.side_effect = {adapters.SHERIDAN_WY_SALE_API: sale,
+                                  adapters.SHERIDAN_WY_SALE_MAP: {"features": [shape]}}.__getitem__
+        tracts = [{"attributes": {"PIN": pin, "descript": f"HOLLY PONDS PUD NO. 9 TRACT {tract} (AREA)",
+                                  "totalimps": 0, "taxyear": "2026"}, "geometry": {"rings": [ring]}}
+                  for pin, tract in adapters.SHERIDAN_WY_TRACTS.items()]
+        with patch.object(adapters, "arcgis_query", return_value=("https://assessor.example", tracts)) as assessor, \
+                patch.object(adapters, "rings_acres", return_value=1.7):
+            rows, result = adapters.sheridan_wy_rfp(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual(result["upstream_total"], 1)
+            self.assertEqual((row["acres"], row["price"], row["price_kind"], row["status"], row["deadline"]),
+                             (1.7, None, "none", "proposal_open", SHERIDAN_WY_CLOSE))
+            self.assertEqual(row["geometry"], [[tuple(point) for point in ring]])
+            self.assertNotIn("name", assessor.call_args.args[3].lower())
+            self.assertIn("56842146700133 / 56842146700233", row["apn"])
+            tracts[1]["attributes"]["totalimps"] = 1
+            self.assertEqual(adapters.sheridan_wy_rfp(fetch, NOW, self.fail)[0], [])
+            tracts[1]["attributes"]["totalimps"] = 0
+            sale["canRegister"] = False
+            self.assertEqual(adapters.sheridan_wy_rfp(fetch, NOW, self.fail)[0], [])
+            sale["canRegister"] = True
+            cutoff = datetime.datetime(2026, 12, 16, tzinfo=datetime.timezone.utc)
+            self.assertEqual(adapters.sheridan_wy_rfp(fetch, cutoff, self.fail)[0], [])
+
     def test_riverton_joins_only_signed_offer_lots_to_the_city_parcel_roll(self):
         import hashlib
 

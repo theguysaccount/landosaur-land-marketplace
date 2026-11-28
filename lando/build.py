@@ -586,7 +586,7 @@ def build(dist, data_dir=None, now=None, log=print):
                 vs_pct = int(round(((ppa - bench) / bench) * 100.0))
         rows.append([r["id"], r.get("lat"), r.get("lon"), r["state"], r["price"], r["price_kind"], r["acres"],
                      r["status"], 1 if r["available"] else 0, r["title"], r["county_label"], r.get("apn") or "",
-                     (r.get("deadline") or "")[:10], 0, vs_pct, r["closes_at_ms"]])
+                     r["deadline_date"], 0, vs_pct, r["closes_at_ms"]])
     w.write("data/map.json", json.dumps({"fields": ["id", "lat", "lon", "state", "price", "kind", "acres", "status", "available",
                                                     "title", "county", "apn", "deadline", "direct", "vs_bench_pct", "closes_at_ms"], "rows": rows}, separators=(",", ":")))
     out = io.StringIO()

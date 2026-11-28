@@ -112,6 +112,17 @@ class RefreshAndBuildTest(unittest.TestCase):
         self.assertEqual(current["closes_at_ms"], int(start.timestamp() * 1000))
         self.assertEqual(Catalog(self.data, now=start).current(), [])
 
+    def test_deadline_displays_source_local_calendar_day_and_closes_at_exact_instant(self):
+        row = listing(1, source="salt-lake-county-surplus", status="proposal_open", deadline="2026-12-16T00:00:00Z")
+        store.save_listings(row["source"], [row], self.data)
+        store.save_status({"sources": {row["source"]: {"last_success": "2026-12-15T12:00:00Z"}}}, self.data)
+        cutoff = datetime.datetime(2026, 12, 16, tzinfo=datetime.timezone.utc)
+        active, = Catalog(self.data, now=cutoff - datetime.timedelta(seconds=1)).current()
+        self.assertEqual(active["deadline_date"], "2026-12-15")
+        self.assertEqual(active["deadline"], row["deadline"])
+        self.assertEqual(active["closes_at_ms"], int(cutoff.timestamp() * 1000))
+        self.assertEqual(Catalog(self.data, now=cutoff).current(), [])
+
     def test_static_budget_preserves_dated_auction_and_large_dossiers(self):
         rows = [
             listing(1, available=True, price=500),

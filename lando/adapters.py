@@ -222,6 +222,8 @@ def outline_url(listing):
         return one_parcel_url(PARK_CO_STATE_PARCELS, PARK_CO_STATE_MATCH, PARK_CO_STATE_FIELDS)
     if listing["source"] == "windham-ct-surplus" and re.fullmatch(r"\d+(?:-\d+)+", listing["apn"]):
         return one_parcel_url(CT_CAMA_PARCELS, f"Town_Name='Windham' AND Parcel_ID='{listing['apn']}'", "Parcel_ID,Location_1")
+    if listing["source"] == "wy-osli-sheridan-rfp":
+        return SHERIDAN_WY_SALE_MAP
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -10433,6 +10435,94 @@ def riverton_wy_industrial(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(RIVERTON_WY_OFFERS)}
 
 
+SHERIDAN_WY_RFP = "https://lands.wyo.gov/commercial-rfp"
+SHERIDAN_WY_TERMS = "https://drive.google.com/file/d/1xq6MKz8XOGB1ihchTkcdUfjxgbuDWRWe/view?usp=drive_link"
+SHERIDAN_WY_SALE = "https://app.efficientmarkets.com/salegroup/7633"
+SHERIDAN_WY_SALE_API = "https://api.efficientmarkets.com/v1/SaleGroup/7633"
+SHERIDAN_WY_SALE_MAP = "https://api.efficientmarkets.com/v1/geojson/salegroups/7633"
+SHERIDAN_WY_PARCELS = "https://services5.arcgis.com/V4b98G4pSkzvUam9/arcgis/rest/services/Parcels/FeatureServer/0/query"
+SHERIDAN_WY_TRACTS = {"56842146700133": "A", "56842146700233": "B"}
+SHERIDAN_WY_AGENCY = "Wyoming Office of State Lands and Investments"
+SHERIDAN_WY_OPEN = "2026-11-02T16:00:00Z"
+SHERIDAN_WY_CLOSE = "2026-12-16T00:00:00Z"
+
+
+def sheridan_wy_rfp(fetch, now, warn):
+    empty = [], {"complete": True, "upstream_total": 0}
+    opens = datetime.datetime.fromisoformat(SHERIDAN_WY_OPEN.replace("Z", "+00:00"))
+    closes = datetime.datetime.fromisoformat(SHERIDAN_WY_CLOSE.replace("Z", "+00:00"))
+    if not opens <= now < closes:
+        return empty
+    published = fetch.text(SHERIDAN_WY_RFP)
+    if SHERIDAN_WY_TERMS not in published or "Sheridan Request For Proposals" not in clean(published):
+        return empty
+    sale = fetch.json(SHERIDAN_WY_SALE_API)
+    if sale.get("id") != 7633 or sale.get("agencyName") != SHERIDAN_WY_AGENCY:
+        raise StructureError("Wyoming's Sheridan solicitation catalog changed")
+    if (sale.get("status") != "Active" or sale.get("canRegister") is not True
+            or sale.get("openingDate") != SHERIDAN_WY_OPEN or sale.get("closingDate") != SHERIDAN_WY_CLOSE):
+        return empty
+    lots = sale.get("lots") or []
+    if len(lots) != 1:
+        return empty
+    lot = lots[0]
+    if (lot.get("id") != 168930 or lot.get("status") != "Active" or lot.get("auctionType") != "RequestForProposal"
+            or lot.get("biddingEndDate") != SHERIDAN_WY_CLOSE or lot.get("acreage") != "Gross Acres: 1.7"
+            or not clean(lot.get("legalDescription")).startswith("Tracts A and B, Holly Ponds Planned Unit Development Unit No. 9,")):
+        return empty
+
+    where = (f"PIN IN ({quote_list(SHERIDAN_WY_TRACTS)}) "
+             "AND UPPER(name) LIKE 'STATE OF WYOMING,%STATE BOARD OF LAND%'")
+    fields = "PIN,descript,totalimps,taxyear"
+    _, parcels = arcgis_query(fetch, SHERIDAN_WY_PARCELS, where, fields)
+    if len(parcels) != len(SHERIDAN_WY_TRACTS) or {p["attributes"].get("PIN") for p in parcels} != SHERIDAN_WY_TRACTS.keys():
+        return empty
+    county_points = []
+    for parcel in parcels:
+        attr = parcel["attributes"]
+        tract = SHERIDAN_WY_TRACTS[attr["PIN"]]
+        rings = (parcel.get("geometry") or {}).get("rings") or []
+        if (clean(attr.get("taxyear")) != "2026" or attr.get("totalimps") != 0 or not rings
+                or not clean(attr.get("descript")).startswith(f"HOLLY PONDS PUD NO. 9 TRACT {tract} (")):
+            return empty
+        county_points.extend(point for ring in rings for point in ring)
+
+    row = {
+        "id": "wy-sheridan-holly-ponds-tracts-a-b", "source": "wy-osli-sheridan-rfp",
+        "title": "Holly Ponds tracts A and B, Sheridan (Wyoming trust land proposals)",
+        "state": "WY", "county": "Sheridan", "locality": "Sheridan", "address": "1589 and 1595 W 5th St",
+        "apn": " / ".join(SHERIDAN_WY_TRACTS), "acres": 1.7, "price": None, "price_kind": "none",
+        "offering": "offer", "status": "proposal_open", "deadline": SHERIDAN_WY_CLOSE,
+        "url": SHERIDAN_WY_RFP, "lat": None, "lon": None, "geometry": None,
+        "facts": [
+            fact("availability", "The state is accepting development proposals for the two vacant tracts together.", SHERIDAN_WY_TERMS),
+            fact("proposal_deadline", "December 15, 2026 at 5:00 p.m. Mountain", SHERIDAN_WY_TERMS),
+            fact("sale_terms", "Proposals may request purchase, lease or exchange. If the state chooses to sell, it will hold a separate public auction.", SHERIDAN_WY_TERMS),
+            fact("acreage", "Approximately 1.7 acres total, surface rights only", SHERIDAN_WY_TERMS),
+            *(fact("parcel_map", f"Sheridan County assessor outline for Tract {tract}",
+                   one_parcel_url(SHERIDAN_WY_PARCELS, f"PIN='{pin}'", fields))
+              for pin, tract in SHERIDAN_WY_TRACTS.items()),
+            fact("submission", "State trust land proposal details and submission portal", SHERIDAN_WY_SALE),
+        ],
+        "tags": ["state trust land", "development proposal", "surface rights"],
+    }
+    shapes = fetch.json(SHERIDAN_WY_SALE_MAP).get("features") or []
+    if len(shapes) == 1 and (shapes[0].get("properties") or {}).get("id") == lot["id"]:
+        outline = shapes[0].get("geometry") or {}
+        rings = outline.get("coordinates") if outline.get("type") == "Polygon" else None
+        area = rings_acres(rings)
+        if area and abs(area - row["acres"]) <= 0.03:
+            county_bounds = [(min(axis), max(axis)) for axis in zip(*county_points)]
+            sale_bounds = [(min(axis), max(axis)) for axis in zip(*rings[0])]
+            if len(county_bounds) == len(sale_bounds) == 2 and all(
+                abs(a - b) <= 0.00002 for county, marketed in zip(county_bounds, sale_bounds) for a, b in zip(county, marketed)
+            ):
+                apply_geometry(row, rings, SHERIDAN_WY_SALE_MAP, "state's submission portal")
+                if row["geometry"]:
+                    row["facts"][-1] = fact("parcel_outline", "Combined sale outline checked against both county parcel boundaries", SHERIDAN_WY_SALE_MAP)
+    return [row], {"complete": True, "upstream_total": 1}
+
+
 DENALI_AK_LAND = "https://www.denaliborough.org/landmanagement"
 
 
@@ -12700,6 +12790,10 @@ SOURCES = [
      "agency": "Alamosa County Treasurer, Colorado", "url": ALAMOSA_CO_SCHEDULE, "state": "CO", "timezone": "America/Denver",
      "run": alamosa_co_tax_deed, "requires_sale_match": True,
      "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start."},
+    {"id": "wy-osli-sheridan-rfp", "name": "Sheridan vacant trust land purchase proposals",
+     "agency": SHERIDAN_WY_AGENCY, "url": SHERIDAN_WY_RFP, "state": "WY", "timezone": "America/Denver",
+     "run": sheridan_wy_rfp, "requires_sale_match": True,
+     "about": "The state invites competitive purchase, lease or exchange proposals for two vacant tracts as one offering."},
     {"id": "riverton-wy-industrial", "name": "Riverton vacant industrial lots on Piper Drive",
      "agency": "City of Riverton, Wyoming", "url": RIVERTON_WY_DOCS["terms"][0], "state": "WY",
      "run": riverton_wy_industrial, "requires_sale_match": True,
@@ -12895,6 +12989,8 @@ NOT_CARRIED = [
      "The directory license limits use to personal or internal purposes and does not permit republishing or reuse of its data."),
     ("Navajo County legacy board-of-supervisors packet index", "https://public.destinyhosted.com/navajdocs/",
      "The official meeting vendor disallows access to the older packet index and agenda routes in robots.txt."),
+    ("Wyoming Sheridan RFP raw PDF download", "https://drive.google.com/uc?export=download&id=1xq6MKz8XOGB1ihchTkcdUfjxgbuDWRWe",
+     "Drive disallows its automated download paths. The state’s announcement, public solicitation catalog and county assessment are carried."),
     ("Connecticut CTsource Bid Board", "https://webprocure.proactiscloud.com/wp-web-public/en/",
      "The state procurement vendor returned HTML in place of robots.txt. Windham’s separate town bid notice is carried."),
     ("Arkansas GeoStor statewide assessor portal", "https://geostor.arkansas.gov/",

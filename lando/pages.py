@@ -70,10 +70,6 @@ def price_line(r):
     return "%s %s" % (adapters.PRICE_KIND.get(r["price_kind"], "Price"), money(r["price"]))
 
 
-def date_text(iso):
-    return (iso or "")[:10]
-
-
 def listing_is_indexable(r):
     """Focus search crawl budget on priced or deadline-bearing active parcels rather than unpriced municipal lot grids."""
     return bool(r.get("available") and (r.get("price") is not None or r.get("deadline") or r.get("auction_day")
@@ -244,7 +240,7 @@ class Site(object):
                     self.u(self.cat.listing_path(r)), esc(r["title"]), esc(where), source_link, self.badge(r),
                     r["price"] if r["price"] is not None else "", esc(price_line(r)) if r["price"] is not None else "–",
                     r["acres"] or "", esc(acres_text(r["acres"])) if r["acres"] else "–",
-                    ppa_td, estimate_td, esc(date_text(r.get("deadline"))) or "–",
+                    ppa_td, estimate_td, esc(r.get("deadline_date")) or "–",
                 )
             )
         ppa_th = '<th scope="col" class="n">$/acre</th>' if show_ppa else ""

@@ -7085,6 +7085,256 @@ def northumberland_pa_repository(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+CLEAR_LAKE_SD_CITY = "https://clearlakesd.com/directory/clear-lake-area-development/"
+CLEAR_LAKE_SD_SALE = "https://www.clearlakeadc.com/copy-of-northside-acres"
+
+
+def parse_clear_lake_industrial_lots(page):
+    text = clean(page)
+    if "Industrial Park Addition to the City of Clear Lake" not in text:
+        raise StructureError("Clear Lake's industrial park legal location changed")
+    available = re.search(r"\bLots ([\d,\s]+(?:and\s+\d+)?)\s+are still available\b", text, re.I)
+    if not available:
+        if re.search(r"\b(?:all (?:industrial )?lots (?:are )?sold|no (?:industrial )?lots (?:are )?available)\b", text, re.I):
+            return []
+        raise StructureError("Clear Lake's list of available industrial lots changed")
+    sold = set(re.findall(r"\bLot (\d+) is sold\b", text, re.I))
+    return sorted(set(re.findall(r"\d+", available[1])) - sold, key=int)
+
+
+def clear_lake_sd_industrial(fetch, now, warn):
+    city = fetch.text(CLEAR_LAKE_SD_CITY)
+    if "Clear Lake Area Development Corporation" not in city or "https://www.clearlakeadc.com/" not in city:
+        raise StructureError("Clear Lake city directory no longer identifies the development agency")
+    lots = parse_clear_lake_industrial_lots(fetch.text(CLEAR_LAKE_SD_SALE))
+    rows = [{
+        "id": "sd-clear-lake-industrial-" + lot, "source": "clear-lake-sd-industrial",
+        "title": "Lot %s, Clear Lake Industrial Park Addition" % lot,
+        "state": "SD", "county": "Deuel", "locality": "Clear Lake", "apn": "", "address": "",
+        "acres": None, "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+        "deadline": None, "url": CLEAR_LAKE_SD_SALE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "Named as available in the Clear Lake Area Development Corporation’s industrial park listing", "="),
+                  fact("agency", "The city directs inquiries to the Clear Lake Area Development Corporation.", CLEAR_LAKE_SD_CITY),
+                  fact("legal_description", "Lot %s, Industrial Park Addition, Clear Lake, Deuel County" % lot, "=")],
+        "tags": ["industrial park"],
+    } for lot in lots]
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+CLARK_OH_LOTS = "https://clarkcountylandbank.org/vacant-lots/"
+
+
+def parse_clark_oh_vacant(page):
+    text = clean(page)
+    section = re.search(r"\bBelow are properties currently owned by the Land Bank\..*?\bProperty Acquisition Application\s+(.*?)\s+Where to Find Us\b", text, re.I)
+    if not section:
+        raise StructureError("Clark County Land Bank's current vacant property and application sections changed")
+    rows = []
+    for match in re.finditer(r"([\d-]+ [A-Z0-9. -]+, SPRINGFIELD) (455\d{2}) P#:\s*(\d{3} \d{2} \d{5} \d{3} \d{3}) Price:\s*Auditor's Appraised Value", section[1]):
+        address, postal, pin = match.groups()
+        address = address.title() + " " + postal
+        pin = pin.replace(" ", "")
+        rows.append({
+            "id": "oh-clark-lra-" + pin, "source": "clark-oh-landbank",
+            "title": "%s (Clark County Land Bank vacant lot)" % address, "state": "OH", "county": "Clark", "locality": "Springfield",
+            "apn": pin, "address": address, "acres": None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": CLARK_OH_LOTS, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Listed in the Land Bank’s vacant lot acquisition program", "="),
+                      fact("sale_terms", "Use the Land Bank’s acquisition application and ask it to confirm the current auditor-based price.", "=")],
+            "tags": ["land bank"],
+        })
+    if not rows:
+        raise StructureError("Clark County Land Bank's individually offered vacant lots could not be read")
+    return rows
+
+
+def clark_oh_landbank(fetch, now, warn):
+    rows = parse_clark_oh_vacant(fetch.text(CLARK_OH_LOTS))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+ATHENS_OH_VACANT = "https://athenscountylandbank.com/property-type/vacant-lots/"
+
+
+def parse_athens_oh_offer(page, url):
+    text = clean(page)
+    if not re.search(r"Property Type\s+Vacant Lots\s+Property Status\s+For Sale\b", text):
+        return None
+    metadata = re.search(r'<script\s+type="application/ld\+json">(.*?)</script>', page, re.S)
+    area = re.search(r"\bLand Area\s+([\d,]+)\s+sq ft\b", text, re.I)
+    square_feet = number(area[1]) if area else None
+    if not metadata or not square_feet:
+        raise StructureError("Athens County Land Bank's vacant lot fields changed")
+    item = json.loads(metadata[1])
+    description = item.get("description") or ""
+    pins = re.search(r"Parcel number\(s\):\s*([A-Z]\d{12}(?:\s*,\s*[A-Z]\d{12})*)\b", description)
+    identity = item.get("name")
+    if item.get("@type") != "Place" or not identity or not pins or item.get("url", "").rstrip("/") != url.rstrip("/"):
+        raise StructureError("Athens County Land Bank's exact lot identifiers changed")
+    parcel_ids = re.findall(r"[A-Z]\d{12}", pins[1])
+    address = item.get("address") or {}
+    geo = item.get("geo") or {}
+    lat, lon = geo.get("latitude"), geo.get("longitude")
+    if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and 38 < lat < 40 and -84 < lon < -80):
+        lat, lon = None, None
+    facts = [fact("availability", "Currently offered as vacant land on the official Athens County Land Bank catalog", "="),
+             fact("parcel_number", ", ".join(parcel_ids), "=")]
+    if len(parcel_ids) > 1:
+        facts.append(fact("sale_terms", "The Land Bank lists these parcels together as one acquisition.", "="))
+    if re.search(r"\b(?:in|within) the floodplain\b", description, re.I):
+        facts.append(fact("restrictions", "The Land Bank identifies the property as being in the floodplain and unsuitable for new construction.", "="))
+    return {
+        "id": "oh-athens-lra-" + parcel_ids[0].lower(), "source": "athens-oh-landbank", "title": identity + " (Athens County Land Bank)",
+        "state": "OH", "county": "Athens", "locality": clean(address.get("addressLocality") or ""),
+        "apn": ", ".join(parcel_ids), "address": clean(address.get("streetAddress") or ""),
+        "acres": round(square_feet / 43560, 4), "price": None, "price_kind": "none", "offering": "sale",
+        "status": "listed", "deadline": None, "url": url, "lat": lat, "lon": lon, "geometry": None,
+        "facts": facts, "tags": ["land bank"],
+    }
+
+
+def athens_oh_landbank(fetch, now, warn):
+    pending, visited = {ATHENS_OH_VACANT}, set()
+    links = set()
+    while pending:
+        index_url = pending.pop()
+        visited.add(index_url)
+        page = fetch.text(index_url)
+        cards = re.split(r'<div class="item-listing-wrap[^>]+data-hz-id="\d+"[^>]*>', page)[1:]
+        if not cards:
+            raise StructureError("Athens County Land Bank's vacant inventory cards changed")
+        for card in cards:
+            heading = re.search(r'<h2\b[^>]*class="item-title[^"]*"[^>]*>\s*<a\b[^>]+href="(https://athenscountylandbank\.com/property/[a-z0-9-]+/)"', card)
+            if heading and re.search(r'class="label-status[^>]*>\s*For Sale\s*</a>', card):
+                links.add(heading[1])
+        pages = re.findall(r'\bclass="page-link"\s+href="(' + re.escape(ATHENS_OH_VACANT) + r'page/\d+/)"', page)
+        pending.update(set(pages) - visited)
+    rows = [row for url in sorted(links) if (row := parse_athens_oh_offer(fetch.text(url), url))]
+    return rows, {"complete": True, "upstream_total": len(links)}
+
+
+RTC_WASHOE_SALE = "https://rtcwashoe.com/property-disposals/"
+WASHOE_NV_PROPERTY_CARD = "https://www.washoecounty.gov/assessor/cama/?parid="
+WASHOE_NV_PROPERTY_QUERY = "https://www.washoecounty.gov/assessor/cama/search.php?command="
+
+
+def parse_rtc_washoe_sale(page, now):
+    from zoneinfo import ZoneInfo
+
+    text = clean(page)
+    if "Property Disposals" not in text:
+        raise StructureError("RTC Washoe's real property disposition page changed")
+    notice = re.search(r"NOTICE OF INTENT TO SELL REAL PROPERTY BY SEALED BIDDING\s+(.*?)(?:Documents:|Bid Opening:)", text, re.I)
+    if not notice:
+        return []
+    terms = re.search(r"Assessors? Parcel Numbers?:\s*APN\s*(\d{3}-\d{3}-\d{2})\s+Address\(es\):\s*([^:]+?)"
+                      r"\s+Type of Property:\s*Vacant Land\s+Minimum Bid Amount:\s*\$([\d,.]+).*?"
+                      r"Bid Deadline:\s*(\d{1,2}:\d{2})\s*([ap])\.m\.\s+on\s+([A-Za-z]+ \d{1,2}, \d{4})", notice[1], re.I)
+    if not terms:
+        raise StructureError("RTC Washoe's vacant land sealed bid terms changed")
+    pin, address, minimum, time_value, period, date = terms.groups()
+    close = datetime.datetime.strptime("%s %s%sM" % (date, time_value, period), "%B %d, %Y %I:%M%p")
+    close = close.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    if close <= now:
+        return []
+    return [{
+        "id": "nv-rtc-washoe-" + slug(pin), "source": "rtc-washoe-land-sales", "title": "%s (RTC Washoe surplus land)" % address,
+        "state": "NV", "county": "Washoe", "locality": "", "address": address, "apn": pin,
+        "acres": None, "price": number(minimum), "price_kind": "min_bid", "offering": "auction",
+        "status": "auction_terms", "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": RTC_WASHOE_SALE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "RTC Washoe lists this parcel as vacant land for sale by sealed bid.", "="),
+                  fact("bid_deadline", close.strftime("%B %d, %Y at %I:%M %p PT"), "="),
+                  fact("sale_terms", "Confirm the parcel number and bid paperwork directly with RTC Washoe before submitting a bid.", "=")],
+        "tags": ["transportation surplus", "sealed bid"],
+    }]
+
+
+def rtc_washoe_land_sales(fetch, now, warn):
+    rows = parse_rtc_washoe_sale(fetch.text(RTC_WASHOE_SALE), now)
+    for row in rows:
+        pin = row["apn"].replace("-", "")
+        index = fetch.json(WASHOE_NV_PROPERTY_QUERY + "search_gsa",
+                           payload={"search_term": pin, "noclosed": False, "sonly": False, "download": False})
+        matches = index.get("results") or []
+        if len(matches) != 1 or not str(matches[0].get("parcel_id") or "").isdecimal():
+            raise StructureError("RTC Washoe auction parcel did not match a unique county property record")
+        reply = fetch.json(WASHOE_NV_PROPERTY_QUERY + "get_parcel", payload={"parcel_id": matches[0]["parcel_id"]})
+        card = reply.get("property") or {}
+        details = (card.get("qi") or {}).get("1") or {}
+        acres = number(card.get("LandSizeAC"))
+        if card.get("strap") != pin or not acres or str(details.get("YearBlt")) != "0":
+            raise StructureError("RTC Washoe auction acreage or unimproved county assessment did not match")
+        row["acres"] = round(acres, 4)
+        row["locality"] = clean(str(details.get("City") or "")).title()
+        row["facts"].append(fact("acreage", "%g acres per the county parcel card" % row["acres"], WASHOE_NV_PROPERTY_CARD + pin))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+WAYCROSS_GA_SALE = "https://www.waycrossga.gov/279/Available-Properties-for-Sale"
+# Exact city aerial exhibits checked for structures. Changed and newly listed exhibits require review.
+WAYCROSS_GA_REVIEWED_AERIALS = {
+    "1167": "ed2414e7b1e8cfecb891791d9f526e2d96cae239081b11c1e6f8d6dcb9ddf114",
+    "1170": "5d95fdba62669c031c6b46fc1b3ad2ab3b1bea02acc267bcd2eb38ff2d59ed79",
+    "1178": "c7797d169f8494cd1faa85ef72012e9e18a72646a68a1490cd36b8bca2fb413d",
+    "1192": "cfae7bf78522576936edb32f36dbcc80e55ae4575039a961c52eb64c4257a334",
+    "1197": "7ba2cc3c2fc019c54a5e6bc5e4533a538c1985d426b18a3ce516ac1b97c4cbab",
+    "1228": "8d48d2d8d8060e47a50ca80adb3de832ed51d2063fddad457aff8d9e0254c6bd",
+    "1238": "1acd3a9edbde2257db56f7eed381e31dc4efd67acccbf970074fe7b05a8e509a",
+}
+
+
+def parse_waycross_ga_offer_table(page, section_index):
+    tables = [table for table in re.findall(r"<table\b[^>]*>(.*?)</table>", page, re.I | re.S)
+              if all(heading in clean(table) for heading in ("Parcel #", "Commission District", "Status & Notes"))]
+    if len(tables) != 2:
+        raise StructureError("Waycross city and Land Bank sale tables changed")
+    open_statuses = ("Available", "Available - multiple inquiries received") if section_index else ("Available",)
+    rows = []
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", tables[section_index], re.I | re.S):
+        raw = re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.I | re.S)
+        if len(raw) != 7:
+            continue
+        _, address, pin, acres, zoning, _, availability = map(clean, raw)
+        links = re.findall(r'<a\b[^>]*\bhref="/DocumentCenter/View/(\d+)"[^>]*>(.*?)</a>', raw[0], re.I | re.S)
+        alt = 'alt="Aerial view of parcel %s with the boundary outlined"' % pin
+        exhibit = next((doc for doc, label in links if alt in label), None)
+        if (availability not in open_statuses or not re.fullmatch(r"WA\d{4} \d{3}[A-Z]?", pin)
+                or not number(acres) or exhibit not in WAYCROSS_GA_REVIEWED_AERIALS):
+            continue
+        rows.append((address, pin, number(acres), zoning, exhibit))
+    return rows
+
+
+def waycross_ga_offers(fetch, section_index):
+    roster = parse_waycross_ga_offer_table(fetch.text(WAYCROSS_GA_SALE), section_index)
+    kind = "land bank" if section_index else "city surplus"
+    source = "waycross-ga-landbank" if section_index else "waycross-ga-surplus"
+    rows = []
+    for address, pin, acres, zoning, exhibit in roster:
+        url = urllib.parse.urljoin(WAYCROSS_GA_SALE, "/DocumentCenter/View/" + exhibit)
+        if hashlib.sha256(fetch.bytes(url)).hexdigest() != WAYCROSS_GA_REVIEWED_AERIALS[exhibit]:
+            raise StructureError("A Waycross aerial exhibit changed and requires renewed vacancy verification")
+        rows.append({
+            "id": "ga-waycross-" + slug(pin), "source": source,
+            "title": "%s, Waycross (%s land)" % (address, kind), "state": "GA", "county": "Ware", "locality": "Waycross",
+            "apn": pin, "address": address, "acres": acres, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": WAYCROSS_GA_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Advertised as available in the %s sale table with an unimproved aerial exhibit" % kind, url),
+                      fact("zoning", zoning, "=")],
+            "tags": [kind],
+        })
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
+def waycross_ga_surplus(fetch, now, warn):
+    return waycross_ga_offers(fetch, 0)
+
+
+def waycross_ga_landbank(fetch, now, warn):
+    return waycross_ga_offers(fetch, 1)
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -7447,8 +7697,36 @@ SOURCES = [
     {"id": "northumberland-pa-repository", "name": "Northumberland County vacant sealed-bid lots", "agency": "Northumberland County Tax Claim Bureau",
      "url": NORTHUMBERLAND_PA_REPO, "state": "PA", "run": northumberland_pa_repository, "requires_sale_match": True,
      "about": "Parcels expressly labeled vacant in the county’s current sealed-bid repository notice."},
+    {"id": "clear-lake-sd-industrial", "name": "Clear Lake available industrial park lots",
+     "agency": "Clear Lake Area Development Corporation", "url": CLEAR_LAKE_SD_SALE, "state": "SD",
+     "run": clear_lake_sd_industrial, "requires_sale_match": True,
+     "about": "Lots specifically listed as still available in the City of Clear Lake's industrial park development."},
+    {"id": "clark-oh-landbank", "name": "Clark County Land Bank vacant lots for acquisition",
+     "agency": "Clark County Land Reutilization Corporation", "url": CLARK_OH_LOTS, "state": "OH",
+     "run": clark_oh_landbank, "requires_sale_match": True,
+     "about": "Individually listed vacant lots with an acquisition application on the land bank's program page."},
+    {"id": "athens-oh-landbank", "name": "Athens County Land Bank available vacant properties", "agency": "Athens County Land Bank",
+     "url": ATHENS_OH_VACANT, "state": "OH", "run": athens_oh_landbank, "requires_sale_match": True,
+     "about": "Properties explicitly listed For Sale in the official vacant lot directory. Packages are carried as single offers."},
+    {"id": "rtc-washoe-land-sales", "name": "RTC Washoe vacant surplus land", "agency": "Regional Transportation Commission of Washoe County",
+     "url": RTC_WASHOE_SALE, "state": "NV", "run": rtc_washoe_land_sales, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Vacant surplus land advertised in the RTC's official current sealed-bid notice, including its stated minimum and cutoff."},
+    {"id": "waycross-ga-surplus", "name": "Waycross city surplus land offers", "agency": "City of Waycross, Georgia",
+     "url": WAYCROSS_GA_SALE, "state": "GA", "run": waycross_ga_surplus, "requires_sale_match": True,
+     "about": "Parcels the city specifically labels available, with vacancy confirmed on its official aerial exhibits."},
+    {"id": "waycross-ga-landbank", "name": "Waycross-Ware Land Bank vacant offers", "agency": "Waycross-Ware County Land Bank Authority",
+     "url": WAYCROSS_GA_SALE, "state": "GA", "run": waycross_ga_landbank, "requires_sale_match": True,
+     "about": "Vacant parcels actively available in the Land Bank’s separate offers table."},
 ]
 NOT_CARRIED = [
+    ("RTC Washoe sealed-bid document attachments", "https://rtcwashoe.com/property-disposals/",
+     "The RTC’s attachment host returned HTTP 403 for robots.txt. The separately published RTC sale terms are carried."),
+    ("Rhode Island DOT real property sale catalog", "https://www.dot.ri.gov/business/ridot_property.php",
+     "The state DOT host returned HTML in place of robots.txt."),
+    ("City of Euclid current land bank roster", "https://www.cityofeuclid.gov/Landbank-Property-Listing-and-Map",
+     "The asset host for the city’s parcel-by-parcel inventory returned HTTP 403 for robots.txt."),
+    ("Prince George’s County available surplus land", "https://www.princegeorgescountymd.gov/departments-offices/redevelopment-authority/surplus-real-property-program/available-county-surplus-real-property-disposition",
+     "The county host returned HTTP 403 for robots.txt."),
     ("Northumberland County, Pennsylvania assessment parcel boundaries", "https://gis.norrycopa.net/arcgis/rest/services/Assessment/NC_Tax_Parcels/MapServer",
      "The county's GIS host did not serve a verifiable TLS certificate for robots.txt. The county's separate current sale notice is carried."),
     ("Baltimore City open-bid vacant parcels", "https://geodata.baltimorecity.gov/egis/rest/services/Housing/dmxLandTransactions/MapServer/4",

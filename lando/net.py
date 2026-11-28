@@ -183,8 +183,12 @@ class Fetcher:
     def bytes(self, url):
         return self._get(url)
 
-    def json(self, url, *, form=None):
+    def json(self, url, *, form=None, payload=None):
+        if form is not None and payload is not None:
+            raise ValueError("pass either form fields or a JSON payload")
         body = urllib.parse.urlencode(form).encode() if form is not None else None
+        if payload is not None:
+            body = json.dumps(payload, separators=(",", ":")).encode()
         try:
             return json.loads(self._get(url, data=body).decode("utf-8-sig", "replace"))
         except ValueError as exc:

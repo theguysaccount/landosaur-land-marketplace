@@ -958,6 +958,59 @@ LEASED LAND - MOBILE HOME ONLY"""
         self.assertNotIn("PRIVATE PERSON", repr(rows))
 
 
+    def test_clear_lake_counts_individual_available_lots_only(self):
+        page = """Industrial Park Addition to the City of Clear Lake.
+        Lot 5 is SOLD. Lots 1, 2, 3, 4, 6 and 7 are still available."""
+        self.assertEqual(adapters.parse_clear_lake_industrial_lots(page), ["1", "2", "3", "4", "6", "7"])
+        self.assertEqual(adapters.parse_clear_lake_industrial_lots(page.replace("6 and 7", "5, 6 and 7")),
+                         ["1", "2", "3", "4", "6", "7"])
+
+    def test_clark_keeps_lots_in_acquisition_section_and_handles_missing_quote(self):
+        page = """Below are properties currently owned by the Land Bank.
+        <a href='/vacant-application.pdf'>Property Acquisition Application</a>
+        <div>0 LYLE AVE, SPRINGFIELD 45505</div><div>P#: 300 07 00032 207 018</div>
+        <div>Price: Auditor's Appraised Value</div>
+        <footer>Where to Find Us 0 TEST ST, SPRINGFIELD 45506 P#: 301 06 00032 205 019 Price: Auditor's Appraised Value</footer>"""
+        rows = adapters.parse_clark_oh_vacant(page)
+        self.assertEqual([(r["apn"], r["price"], r["status"]) for r in rows], [("3000700032207018", None, "listed")])
+
+    def test_athens_keeps_bundle_as_one_sale_and_excludes_pending(self):
+        url = "https://athenscountylandbank.com/property/944-958-high-street-nelsonville/"
+        metadata = {"@type": "Place", "name": "944/958 High Street, Nelsonville", "url": url,
+                    "description": "Two vacant parcels. Parcel number(s): P030250011000, P030250011200",
+                    "address": {"addressLocality": "Nelsonville", "streetAddress": "944 High Street"},
+                    "geo": {"latitude": 39.4528808, "longitude": -82.235}}
+        page = '<script type="application/ld+json">%s</script><div>Land Area 7000 sq ft Property Type Vacant Lots Property Status For Sale</div>' % json.dumps(metadata)
+        row = adapters.parse_athens_oh_offer(page, url)
+        self.assertEqual((row["apn"], row["acres"], row["lat"], row["price"]),
+                         ("P030250011000, P030250011200", .1607, 39.4528808, None))
+        self.assertIsNone(adapters.parse_athens_oh_offer(page.replace("For Sale", "Pending"), url))
+
+    def test_rtc_washoe_uses_exact_notice_and_pacific_cutoff(self):
+        page = """Property Disposals NOTICE OF INTENT TO SELL REAL PROPERTY BY SEALED BIDDING
+        Assessors Parcel Numbers: APN 020-293-01 Address(es): Evelyn Circle Type of Property: Vacant Land
+        Minimum Bid Amount: $220,500 (90% of fair market value) Down Payment Deposit (due with bid): $5,000
+        Bid Deadline: 4:00 p.m. on December 7, 2026 Bid Opening: 10:00 a.m. on December 11, 2026
+        Documents: Bid Proposal Form for APN 020-321-49"""
+        row, = adapters.parse_rtc_washoe_sale(page, NOW)
+        self.assertEqual((row["apn"], row["price"], row["deadline"]), ("020-293-01", 220500, "2026-12-08T00:00:00Z"))
+        self.assertEqual(adapters.parse_rtc_washoe_sale(page, datetime.datetime(2026, 12, 8, tzinfo=datetime.timezone.utc)), [])
+
+
+    def test_waycross_requires_available_status_and_reviewed_aerial_in_each_agency_table(self):
+        head = '<table><tr><th>Parcel #</th><th>Commission District</th><th>Status &amp; Notes</th></tr>'
+
+        def row(pin, doc, status):
+            return ('<tr><td><a href="/DocumentCenter/View/%s"><img alt="Aerial view of parcel %s with the boundary outlined"></a></td>'
+                    '<td>Marion Street</td><td>%s</td><td>0.34</td><td>R-75</td><td>2</td><td>%s</td></tr>') % (doc, pin, pin, status)
+
+        page = (head + row("WA1805 078", 1228, "Available") + row("WA0710 070", 1179, "Available") + '</table>'
+                + head + row("WA1902 010", 1192, "Available - multiple inquiries received")
+                + row("WA0308 044", 1167, "Available - in discussion with adjoining owner") + '</table>')
+        self.assertEqual([r[1] for r in adapters.parse_waycross_ga_offer_table(page, 0)], ["WA1805 078"])
+        self.assertEqual([r[1] for r in adapters.parse_waycross_ga_offer_table(page, 1)], ["WA1902 010"])
+
+
 class OfficialInventoryExtensionTest(unittest.TestCase):
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
         attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,

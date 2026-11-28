@@ -46,6 +46,47 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_bismarck_matches_current_sale_maps_to_vacant_city_parcels(self):
+        fetch = unittest.mock.Mock()
+        maps = list(adapters.BISMARCK_ND_MAPS)
+        fetch.text.return_value = ('<h1>City Properties for Sale</h1>'
+                                   f'<a href="https://www.bismarcknd.gov/DocumentCenter/View/{maps[0]}">Map</a>'
+                                   f'<iframe src="/DocumentCenter/View/{maps[3]}"></iframe>')
+        fetch.bytes.side_effect = [b"verified site", b"verified subdivision"]
+        fixtures = {
+            name: (hashlib.sha256(body).hexdigest(), adapters.BISMARCK_ND_MAPS[name][1])
+            for name, body in zip((maps[0], maps[3]), (b"verified site", b"verified subdivision"))
+        }
+        parcel = {"ASSESS_YEAR": NOW.year, "VACANT": "Y", "LANDUSE": "UNDEVELOPED",
+                  "MARKET_BUILDING": 0, "CERTIFIED_MARKET_BUILDING": 0,
+                  "RESIDENTIAL_BUILDING_COUNT": 0, "COMMERCIAL_BUILDING_COUNT": 0}
+        properties = [
+            dict(parcel, PARCEL_ID="0980-002-001", PROPERTY_ADDRESS="2909 E E AVE", ADDITION_NAME="EASTSIDE HEIGHTS",
+                 BLOCK_NUMBER=2, LEGAL_ONE="LOT 1", LOT_SQ_FEET=68876),
+            dict(parcel, PARCEL_ID="1997-001-165", PROPERTY_ADDRESS="1852 YEGEN RD",
+                 ADDITION_NAME="NORTHERN PLAINS COMMERCE CENTRE 2ND", BLOCK_NUMBER=1, LEGAL_ONE="LOT 10",
+                 LOT_SQ_FEET=144270, COMMERCIAL_BUILDING_COUNT=1),
+            dict(parcel, PARCEL_ID="1997-001-370", PROPERTY_ADDRESS="2119 TRADE ST",
+                 ADDITION_NAME="NORTHERN PLAINS COMMERCE CENTRE 2ND", BLOCK_NUMBER=1, LEGAL_ONE="LOT 20",
+                 LOT_SQ_FEET=1070691, ASSESS_YEAR=NOW.year - 1),
+            dict(parcel, PARCEL_ID="1997-001-140", PROPERTY_ADDRESS="1846 YEGEN RD",
+                 ADDITION_NAME="NORTHERN PLAINS COMMERCE CENTRE 2ND", BLOCK_NUMBER=1, LEGAL_ONE="LOT 9",
+                 LOT_SQ_FEET=201640),
+        ]
+        geometry = {"rings": [[[-100.7, 46.8], [-100.699, 46.8], [-100.7, 46.801], [-100.7, 46.8]]]}
+        fetch.json.return_value = {"features": [{"attributes": attributes, "geometry": geometry}
+                                                 for attributes in properties]}
+        with patch.dict(adapters.BISMARCK_ND_MAPS, fixtures):
+            rows, info = adapters.bismarck_nd_city_surplus(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["status"]), ("0980-002-001", None, "listed"))
+        self.assertEqual(row["acres"], 1.5812)
+        self.assertTrue(row["geometry"])
+        self.assertEqual(info["upstream_total"], 3)
+        query = fetch.json.call_args.args[0]
+        self.assertIn("PROPERTY_OWNER", query)
+        self.assertNotIn("PROPERTY_OWNER", query.partition("outFields=")[2].split("&", 1)[0])
+
     def test_powers_lake_excludes_sold_lots_and_keeps_only_exact_price(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = (

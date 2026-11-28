@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T10:06:24Z",
+ "checked": "2026-11-28T10:27:19Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -328,6 +328,24 @@
    "state": "TX",
    "upstream_total": 116,
    "url": "https://www.bigspringtx.gov/"
+  },
+  "bismarck-nd-city-surplus": {
+   "about": "The city\u2019s sale maps identify each available tract. The city assessor verifies vacant land, acreage and parcel boundaries.",
+   "agency": "City of Bismarck, North Dakota",
+   "complete": true,
+   "count": 5,
+   "failures": 0,
+   "last_attempt": "2026-11-28T10:27:19Z",
+   "last_success": "2026-11-28T10:27:19Z",
+   "message": "",
+   "name": "Bismarck vacant city properties for sale",
+   "notes": [],
+   "ok": true,
+   "read": 5,
+   "seconds": 42,
+   "state": "ND",
+   "upstream_total": 5,
+   "url": "https://www.bismarcknd.gov/1253/City-Properties-for-Sale"
   },
   "blue-hill-ne-homesites": {
    "about": "Individually offered residential lots in the city\u2019s free homesite program, with recorded plat acreage.",

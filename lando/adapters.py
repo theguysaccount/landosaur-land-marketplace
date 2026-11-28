@@ -11182,7 +11182,92 @@ def grand_forks_nd_business_park(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(current)}
 
 
+BISMARCK_ND_SALES = "https://www.bismarcknd.gov/1253/City-Properties-for-Sale"
+BISMARCK_ND_GIS = "https://bisgis.bismarcknd.gov/server/rest/services/TRAKiT/MapServer/12/query"
+BISMARCK_ND_FIELDS = ("PARCEL_ID,PROPERTY_ADDRESS,ADDITION_NAME,BLOCK_NUMBER,LEGAL_ONE,ASSESS_YEAR,LOT_SQ_FEET,"
+                      "VACANT,LANDUSE,MARKET_BUILDING,CERTIFIED_MARKET_BUILDING,RESIDENTIAL_BUILDING_COUNT,COMMERCIAL_BUILDING_COUNT")
+# The city maps label individual sale properties. Only the shaded lots in its Commerce Centre map are unsold.
+BISMARCK_ND_MAPS = {
+    "44441/2909-East-E-Avenue-PDF": (
+        "f9bf63bc621a62f37bb6dedefd6fc601bf2e236b09226e650e925229c49ed526",
+        {"0980-002-001": ("2909 E E AVE", "EASTSIDE HEIGHTS", 2, 1, 68876)},
+    ),
+    "44442/3440-East-Divide-Avenue-PDF": (
+        "4ff3acf9955be4b6406b73d63513f91c566eb5bb0fb804db1d4d6594af2aa773",
+        {"1336-005-001": ("3440 E DIVIDE AVE", "EAST HILLS ADDITION REPLAT", 5, 1, 35197)},
+    ),
+    "44438/718-Boehm-Drive-PDF": (
+        "dd05552b921a97a6f0effc3e37696983a049db2167c34f895c601ce122aec41c",
+        {"0115-003-040": ("718 BOEHM DR", "CITY LANDS 138-80", 3, None, 40695)},
+    ),
+    "44445/Northern-Plains-Commerce-Center-PDF": (
+        "8dd61ab698f918aa732c18fed1cc33b4b144efc98d99b89c3d6488eac8528347",
+        {"1997-001-165": ("1852 YEGEN RD", "NORTHERN PLAINS COMMERCE CENTRE 2ND", 1, 10, None),
+         "1997-001-370": ("2119 TRADE ST", "NORTHERN PLAINS COMMERCE CENTRE 2ND", 1, 20, None)},
+    ),
+}
+
+
+def bismarck_nd_city_surplus(fetch, now, warn):
+    page = fetch.text(BISMARCK_ND_SALES)
+    if "<h1" not in page or "City Properties for Sale" not in page:
+        raise StructureError("Bismarck’s city property sale directory changed")
+    offered = {}
+    for document, (digest, details) in BISMARCK_ND_MAPS.items():
+        path = "/DocumentCenter/View/" + document
+        if not re.search(rf'(?:href|src)\s*=\s*["\']?(?:https://www\.bismarcknd\.gov)?{re.escape(path)}(?=["\'\s>])',
+                         page, re.I):
+            continue
+        map_url = urllib.parse.urljoin(BISMARCK_ND_SALES, path)
+        if hashlib.sha256(fetch.bytes(map_url)).hexdigest() != digest:
+            warn("A Bismarck city sale map changed and needs to be checked before its parcels can be shown.")
+            continue
+        offered.update((pin, (site, map_url)) for pin, site in details.items())
+    if not offered:
+        return [], {"complete": True, "upstream_total": 0}
+
+    # Use the assessor’s public title and vacancy fields without returning any holder names.
+    where = f"PARCEL_ID IN ({quote_list(offered)}) AND UPPER(PROPERTY_OWNER) IN ('BISMARCK, CITY OF','BISMARCK, CITY OF ')"
+    parcels = _arcgis_query(fetch, BISMARCK_ND_GIS, where, BISMARCK_ND_FIELDS)
+    counts = Counter(item["attributes"].get("PARCEL_ID") for item in parcels)
+    building_fields = ("MARKET_BUILDING", "CERTIFIED_MARKET_BUILDING", "RESIDENTIAL_BUILDING_COUNT", "COMMERCIAL_BUILDING_COUNT")
+    rows = []
+    for item in parcels:
+        a = item["attributes"]
+        pin = a.get("PARCEL_ID")
+        if pin not in offered or counts[pin] != 1:
+            continue
+        (address, subdivision, block, lot, expected_sqft), map_url = offered[pin]
+        sqft = number(a.get("LOT_SQ_FEET"))
+        if (a.get("ASSESS_YEAR") != now.year or a.get("VACANT") != "Y" or a.get("LANDUSE") != "UNDEVELOPED"
+                or any(a.get(field) != 0 for field in building_fields)
+                or clean(a.get("PROPERTY_ADDRESS")) != address or clean(a.get("ADDITION_NAME")) != subdivision
+                or number(a.get("BLOCK_NUMBER")) != block or (lot and clean(a.get("LEGAL_ONE")) != f"LOT {lot}")
+                or not sqft or (expected_sqft and sqft != expected_sqft)):
+            continue
+        title = (f"Northern Plains Commerce Centre Second Addition, Block {block} Lot {lot}"
+                 if subdivision.startswith("NORTHERN PLAINS") else f"{address.title()}, Bismarck (city land for sale)")
+        row = {
+            "id": "nd-bismarck-city-" + pin, "source": "bismarck-nd-city-surplus",
+            "title": title, "state": "ND", "county": "Burleigh", "locality": "Bismarck",
+            "apn": pin, "address": address.title(), "acres": round(sqft / 43560, 4),
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": BISMARCK_ND_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Bismarck identifies this vacant city parcel in its current sale directory.", map_url)],
+            "tags": ["city surplus", "vacant land"],
+        }
+        assessor = one_parcel_url(BISMARCK_ND_GIS, f"PARCEL_ID='{pin}'", BISMARCK_ND_FIELDS)
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), assessor, "City of Bismarck Assessor")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offered)}
+
+
 SOURCES = [
+    {"id": "bismarck-nd-city-surplus", "name": "Bismarck vacant city properties for sale",
+     "agency": "City of Bismarck, North Dakota", "url": BISMARCK_ND_SALES, "state": "ND",
+     "run": bismarck_nd_city_surplus, "requires_sale_match": True,
+     "about": "The city’s sale maps identify each available tract. The city assessor verifies vacant land, acreage and parcel boundaries."},
     {"id": "powers-lake-nd-hegstad", "name": "Powers Lake Hegstad Addition vacant homesites",
      "agency": "City of Powers Lake, North Dakota", "url": POWERS_LAKE_SALES, "state": "ND",
      "run": powers_lake_nd_hegstad, "requires_sale_match": True,

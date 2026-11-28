@@ -2335,6 +2335,65 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             self.assertFalse(adapters.missoula_mt_west_broadway(fetch, NOW, self.fail)[0])
             query.assert_called_once()
 
+    def test_jefferson_co_requires_matching_sale_notice_and_no_recorded_improvements(self):
+        fetch = unittest.mock.Mock()
+        account = "300083292"
+        pin = "40-064-01-002"
+        directory = '<h3>Upcoming Auctions</h3>'
+        for schedule, deed in ((account, "2026-030"), ("300097250", "2026-029")):
+            directory += (f'<p>December 15, 2026<br>Tax Lien Certificate 210477<br>Schedule/PIN {schedule}<br>'
+                          f'Treasurer’s Deed {deed}<br><a href="/DocumentCenter/View/59/Known-Interested-Party-Notice-for-PIN-{schedule}-PDF">Notice</a></p>')
+        fetch.text.return_value = directory + "</div>"
+        notice = (f"Schedule/Account No. {account} Treasurer’s Deed No. 2026-030 "
+                  "AKA: V ACANT LAND at 10:00 a.m. Mountain Time on TUESDAY DECEMBER 15, 2026")
+        rings = [[[-105.22, 39.69], [-105.23, 39.69], [-105.22, 39.7], [-105.22, 39.69]]]
+        vacant = dict.fromkeys(adapters.JEFFERSON_CO_IMPROVEMENTS, 0)
+        vacant.update(AUMENTUM_PIN=account, PIN=pin, SUBNAM="RILLIET PARK 1ST ADD", TOTACR=2.05, TOTACTLNDV=180785)
+        improved = dict(vacant, AUMENTUM_PIN="300097250", PIN="30-102-02-009", STTNBRBLDG=1)
+        fetch.json.return_value = {"features": [{"attributes": attrs, "geometry": {"rings": rings}}
+                                                 for attrs in (vacant, improved)]}
+        with patch.object(adapters, "pdf_text", return_value=notice) as read_notice:
+            rows, info = adapters.jefferson_co_tax_deed(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["acres"], row["price"], row["status"]), (pin, 2.05, None, "auction_terms"))
+            self.assertEqual(row["deadline"], "2026-12-15T17:00:00Z")
+            self.assertEqual(info["upstream_total"], 2)
+            self.assertTrue(row["geometry"])
+            self.assertIn(account, read_notice.call_args.args[1])
+            read_notice.assert_called_once()
+            read_notice.return_value = notice.replace("DECEMBER 15", "DECEMBER 8")
+            self.assertEqual(adapters.jefferson_co_tax_deed(fetch, NOW, self.fail)[0], [])
+            self.assertEqual(adapters.jefferson_co_tax_deed(
+                fetch, datetime.datetime(2026, 12, 15, 17, tzinfo=datetime.timezone.utc), self.fail)[0], [])
+
+    def test_park_co_requires_current_notice_and_vacant_assessment(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = ('<table summary="Archive Details"><a href="Archive.aspx?ADID=4790">'
+                                   '<span>2026-0024</span></a></table>')
+        notice = ("NOTICE OF PUBLIC AUCTION: #2026-0024 DECEMBER 15, 2026, AT 2:00 PM MST "
+                  "ESTATES OF COLORADO UNIT 66 LOT 3450 PROPERTY ADDRESS: 4099 CHICKASAW RD., HARTSEL "
+                  "SCHEDULE/ACCOUNT NO.: R0009015")
+        assessment = {"ACCOUNT_NO": "R0009015", "ScheduleNu": "9015", "LOCAL_ADDR": "4099 CHICKASAW RD HARTSEL CO 80449",
+                      "LAND_TY": "Vacant Land", "LAND_V": 14370.74, "IMPROVE_V": None, "BLDGCOUNT": 0, "ACRES": 5.1}
+        state = {"account": "R0009015", "parcel_id": "9015", "sharing": "Public", "landUseDsc": "Vacant Land"}
+        rings = [[[-105.77, 39.01], [-105.78, 39.01], [-105.77, 39.02], [-105.77, 39.01]]]
+        fetch.json.side_effect = [{"features": [{"attributes": assessment}]},
+                                  {"features": [{"attributes": state, "geometry": {"rings": rings}}]}]
+        with patch.object(adapters, "pdf_text", return_value=notice):
+            rows, info = adapters.park_co_tax_deed(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["acres"], row["price"], row["status"]),
+                             ("R0009015", 5.1, None, "auction_terms"))
+            self.assertEqual(row["deadline"], "2026-12-15T21:00:00Z")
+            self.assertEqual(info["upstream_total"], 1)
+            self.assertTrue(row["geometry"])
+            self.assertIn("Colorado Public parcels", str(row["facts"]))
+            improved = dict(assessment, BLDGCOUNT=1, IMPROVE_V=2000)
+            fetch.json.side_effect = [{"features": [{"attributes": improved}]}]
+            self.assertEqual(adapters.park_co_tax_deed(fetch, NOW, self.fail)[0], [])
+            fetch.text.return_value = '<table summary="Archive Details"></table>'
+            self.assertEqual(adapters.park_co_tax_deed(fetch, NOW, self.fail)[0], [])
+
     def test_new_castle_requires_live_scheduled_sale_and_clear_county_parcel(self):
         fetch = unittest.mock.Mock()
         directory = 'New Castle County, DE<option value="12/08/2026">December 8</option>'

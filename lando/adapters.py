@@ -216,6 +216,10 @@ def outline_url(listing):
         return one_parcel_url(MT_COMPOSITE_PARCELS, f"PARCELID='{MISSOULA_MT_PARCEL}'", MISSOULA_MT_FIELDS)
     if listing["source"] == "new-castle-de-sheriff" and listing["apn"] in NEW_CASTLE_DE_VACANT:
         return one_parcel_url(NEW_CASTLE_DE_PARCELS, f"PRCLID='{listing['apn']}'", NEW_CASTLE_DE_FIELDS)
+    if listing["source"] == "jefferson-co-tax-deed" and re.fullmatch(r"\d\d-\d{3}-\d\d-\d{3}", listing["apn"]):
+        return one_parcel_url(JEFFERSON_CO_PARCELS, f"PIN='{listing['apn']}'", JEFFERSON_CO_FIELDS)
+    if listing["source"] == "park-co-tax-deed" and listing["apn"] == PARK_CO_ACCOUNT:
+        return one_parcel_url(PARK_CO_STATE_PARCELS, PARK_CO_STATE_MATCH, PARK_CO_STATE_FIELDS)
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -8467,6 +8471,153 @@ def alamosa_co_tax_deed(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(slots)}
 
 
+JEFFERSON_CO_SALE = "https://www.jeffco.us/4850/Jefferson-County-Treasurers-Deed"
+JEFFERSON_CO_PARCELS = "https://mapservices2.jeffco.us/arcgis/rest/services/jMap/Parcel/MapServer/0/query"
+JEFFERSON_CO_IMPROVEMENTS = ("STTNBRBLDG", "STTNBRBLD2", "STTNBRBLD3", "STTNBRBLD4", "TOTACTIMPV", "ASMASDIMP")
+JEFFERSON_CO_FIELDS = ",".join(("AUMENTUM_PIN", "PIN", "SUBNAM", "TOTACR", "TOTACTLNDV", *JEFFERSON_CO_IMPROVEMENTS))
+
+
+def jefferson_co_tax_deed(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/Denver")
+    page = fetch.text(JEFFERSON_CO_SALE)
+    section = re.search(r"<h3\b[^>]*>Upcoming Auctions</h3>(.*?)(?:<h[1-6]\b|</div>)", page, re.S | re.I)
+    if not section:
+        raise StructureError("Jefferson County’s upcoming treasurer’s deed auctions section changed")
+    notices = {}
+    for paragraph in re.findall(r"<p\b[^>]*>(.*?)</p>", section[1], re.S | re.I):
+        schedule = re.search(r"\b([A-Z][a-z]+ \d{1,2}, \d{4})\s+Tax Lien Certificate \d+\s+Schedule/PIN (\d{9})\s+"
+                             r"Treasurer['’]s Deed (\d{4}-\d{3})\b", clean(paragraph))
+        path = re.search(r'href="(/DocumentCenter/View/\d+/Known-Interested-Party-Notice-for-PIN-\d{9}-PDF)"', paragraph)
+        if not schedule:
+            if "Schedule/PIN" in paragraph:
+                raise StructureError("Jefferson County’s auction identity or date changed")
+            continue
+        day, account, deed = schedule.groups()
+        if not path or f"-PIN-{account}-PDF" not in path[1] or account in notices:
+            raise StructureError("Jefferson County’s auction roster has a missing or conflicting notice")
+        date = alamosa_auction_date(day)
+        if date >= now.astimezone(zone).date():
+            notices[account] = date, deed, urllib.parse.urljoin(JEFFERSON_CO_SALE, path[1])
+    if not notices:
+        return [], {"complete": True, "upstream_total": 0}
+    account_list = ", ".join(f"'{account}'" for account in sorted(notices))
+    parcels = _arcgis_query(fetch, JEFFERSON_CO_PARCELS, f"AUMENTUM_PIN IN ({account_list})", JEFFERSON_CO_FIELDS)
+    rows = []
+    for parcel in parcels:
+        attrs = parcel["attributes"]
+        account = attrs.get("AUMENTUM_PIN")
+        pin = attrs.get("PIN") or ""
+        acres = number(attrs.get("TOTACR"))
+        land_value = number(attrs.get("TOTACTLNDV"))
+        rings = (parcel.get("geometry") or {}).get("rings")
+        if (account not in notices or not re.fullmatch(r"\d\d-\d{3}-\d\d-\d{3}", pin)
+                or not acres or not land_value or not rings
+                or any(attrs.get(field) != 0 for field in JEFFERSON_CO_IMPROVEMENTS)):
+            continue
+        day, deed, url = notices[account]
+        text = clean(pdf_text(fetch, url, extraction_mode="plain"))
+        if not (re.search(r"Schedule/Account No\.\s*" + re.escape(account) + r"\b", text, re.I)
+                and re.search(r"Treasurer['’]s Deed No\.\s*" + re.escape(deed) + r"\b", text, re.I)
+                and re.search(r"AKA:\s*V\s*ACANT LAND\b", text, re.I)):
+            continue
+        sale = re.search(r"\bat\s+(\d{1,2}:\d{2}\s*[ap]\s*\.\s*m\s*\.)\s+Mountain Time on "
+                         r"[A-Z]+\s+([A-Z]+\s+\d{1,2},\s+\d{4})", text, re.I)
+        if not sale or alamosa_auction_date(sale[2].title()) != day:
+            continue
+        clock = datetime.datetime.strptime(re.sub(r"[ .]", "", sale[1]).upper(), "%I:%M%p").time()
+        starts = datetime.datetime.combine(day, clock, zone)
+        if starts <= now:
+            continue
+        area = clean(attrs.get("SUBNAM")).title()
+        title = f"{area}, parcel {pin}" if area else f"Parcel {pin}"
+        row = {
+            "id": f"co-jefferson-treasurer-{pin}", "source": "jefferson-co-tax-deed",
+            "title": title + " (Jefferson County treasurer’s deed auction)",
+            "state": "CO", "county": "Jefferson", "locality": "", "address": "",
+            "apn": pin, "acres": acres, "price": None, "price_kind": "none",
+            "offering": "auction", "status": "auction_terms",
+            "deadline": starts.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": JEFFERSON_CO_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("county_account", account, "="),
+                      fact("availability", f"The treasurer lists this vacant parcel in deed auction {deed}.", url),
+                      fact("auction_start", starts.strftime("%B %d, %Y at %I:%M %p Mountain"), url),
+                      fact("sale_terms", "The county auctions the option for a treasurer’s deed. Check current bidding and redemption terms with the treasurer.", "=")],
+            "tags": ["treasurer’s deed auction", "online auction"],
+        }
+        apply_geometry(row, rings, outline_url(row), "Jefferson County parcel")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(notices)}
+
+
+PARK_CO_ARCHIVE = "https://www.parkcountyco.gov/Archive.aspx?AMID=94"
+PARK_CO_NOTICE = "https://www.parkcountyco.gov/Archive.aspx?ADID=4790"
+PARK_CO_ASSESSMENT = "https://maps.parkcountyco.gov/server/rest/services/ParcelsPublic/MapServer/0/query"
+PARK_CO_STATE_SERVICE = "https://gis.colorado.gov/public/rest/services/Address_and_Parcel"
+PARK_CO_STATE_PARCELS = PARK_CO_STATE_SERVICE + "/Colorado_Public_Parcels/FeatureServer/0/query"
+PARK_CO_ACCOUNT = "R0009015"
+PARK_CO_STATE_MATCH = f"countyName='Park' AND account='{PARK_CO_ACCOUNT}' AND sharing='Public'"
+PARK_CO_STATE_FIELDS = "countyName,account,parcel_id,landAcres,landUseDsc,sharing"
+PARK_CO_ASSESSOR_FIELDS = "ACCOUNT_NO,ScheduleNu,LOCAL_ADDR,LAND_TY,LAND_V,IMPROVE_V,BLDGCOUNT,ACRES"
+
+
+def park_co_tax_deed(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    sale = datetime.datetime(2026, 12, 15, 14, tzinfo=ZoneInfo("America/Denver"))
+    if now >= sale:
+        return [], {"complete": True, "upstream_total": 0}
+    archive = fetch.text(PARK_CO_ARCHIVE)
+    if 'summary="Archive Details"' not in archive:
+        raise StructureError("Park County’s public auction archive changed")
+    if not re.search(r'href="(?:/)?Archive\.aspx\?ADID=4790"[^>]*>\s*<span>2026-0024\s*</span>', archive):
+        return [], {"complete": True, "upstream_total": 0}
+    text = clean(pdf_text(fetch, PARK_CO_NOTICE, extraction_mode="plain"))
+    required = ("NOTICE OF PUBLIC AUCTION: #2026-0024", "DECEMBER 15, 2026, AT 2:00 PM MST",
+                "SCHEDULE/ACCOUNT NO.: " + PARK_CO_ACCOUNT, "ESTATES OF COLORADO UNIT 66 LOT 3450",
+                "PROPERTY ADDRESS: 4099 CHICKASAW RD., HARTSEL")
+    if not all(phrase in text.upper() for phrase in required):
+        raise StructureError("Park County’s published sale identity or time changed")
+    matches = _arcgis_query(fetch, PARK_CO_ASSESSMENT, f"ACCOUNT_NO='{PARK_CO_ACCOUNT}'", PARK_CO_ASSESSOR_FIELDS,
+                            count=None, extra={"returnGeometry": "false"})
+    info = {"complete": True, "upstream_total": 1}
+    if len(matches) != 1:
+        return [], info
+    attrs = matches[0]["attributes"]
+    acres = number(attrs.get("ACRES"))
+    if (attrs.get("ACCOUNT_NO") != PARK_CO_ACCOUNT or attrs.get("ScheduleNu") != "9015"
+            or attrs.get("LAND_TY") != "Vacant Land" or attrs.get("BLDGCOUNT") != 0
+            or attrs.get("IMPROVE_V") not in (None, 0) or not acres or not number(attrs.get("LAND_V"))
+            or not clean(attrs.get("LOCAL_ADDR")).startswith("4099 CHICKASAW RD HARTSEL")):
+        return [], info
+    parcels = _arcgis_query(fetch, PARK_CO_STATE_PARCELS, PARK_CO_STATE_MATCH, PARK_CO_STATE_FIELDS)
+    row = {
+        "id": "co-park-treasurer-r0009015", "source": "park-co-tax-deed",
+        "title": "4099 Chickasaw Road, Hartsel (Park County treasurer’s deed auction)",
+        "state": "CO", "county": "Park", "locality": "Hartsel", "address": "4099 Chickasaw Road",
+        "apn": PARK_CO_ACCOUNT, "acres": acres, "price": None, "price_kind": "none",
+        "offering": "auction", "status": "auction_terms",
+        "deadline": sale.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": PARK_CO_NOTICE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The treasurer’s notice schedules this vacant lot for online auction on December 15, 2026 at 2:00 p.m. Mountain.", "="),
+                  fact("sale_terms", "The county auctions the option for a treasurer’s deed. Check bidding and redemption terms with the treasurer.", PARK_CO_ARCHIVE)],
+        "tags": ["treasurer’s deed auction", "online auction"],
+    }
+    if len(parcels) == 1:
+        feature = parcels[0]
+        mapped = feature["attributes"]
+        if (mapped.get("account") == PARK_CO_ACCOUNT and mapped.get("parcel_id") == "9015"
+                and mapped.get("sharing") == "Public" and mapped.get("landUseDsc") == "Vacant Land"):
+            rings = (feature.get("geometry") or {}).get("rings") or []
+            apply_geometry(row, rings, outline_url(row), "Colorado state parcel")
+            if row["geometry"]:
+                row["facts"].append(fact("map_credit", "State of Colorado Public parcels were accessed on "
+                                         + now.date().isoformat() + " from the Address and Parcel service.", PARK_CO_STATE_SERVICE))
+    return [row], info
+
+
 ELK_PA_REPOSITORY = "https://countyofelkpa.gov/elk-county-offices/tax-claim-bureau/repository-properties/"
 ELK_PA_ROSTER = "https://countyofelkpa.gov/repository-sale-properties/"
 
@@ -12327,8 +12478,20 @@ SOURCES = [
      "agency": "New Castle County Sheriff, Delaware", "url": NEW_CASTLE_DE_ROSTER, "state": "DE",
      "run": new_castle_de_sheriff, "requires_sale_match": True, "timezone": "America/New_York",
      "about": "Two December 8 sheriff sales matched to county parcel boundaries, aerial imagery and building records."},
+    {"id": "jefferson-co-tax-deed", "name": "Jefferson County vacant land treasurer’s deed auctions",
+     "agency": "Jefferson County Treasurer, Colorado", "url": JEFFERSON_CO_SALE, "state": "CO",
+     "run": jefferson_co_tax_deed, "requires_sale_match": True, "timezone": "America/Denver",
+     "about": "Current treasurer’s deed auctions matched to vacant land in official auction notices and county assessment records."},
+    {"id": "park-co-tax-deed", "name": "Park County vacant land treasurer’s deed auction",
+     "agency": "Park County Treasurer, Colorado", "url": PARK_CO_ARCHIVE, "state": "CO",
+     "run": park_co_tax_deed, "requires_sale_match": True, "timezone": "America/Denver",
+     "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("The Flume and Park County Republican public notice portal", "https://theflume.column.us/search",
+     "The publisher returned HTML in place of robots.txt. An independently published county notice is carried."),
+    ("Payson Roundup legal notices", "https://payson.onlineads.advpubtech.com/showads/section/show/title/public-notices",
+     "The publisher returned HTML in place of robots.txt."),
     ("Brookfield, Massachusetts municipal disposition records", "https://www.brookfieldma.us/event/select-board-22/",
      "The town website returned HTTP 403 for robots.txt. Its linked meeting vendor returned HTTP 403 for the agenda itself."),
     ("New Castle County detailed parcel assessment", "https://www3.newcastlede.gov/parcel/search/",

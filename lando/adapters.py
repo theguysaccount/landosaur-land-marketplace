@@ -8672,6 +8672,101 @@ def franklin_nj_adjacent_land(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(FRANKLIN_NJ_OFFERS)}
 
 
+GREYBULL_LAND = "https://townofgreybull.com/land-for-sale/"
+GREYBULL_DOCS = {
+    "frontier_map": ("https://townofgreybull.com/wp-content/uploads/2025/09/Frontier-Subdivision-Lots-Remaining.pdf",
+                     "918619e0cfe8b140e56d6c28e0bb3fdf8af2128acef9b3671b2044a4dc7156bb"),
+    "frontier_terms": ("https://townofgreybull.com/wp-content/uploads/2025/01/2025-Sales-Process.pdf",
+                       "c4979fca7ec96bac5b8333e31a22626adb253458d124798a4ebd731882f5c153"),
+    "industrial_map": ("https://townofgreybull.com/wp-content/uploads/2025/03/Phase-II-map-LOTS-available-032125.pdf",
+                       "e6f6809f2382c9a06e9688cc7e677e7317696ff5df9501583432def60b64d327"),
+    "industrial_terms": ("https://townofgreybull.com/wp-content/uploads/2023/11/Industrial-Part-Purchase-Info.pdf",
+                         "107b112e878085869068c5c02481adfb389e486e6a0bfdce01f682c68b7d5803"),
+}
+BIG_HORN_PARCELS = "https://maps.terragis.net/bighorn/mapserver/download/"
+# The town markets lots individually. The county combines them on a few assessment accounts.
+# Exclude Frontier lots with newer bid awards and industrial lots 67–68 with a separately noticed request.
+GREYBULL_INDUSTRIAL = (
+    ("R0015444", "292", "19-22", range(19, 23)),
+    ("R0015282", "292", "34-36", range(34, 37)),
+    ("R0015299", "307", "40-58 & 67-68", range(40, 59)),
+)
+
+
+def greybull_wy_land(fetch, now, warn):
+    from zipfile import ZipFile
+
+    import shapefile
+
+    page = html.unescape(fetch.text(GREYBULL_LAND))
+    if "Frontier Subdivision Map" not in page or "Industrial park lots available" not in page:
+        raise StructureError("Greybull’s sale programs changed")
+    for url, expected in GREYBULL_DOCS.values():
+        if url not in page or hashlib.sha256(fetch.bytes(url)).hexdigest() != expected:
+            raise StructureError("Greybull’s sale map or procedure needs review")
+    raw = fetch.bytes(urllib.parse.urljoin(BIG_HORN_PARCELS, "parcel_ownership.zip"))
+    with ZipFile(io.BytesIO(raw)) as archive:
+        dbf = archive.read("parcel_ownership.dbf")
+    with shapefile.Reader(dbf=io.BytesIO(dbf), encoding="latin-1") as parcels:
+        accounts = {}
+        relevant = {"R0015482", *(account for account, *_ in GREYBULL_INDUSTRIAL)}
+        for record in parcels.iterRecords(fields=["accountno", "subno", "lot", "name", "grossacres", "impsval"]):
+            row = record.as_dict()
+            account = row["accountno"]
+            if account not in relevant:
+                continue
+            if account in accounts:
+                raise StructureError(f"Big Horn County returned duplicate Greybull account {account}")
+            accounts[account] = row
+        if not accounts:
+            raise StructureError("Big Horn County no longer reports the reviewed Greybull assessments")
+
+    def town_land(account, subdivision, lots):
+        row = accounts.get(account)
+        return (row is not None and row["subno"] == subdivision and row["lot"] == lots
+                and clean(row["name"]).upper() in {"GREYBULL TOWN OF", "TOWN OF GREYBULL", "GREYBULL, TOWN OF"}
+                and row["impsval"] in (None, 0))
+
+    offers = [
+        ("industrial", lot, 1.10 if lot == 56 else .80)
+        for account, subdivision, lots, numbers in GREYBULL_INDUSTRIAL if town_land(account, subdivision, lots)
+        for lot in numbers
+    ]
+    if town_land("R0015482", "312", "") and accounts["R0015482"]["grossacres"] == 5.79:
+        # Surveyed lots 29 and 34 are still shown on the town map. The current county geometry
+        # corroborates both in this account. The council awarded lot 33 in October 2026.
+        offers += [("frontier", 29, 2.21), ("frontier", 34, 1.60)]
+    else:
+        warn("The reviewed Frontier Subdivision assessment changed; verify the remaining lot boundaries.")
+
+    rows = []
+    for program, lot, acres in offers:
+        frontier = program == "frontier"
+        name = "Frontier Subdivision" if frontier else "Greybull Industrial Park"
+        map_url = GREYBULL_DOCS[f"{program}_map"][0]
+        terms = GREYBULL_DOCS[f"{program}_terms"][0]
+        facts = [
+            fact("acreage", f"{acres:.2f} acres on the town plat" if frontier else f"Approximately {acres:.2f} acres on the town plat", map_url),
+            fact("minimum_bid_per_acre", "$18,000 per acre" if frontier else "$3,000 per acre", terms),
+            fact("sale_process", "Nominate the lot with the town. The town advertises nominated lots for three weeks before awarding a bid.", terms),
+            fact("eligibility", "The sale includes town-approved building milestones and reversion terms.", terms),
+            fact("parcel_map", f"Lot {lot} on the town plat. County assessments combine some lots.", map_url),
+        ]
+        if frontier:
+            facts.append(fact("minimum_bid", f"{acres:.2f} platted acres × the town’s $18,000 per-acre minimum. Confirm with the town before submitting a bid.", terms))
+        else:
+            facts.append(fact("eligibility", "The industrial land program is for operating businesses and prohibits speculative purchases.", terms))
+        rows.append({
+            "id": f"wy-greybull-{program}-lot-{lot}", "source": "greybull-wy-land",
+            "title": f"{name}, lot {lot} (town bid nomination)", "state": "WY", "county": "Big Horn", "locality": "Greybull",
+            "acres": acres, "price": round(acres * 18000) if frontier else None, "price_kind": "min_bid" if frontier else "none",
+            "offering": "offer", "status": "proposal_open", "deadline": None, "url": GREYBULL_LAND,
+            "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["bid nomination", "residential lot" if frontier else "industrial lot", "building milestones"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9154,8 +9249,14 @@ SOURCES = [
      "agency": "Township of Franklin, Gloucester County, New Jersey", "url": FRANKLIN_NJ_NOTICE, "state": "NJ",
      "run": franklin_nj_adjacent_land, "requires_sale_match": True,
      "about": "Sealed-bid municipal land sale with parcel-level starting bids. Eligibility is limited to buyers who own adjacent property."},
+    {"id": "greybull-wy-land", "name": "Town of Greybull platted lots available for bid nomination",
+     "agency": "Town of Greybull, Wyoming", "url": GREYBULL_LAND, "state": "WY",
+     "run": greybull_wy_land, "requires_sale_match": True,
+     "about": "Municipal residential and industrial lots matched to county assessments and reviewed against council decisions. The town publishes per-acre starting bids and development terms."},
 ]
 NOT_CARRIED = [
+    ("Go Goshen embedded industrial lot maps", "https://gogoshen.com/do-business/economic-development/industrial-real-estate/",
+     "The third-party map host disallows crawling the published style paths. Lot-level availability needs a separate official source."),
     ("Snohomish County current foreclosure auction", "https://snohomishcountywa.gov/220/Tax-Foreclosures",
      "The current sale vendor returned HTTP 403 for robots.txt, and the county payment portal’s search script is disallowed."),
     ("Pierce County tax-title sale roster", "https://www.piercecountywa.gov/1005/Tax-Title-Properties",

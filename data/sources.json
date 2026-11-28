@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T05:12:49Z",
+ "checked": "2026-11-28T05:26:44Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -1010,6 +1010,24 @@
    "state": "NE",
    "upstream_total": 4,
    "url": "https://www.yorkdevco.com/life/housing-and-neighborhoods"
+  },
+  "greybull-wy-land": {
+   "about": "Municipal residential and industrial lots matched to county assessments and reviewed against council decisions. The town publishes per-acre starting bids and development terms.",
+   "agency": "Town of Greybull, Wyoming",
+   "complete": true,
+   "count": 28,
+   "failures": 0,
+   "last_attempt": "2026-11-28T05:26:44Z",
+   "last_success": "2026-11-28T05:26:44Z",
+   "message": "",
+   "name": "Town of Greybull platted lots available for bid nomination",
+   "notes": [],
+   "ok": true,
+   "read": 28,
+   "seconds": 7,
+   "state": "WY",
+   "upstream_total": 28,
+   "url": "https://townofgreybull.com/land-for-sale/"
   },
   "harris-county-tax-sales": {
    "about": "County sale cards marked For Sale, matched to vacant HCAD land classes with zero recorded building and improvement value.",

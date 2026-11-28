@@ -1069,6 +1069,42 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_greybull_requires_current_town_assessment_and_keeps_industrial_price_per_acre(self):
+        import hashlib
+        import io
+        import zipfile
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("parcel_ownership.dbf", b"assessment fixture")
+        document = b"verified document"
+        digest = hashlib.sha256(document).hexdigest()
+        documents = {key: (url, digest) for key, (url, _) in adapters.GREYBULL_DOCS.items()}
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = "Frontier Subdivision Map Industrial park lots available " + " ".join(
+            url for url, _ in documents.values())
+        fetch.bytes.side_effect = lambda url: archive.getvalue() if url.endswith(".zip") else document
+        holder = "TOWN OF GREYBULL"
+        assessments = [
+            ("R0015482", "312", "", holder, 5.79, None),
+            ("R0015444", "292", "19-22", "PRIVATE PARTY", 3.20, None),
+            ("R0015282", "292", "34-36", holder, 2.41, 500),
+            ("R0015299", "307", "40-58 & 67-68", holder, 17.19, None),
+        ]
+        keys = ("accountno", "subno", "lot", "name", "grossacres", "impsval")
+        shapefile = unittest.mock.MagicMock()
+        reader = shapefile.Reader.return_value.__enter__.return_value
+        reader.iterRecords.return_value = [unittest.mock.Mock(**{"as_dict.return_value": dict(zip(keys, row))})
+                                          for row in assessments]
+        with patch.dict("sys.modules", {"shapefile": shapefile}), patch.object(adapters, "GREYBULL_DOCS", documents):
+            rows, info = adapters.greybull_wy_land(fetch, NOW, self.fail)
+        by_id = {row["id"]: row for row in rows}
+        self.assertEqual(info["upstream_total"], 21)
+        self.assertEqual(by_id["wy-greybull-frontier-lot-29"]["price"], 39780)
+        self.assertIsNone(by_id["wy-greybull-industrial-lot-56"]["price"])
+        self.assertNotIn("wy-greybull-industrial-lot-67", by_id)
+        self.assertNotIn("PRIVATE PARTY", repr(rows))
+
     def test_franklin_adjacent_sale_requires_adopted_schedule_and_keeps_combined_bid(self):
         import hashlib
 

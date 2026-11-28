@@ -1727,6 +1727,36 @@ Zoning R-1 Single Family Residential
             ("R571703300023", "2026-12-02", None, None), ("R556335202072", "2026-12-09", None, None),
         ])
 
+    def test_rio_grande_requires_an_exact_land_only_assessment_for_the_noticed_parcel(self):
+        fetch = unittest.mock.Mock()
+        notice = b"Verified county notice"
+        digest = hashlib.sha256(notice).hexdigest()
+        fetch.bytes.return_value = notice
+        card = """
+            <p>Parcel Number 19-304-43-003</p><p>Subdivision ALPINE VILLAGE #5 Lot 5 Block 38</p>
+            <p>Owner: PRIVATE PERSON</p>
+            <tr><td>Actual (2026)</td><td>$1,000</td></tr>
+            <tr><td>Land</td><td>$1,000</td><td>$1,000</td><td>$1,000</td><td>$260</td><td>$260</td><td>1.000</td></tr>
+        """
+        fetch.text.return_value = card
+        fetch.json.return_value = {"features": [{
+            "attributes": {
+                "GIS_Parcel_Number": "1930443003", "TSC_Legal_Description": adapters.RIO_GRANDE_CO_LEGAL,
+                "TSC_Site_Address": "362 ALPINE",
+            },
+            "geometry": {"rings": [[[-106.5, 37.6], [-106.499, 37.6], [-106.499, 37.601], [-106.5, 37.6]]]},
+        }]}
+        with unittest.mock.patch.object(adapters, "CONEJOS_CO_NOTICE_SHA256", digest):
+            rows, info = adapters.rio_grande_co_treasurer_sale(fetch, NOW, self.fail)
+            self.assertTrue(info["complete"])
+            self.assertEqual([(r["apn"], r["deadline"], r["price"]) for r in rows],
+                             [("1930443003", "2026-12-23T18:00:00+00:00", None)])
+            self.assertTrue(rows[0]["geometry"])
+            self.assertNotIn("PRIVATE PERSON", repr(rows))
+            fetch.text.return_value = card.replace("Actual (2026)</td><td>$1,000", "Actual (2026)</td><td>$50,000")
+            self.assertEqual(adapters.rio_grande_co_treasurer_sale(fetch, NOW, self.fail)[0], [])
+            at_sale = datetime.datetime(2026, 12, 23, 18, tzinfo=datetime.timezone.utc)
+            self.assertEqual(adapters.rio_grande_co_treasurer_sale(fetch, at_sale, self.fail)[0], [])
 
     def test_elk_carries_named_vacant_parcel_without_assessment_or_prior_owner(self):
         text = """<h1>VACANT LAND – 40X IRR – Located in RIDGWAY TOWNSHIP</h1>

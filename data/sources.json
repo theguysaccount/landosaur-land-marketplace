@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T10:27:19Z",
+ "checked": "2026-11-28T10:51:37Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -7,14 +7,14 @@
    "complete": true,
    "count": 9,
    "failures": 0,
-   "last_attempt": "2026-11-28T06:17:47Z",
-   "last_success": "2026-11-28T06:17:47Z",
+   "last_attempt": "2026-11-28T10:42:28Z",
+   "last_success": "2026-11-28T10:42:28Z",
    "message": "",
    "name": "Alamosa County vacant land treasurer\u2019s deed auctions",
    "notes": [],
    "ok": true,
    "read": 9,
-   "seconds": 341,
+   "seconds": 331,
    "state": "CO",
    "upstream_total": 15,
    "url": "https://www.alamosacounty.org/308/Upcoming-Scheduled-Auction-Information"
@@ -2508,6 +2508,24 @@
    "state": "VA",
    "upstream_total": 73,
    "url": "https://www.rva.gov/"
+  },
+  "rio-grande-co-treasurer-sale": {
+   "about": "Published treasurer\u2019s deed notices matched to the county\u2019s assessment and parcel outline.",
+   "agency": "Rio Grande County Treasurer, Colorado",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T10:51:37Z",
+   "last_success": "2026-11-28T10:51:37Z",
+   "message": "",
+   "name": "Rio Grande County vacant land treasurer\u2019s deed auctions",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 11,
+   "state": "CO",
+   "upstream_total": 1,
+   "url": "https://alpha.creativecirclecdn.com/valley/files/20261110-124354-d9d-11-11-2026%20Valley%20Courier.pdf#page=23"
   },
   "riverton-wy-industrial": {
    "about": "Vacant city lots with asking prices in the approved broker agreement, matched to parcel numbers and boundaries in the Wyoming official parcel layer.",

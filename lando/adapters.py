@@ -214,6 +214,8 @@ def outline_url(listing):
         return one_parcel_url(MT_COMPOSITE_PARCELS, "PARCELID='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
+        return one_parcel_url(RIO_GRANDE_CO_PARCELS, f"GIS_Parcel_Number='{RIO_GRANDE_CO_APN}'", RIO_GRANDE_CO_FIELDS)
     return ""
 
 
@@ -8186,6 +8188,66 @@ def conejos_co_treasurer_sale(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+RIO_GRANDE_CO_NOTICE = CONEJOS_CO_NOTICE + "#page=23"
+RIO_GRANDE_CO_ASSESSOR = "https://riograndecountyco-assessor.tylerhost.net/assessor/"
+RIO_GRANDE_CO_PARCELS = "https://services8.arcgis.com/S4XaDWnt7zDg1erG/ArcGIS/rest/services/RioGrandeCOFeatures/FeatureServer/2/query"
+RIO_GRANDE_CO_FIELDS = "GIS_Parcel_Number,TSC_Legal_Description,TSC_Site_Address"
+RIO_GRANDE_CO_APN = "1930443003"
+RIO_GRANDE_CO_LEGAL = "Subdivision ALPINE VILLAGE #5 Lot 5 Block 38"
+
+
+def rio_grande_co_treasurer_sale(fetch, now, warn):
+    # Deed 26-1132 in the published Rio Grande County treasurer's notice.
+    deadline = datetime.datetime(2026, 12, 23, 18, tzinfo=datetime.timezone.utc)
+    if now >= deadline:
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(CONEJOS_CO_NOTICE)).hexdigest() != CONEJOS_CO_NOTICE_SHA256:
+        raise StructureError("Rio Grande County's published notice requires renewed verification")
+
+    fetch.enable_cookies()
+    fetch.text(RIO_GRANDE_CO_ASSESSOR + "web/")
+    fetch.text(RIO_GRANDE_CO_ASSESSOR + "web/loginPOST.jsp", form={"guest": "true", "submit": "Enter EagleWeb"})
+    card = fetch.text(RIO_GRANDE_CO_ASSESSOR + "taxweb/account.jsp?accountNum=R004544")
+    tables = [[clean(cell) for cell in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", tr, re.I | re.S)]
+              for tr in re.findall(r"<tr\b[^>]*>(.*?)</tr>", card, re.I | re.S)]
+    land = [cells for cells in tables if cells[:1] == ["Land"] and len(cells) == 7]
+    actual = [cells for cells in tables if cells[:1] == ["Actual (2026)"] and len(cells) == 2]
+    if "Parcel Number 19-304-43-003" not in clean(card) or RIO_GRANDE_CO_LEGAL not in clean(card):
+        raise StructureError("Rio Grande County's assessment card no longer matches the notice parcel")
+    if len(land) != 1 or len(actual) != 1 or not number(land[0][1]) or land[0][1] != actual[0][1]:
+        return [], {"complete": True, "upstream_total": 1}
+
+    where = f"GIS_Parcel_Number='{RIO_GRANDE_CO_APN}'"
+    gis_url, features = arcgis_query(fetch, RIO_GRANDE_CO_PARCELS, where, RIO_GRANDE_CO_FIELDS)
+    if len(features) != 1:
+        raise StructureError("Rio Grande County's notice parcel has no unique GIS outline")
+    feature = features[0]
+    parcel = feature["attributes"]
+    if (parcel.get("GIS_Parcel_Number") != RIO_GRANDE_CO_APN or
+            clean(parcel.get("TSC_Legal_Description")) != RIO_GRANDE_CO_LEGAL or
+            clean(parcel.get("TSC_Site_Address")) != "362 ALPINE"):
+        raise StructureError("Rio Grande County's parcel outline no longer matches the notice")
+    rings = (feature.get("geometry") or {}).get("rings") or []
+    acres = rings_acres(rings)
+    row = {
+        "id": "co-rio-grande-treasurer-" + RIO_GRANDE_CO_APN, "source": "rio-grande-co-treasurer-sale",
+        "title": "362 Alpine Road, South Fork (Rio Grande County treasurer’s deed auction)",
+        "state": "CO", "county": "Rio Grande", "locality": "South Fork", "address": "362 Alpine Road",
+        "apn": RIO_GRANDE_CO_APN, "acres": acres, "price": None, "price_kind": "none", "offering": "auction",
+        "status": "auction_terms", "deadline": deadline.isoformat(), "url": RIO_GRANDE_CO_NOTICE,
+        "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("auction_item", "26-1132", "="),
+                  fact("auction_start", "December 23, 2026 at 11:00 AM Mountain", "="),
+                  fact("availability", "Registration is required. Confirm availability and terms with the county treasurer.", "="),
+                  fact("land_use", "The 2026 assessment lists land as the entire actual value.", RIO_GRANDE_CO_ASSESSOR + "web/")],
+        "tags": ["treasurer’s deed auction", "registration required"],
+    }
+    if acres:
+        row["facts"].append(fact("acreage", f"{acres:g} acres estimated from the published parcel outline.", gis_url, "gis_area"))
+    apply_geometry(row, rings, gis_url, "Rio Grande County")
+    return [row], {"complete": True, "upstream_total": 1}
+
+
 ALAMOSA_CO_SCHEDULE = "https://www.alamosacounty.org/308/Upcoming-Scheduled-Auction-Information"
 ALAMOSA_CO_NOTICES = "https://www.alamosacounty.org/307/Known-Interested-Party-Notices"
 ALAMOSA_CO_ENTRY = r"Certificate\s+(\d+),\s*Parcel\s+(\d{12})\b"
@@ -11767,6 +11829,10 @@ SOURCES = [
      "agency": "Conejos County Treasurer", "url": CONEJOS_CO_NOTICE, "state": "CO", "timezone": "America/Denver",
      "run": conejos_co_treasurer_sale, "requires_sale_match": True,
      "about": "Vacant land in the county treasurer’s legal auction notices. Confirm registration and timing with the treasurer."},
+    {"id": "rio-grande-co-treasurer-sale", "name": "Rio Grande County vacant land treasurer’s deed auctions",
+     "agency": "Rio Grande County Treasurer, Colorado", "url": RIO_GRANDE_CO_NOTICE, "state": "CO", "timezone": "America/Denver",
+     "run": rio_grande_co_treasurer_sale, "requires_sale_match": True,
+     "about": "Published treasurer’s deed notices matched to the county’s assessment and parcel outline."},
     {"id": "elk-pa-repository", "name": "Elk County vacant repository land",
      "agency": "Elk County Tax Claim Bureau", "url": ELK_PA_REPOSITORY, "state": "PA",
      "run": elk_pa_repository, "requires_sale_match": True,
@@ -11881,6 +11947,16 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Cochise County Board tax-deed award exhibits", "https://public.destinyhosted.com/26244/agenda/",
+     "The agenda portal disallows crawling, and the separate video agenda attachments return HTTP 403 for robots.txt. The November 24 Board recording confirms three groups remained, but does not identify them. The original sale roster still shows awarded units."),
+    ("Oakridge city industrial park sale materials", "https://www.ci.oakridge.or.us/media/22486",
+     "The city and its published sale materials returned HTTP 403. The separate Lane County assessment layer cannot confirm which city lots are open for offers."),
+    ("Encampment municipal and legacy economic development sale materials", "https://www.townofencampment.com/",
+     "The town site and legacy catalog did not present verifiable TLS certificates for robots.txt. The current county economic development directory does not identify Encampment lots for sale."),
+    ("Fannie Mae HomePath public listing catalog", "https://www.homepath.fanniemae.com/",
+     "The catalog host returned HTML in place of robots.txt."),
+    ("Rio Grande County treasurer’s real-property sale materials", "https://riograndecounty.colorado.gov/departments/treasurer",
+     "The county host returned HTTP 403 for robots.txt."),
     ("Kenai Peninsula Borough additional parcel map service", "https://maps.kpb.us/gis/rest/services/BoroughParcels/MapServer/0",
      "The map service did not return its robots.txt before the timeout. The borough’s separately published assessment layer is carried where it confirms vacancy."),
     ("Graham County tax-deed sale notices", "https://www.graham.az.gov/731/Tax-Deed-Sales",

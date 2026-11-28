@@ -106,6 +106,11 @@ class Fetcher:
                 handlers.append(urllib.request.HTTPSHandler(context=context))
         self._opener = urllib.request.build_opener(*handlers)
 
+    def enable_cookies(self):
+        """Retain site cookies for public forms that require a guest session."""
+        if not any(isinstance(handler, urllib.request.HTTPCookieProcessor) for handler in self._opener.handlers):
+            self._opener.add_handler(urllib.request.HTTPCookieProcessor())
+
     @staticmethod
     def _origin(parts):
         if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:

@@ -26,7 +26,7 @@
   var outBox = document.getElementById("concierge-result");
   var submitBtn = document.getElementById("concierge-submit");
   var serviceCards = Array.prototype.slice.call(document.querySelectorAll("[data-select-service]"));
-  var quotedParcel = null, quoteRequest = 0;
+  var quotedParcel = null, quoteRequest = 0, quotePending = false;
 
   function listedPriceLabel(kind, isDirect) {
     if (kind === "min_bid") return isDirect ? "Seller minimum bid" : "Official minimum bid";
@@ -63,7 +63,7 @@
       c.classList.toggle("active-service", c.getAttribute("data-select-service") === svc);
     });
     if (mapWrap) {
-      mapWrap.hidden = Boolean(quotedParcel && quotedParcel.lat != null && quotedParcel.lon != null);
+      mapWrap.hidden = quotePending || Boolean(quotedParcel && quotedParcel.lat != null && quotedParcel.lon != null);
       if (locBtn) locBtn.disabled = mapWrap.hidden;
       if (!mapWrap.hidden && pinMap) setTimeout(function () { pinMap.invalidateSize(); }, 80);
     }
@@ -202,6 +202,7 @@
       pinMarker = null;
     }
     quotedParcel = null;
+    quotePending = Boolean(id);
     Object.keys(parcelFields).forEach(function (field) {
       if (form[field].readOnly) form[field].value = "";
       form[field].readOnly = false;
@@ -209,6 +210,7 @@
     setActiveService(form.service_type.value, false);
     if (banner && !returningFromCheckout) {
       banner.hidden = !id;
+      banner.setAttribute("aria-busy", String(quotePending));
       banner.textContent = id ? "Checking current parcel availability…" : "";
     }
     if (!id) return;
@@ -216,13 +218,20 @@
       return revision === quoteRequest && form.parcel_id.value.trim().toLowerCase() === id;
     }
     function showError(message) {
-      if (current() && banner && !returningFromCheckout) banner.textContent = message;
+      if (!current()) return;
+      quotePending = false;
+      setActiveService(form.service_type.value, false);
+      if (banner && !returningFromCheckout) {
+        banner.setAttribute("aria-busy", "false");
+        banner.textContent = message;
+      }
     }
     fetch(base + "/api/concierge/?parcel_id=" + encodeURIComponent(id))
       .then(function (response) { return response.json(); })
       .then(function (result) {
         if (!current()) return;
         if (!result.parcel) { showError(result.error || "Could not check current parcel availability."); return; }
+        quotePending = false;
         var parcel = quotedParcel = result.parcel;
         Object.keys(parcelFields).forEach(function (field) {
           var value = parcel[parcelFields[field]];
@@ -234,6 +243,7 @@
         if (parcel.lat != null && parcel.lon != null) setPin(parcel.lat, parcel.lon, false);
         setActiveService(form.service_type.value, false);
         if (banner && !returningFromCheckout) {
+          banner.setAttribute("aria-busy", "false");
           banner.innerHTML = "<h3>" + esc(parcel.title) + "</h3><p>" +
             esc([parcel.county, parcel.state].filter(Boolean).join(", ")) +
             (parcel.apn ? " · APN " + esc(parcel.apn) : "") +

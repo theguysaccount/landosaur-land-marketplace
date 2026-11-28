@@ -6562,11 +6562,19 @@ def multnomah_or_tax_title(fetch, now, warn):
 
 
 CTDOT_SALE = "https://portal.ct.gov/dot/properties/active-public-bids"
+CTDOT_LISTINGS = "https://portal.ct.gov/dot/properties/listings"
 CTDOT_MANSFIELD = CTDOT_SALE + "/0032-0032-005a-mansfield-item-no-795"
-CTDOT_REGIONS = {"Mansfield": "Capitol Planning Region", "Torrington": "Northwest Hills Planning Region"}
+CTDOT_PRESTON = CTDOT_SALE + "/113-014-011a-preston-item-no-877"
+CTDOT_PRESTON_PLAN = "/dot/-/media/dot/prop-management/maps/113-014-011a-release-map.pdf"
+CTDOT_PRESTON_PLAN_SHA256 = "4125957ad3ba3cb91765291076ce8090c79bd2574618d71dfc7bf74bc4657719"
+# Four vertices digitized from the verified plan's NAD83 Connecticut grid and 1-inch-to-40-foot scale.
+CTDOT_PRESTON_OUTLINE = [[-71.961124, 41.531153], [-71.959676, 41.530857], [-71.958036, 41.530867],
+                        [-71.957466, 41.531223], [-71.961124, 41.531153]]
+CTDOT_REGIONS = {"Mansfield": "Capitol Planning Region", "Torrington": "Northwest Hills Planning Region",
+                 "Preston": "Southeastern Connecticut Planning Region"}
 
 
-def parse_ctdot_bid(page, url, now, require_date=False):
+def parse_ctdot_bid(page, url, now, require_date=False, release_plan=None):
     from zoneinfo import ZoneInfo
 
     fields = {}
@@ -6580,15 +6588,20 @@ def parse_ctdot_bid(page, url, now, require_date=False):
         return None
     text = clean(heading[1])
     item = re.match(r"([\dA-Z-]+)\s*-\s*([A-Z][a-z ]+)\s*-\s*Item No\.\s*(\d+)", text, re.I)
+    if not item and url == CTDOT_PRESTON:
+        item = re.match(r"(113-014-011A)\s+(Preston)\s+Item No\.\s*(877)\b", text)
     if not item or re.search(r"\b(?:deposit|sold|withdrawn|cancelled|canceled)\b", text, re.I):
         return None
     ref, place, number_id = item.groups()
     place = place.strip().title()
-    if place not in CTDOT_REGIONS or "PUBLIC BID" not in page or "Department of Transportation" not in page:
+    description = clean(page)
+    if place not in CTDOT_REGIONS or "PUBLIC BID" not in description or "Department of Transportation" not in description:
         return None
     size = fields.get("Lot Size", "")
     land = fields.get("Style", "") + " " + size
-    if not re.search(r"\bvacant land\b", land, re.I) or re.search(r"\b(?:improved|tower|shed|house|building)\b", land, re.I):
+    preston = url == CTDOT_PRESTON and (ref, place, number_id) == ("113-014-011A", "Preston", "877")
+    if (not (re.search(r"\bvacant land\b", land, re.I) or preston and release_plan)
+            or re.search(r"\b(?:improved|tower|shed|house|building)\b", land, re.I)):
         return None
     area = re.match(r"([\d,.]+)\s*(?:±|\+/-)?\s*(acres?|square feet|sq\.? ft\.?)\b", size, re.I)
     acres = number(area[1]) if area else None
@@ -6610,11 +6623,11 @@ def parse_ctdot_bid(page, url, now, require_date=False):
     address = fields.get("Location", "")
     facts = [fact("parcel_number", "ConnDOT file %s, item %s" % (ref, number_id), "="),
              fact("title_terms", "Municipal right of first refusal applies", "=")]
-    if fee := re.search(r"(\$[\d,.]+)\s+administrative fee", clean(page), re.I):
+    if fee := re.search(r"(\$[\d,.]+)\s+administrative fee", description, re.I):
         facts.append(fact("price", fee[1] + " separate administrative fee", "="))
     if fields.get("Zone"):
         facts.append(fact("zoning", fields["Zone"], "="))
-    return {
+    row = {
         "id": "ct-dot-" + number_id, "source": "connecticut-dot-land",
         "title": "%s, %s (ConnDOT public bid)" % (address or ("ConnDOT item " + number_id), place),
         "state": "CT", "county": CTDOT_REGIONS[place], "locality": place, "apn": "",
@@ -6625,6 +6638,28 @@ def parse_ctdot_bid(page, url, now, require_date=False):
         "url": url, "lat": None, "lon": None, "geometry": None, "facts": facts,
         "tags": ["state transportation surplus", "public bid"],
     }
+    if preston:
+        if not release_plan or acres != 2.019:
+            return None
+        apply_geometry(row, [CTDOT_PRESTON_OUTLINE], release_plan, "Connecticut DOT")
+        row["facts"][-1] = fact("parcel_outline", "Approximate boundary digitized from the preliminary state release plan for item 877.", "=")
+        row["facts"].append(fact("site_constraints", "The state reserves a drainage right-of-way easement of about 700 square feet. "
+                                 "The release includes the state’s interest in the former Packer Road as shown on the plan.", "="))
+    return row
+
+
+def ctdot_preston_release(fetch, page):
+    for href, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        if clean(label) != "Property Map":
+            continue
+        url = urllib.parse.urljoin(CTDOT_PRESTON, html.unescape(href))
+        destination = urllib.parse.urlsplit(url)
+        if (destination.scheme, destination.hostname, destination.path) != ("https", "portal.ct.gov", CTDOT_PRESTON_PLAN):
+            continue
+        if hashlib.sha256(fetch.bytes(url)).hexdigest() != CTDOT_PRESTON_PLAN_SHA256:
+            raise StructureError("Connecticut DOT's Preston release plan changed")
+        return url
+    raise StructureError("Connecticut DOT's Preston release plan could not be confirmed")
 
 
 def connecticut_dot_land(fetch, now, warn):
@@ -6635,9 +6670,25 @@ def connecticut_dot_land(fetch, now, warn):
     urls = {urllib.parse.urljoin(CTDOT_SALE, link.lower()) for link in re.findall(pattern + '"', directory, re.I)}
     # This separate official notice has a hard future deadline, even when omitted from the directory.
     archived = {urllib.parse.urljoin(CTDOT_SALE, link.lower()) for link in re.findall(pattern + r'\?archived=true"', directory, re.I)}
+    listings = fetch.text(CTDOT_LISTINGS)
+    if "Active Public Bids" not in listings or "Potential Properties" not in listings:
+        raise StructureError("Connecticut DOT property listing layout changed")
+    listed_urls = {urllib.parse.urljoin(CTDOT_LISTINGS, link.lower()) for link in re.findall(pattern + '"', listings, re.I)}
+    if CTDOT_PRESTON in listed_urls:
+        urls.add(CTDOT_PRESTON)
+    else:
+        urls.discard(CTDOT_PRESTON)
     rows = []
     for url in sorted((urls | {CTDOT_MANSFIELD}) - archived):
-        if row := parse_ctdot_bid(fetch.text(url), url, now, require_date=url not in urls):
+        page = fetch.text(url)
+        release = None
+        if url == CTDOT_PRESTON:
+            try:
+                release = ctdot_preston_release(fetch, page)
+            except (FetchError, StructureError) as error:
+                warn(str(error))
+                continue
+        if row := parse_ctdot_bid(page, url, now, require_date=url not in urls, release_plan=release):
             rows.append(row)
     return rows, {"complete": True, "upstream_total": len(rows)}
 

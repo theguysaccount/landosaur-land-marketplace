@@ -24,6 +24,9 @@ try {
         await page.goto(base + route);
         const url = new URL(route, base);
         if (ready[url.pathname]) await page.waitFor(ready[url.pathname], 15000);
+        if (url.pathname === "/services/" && url.searchParams.has("parcel") && url.searchParams.get("paid") !== "1") {
+          await page.waitFor("document.querySelector('#selected-parcel-banner[aria-busy=false]:not([hidden])')", 15000);
+        }
         if (/^#[a-z][a-z0-9-]*$/i.test(url.hash)) {
           await page.eval(`document.getElementById(${JSON.stringify(url.hash.slice(1))})?.scrollIntoView({ behavior: "instant", block: "start" })`);
         }

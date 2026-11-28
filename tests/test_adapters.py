@@ -1016,6 +1016,35 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertIsNone(adapters.parse_ctdot_bid(page.replace("vacant land", "vacant land improved with a tower"),
                                                   adapters.CTDOT_SALE, NOW))
 
+    def test_connecticut_preston_requires_an_active_link_and_verified_release_plan(self):
+        fetch = unittest.mock.Mock()
+        plan = b"Reviewed agency release plan"
+        fetch.bytes.return_value = plan
+        pages = {
+            adapters.CTDOT_SALE: '<div id="resultsPanel">Active Public Bids</div>',
+            adapters.CTDOT_LISTINGS: 'Active Public Bids <a href="%s">Preston</a> Potential Properties' % adapters.CTDOT_PRESTON,
+            adapters.CTDOT_PRESTON: ('<h3>113-014-011A Preston Item No. 877 Bid Date: STILL AVAILABLE</h3>'
+                                    '<p><b>PUBLIC</b> <b>BID</b></p><p>Department of Transportation</p><p>Bid Date: Still Available</p>'
+                                    '<p>Location: Route 165</p><p>Lot Size: 2.019± Acres</p><p>Asking Price: $75,000.00</p>'
+                                    f'<a href="{adapters.CTDOT_PRESTON_PLAN}">Property Map</a>'),
+            adapters.CTDOT_MANSFIELD: '',
+        }
+        fetch.text.side_effect = pages.__getitem__
+        with patch.object(adapters, "CTDOT_PRESTON_PLAN_SHA256", hashlib.sha256(plan).hexdigest()):
+            rows, _ = adapters.connecticut_dot_land(fetch, NOW, self.fail)
+            preston, = rows
+            self.assertEqual((preston["id"], preston["price_kind"], preston["price"], preston["acres"]),
+                             ("ct-dot-877", "asking", 75000, 2.019))
+            self.assertAlmostEqual(adapters.rings_acres(preston["geometry"]), preston["acres"], places=2)
+            self.assertAlmostEqual(preston["lat"], 41.531046, places=6)
+            self.assertIn("preliminary state release plan", repr(preston))
+            fetch.bytes.return_value = b"Revised release plan"
+            notes = []
+            self.assertEqual(adapters.connecticut_dot_land(fetch, NOW, notes.append)[0], [])
+            self.assertIn("release plan changed", notes[0])
+            pages[adapters.CTDOT_LISTINGS] = pages[adapters.CTDOT_LISTINGS].replace('877"', '877?archived=true"')
+            self.assertEqual(adapters.connecticut_dot_land(fetch, NOW, self.fail)[0], [])
+
     def test_gorham_lot_schedule_preserves_ask_and_skips_unavailable(self):
         brochure = ("Town-owned lots approximately 3 acres ready for development\nSUBDIVISION LOTS\n"
                     "Lot # Acres Buildable SF* Price\n1 15.5 AC 85,000± SF SOLD\n"

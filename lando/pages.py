@@ -2485,7 +2485,9 @@ class Site(object):
                 '</section>'
             ) % (self.u("/xray/"), la, lo)
         else:
-            mapbox = '<p class="small">The source publishes no map coordinates for this listing. Use the official agency link for plat maps and sale documents.</p>'
+            extent_note = next((item["value"] for item in r["facts"] if item["topic"] == "acreage_note"), "")
+            mapbox = '<p class="small">%s</p>' % esc(extent_note or
+                "The source publishes no map coordinates for this listing. Use the official agency link for plat maps and sale documents.")
 
         aq = urllib.parse.urlencode({k: v for k, v in (
             ("id", r["id"]), ("title", r["title"]),

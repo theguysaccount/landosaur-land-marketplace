@@ -8534,6 +8534,90 @@ def cumberland_md_surplus(fetch, now, warn):
     return sorted(rows, key=lambda item: item["apn"]), {"complete": True, "upstream_total": len(offers)}
 
 
+MOHAVE_AZ_SALE = "https://www.mohave.gov/departments/clerk-of-the-board/over-the-counter-tax-deed-sales/"
+MOHAVE_AZ_ROSTER = "/media/lexkhrwq/otc_td_list_1126.pdf"
+MOHAVE_AZ_ROSTER_SHA = "8f1cf607c42c3440c11761320d78d81c1bbe69fabe1a64fb3eeb89be9322d557"
+MOHAVE_AZ_ASSESSOR = "https://www.mohave.gov/departments/assessor/assessor-search/"
+MOHAVE_AZ_SUMMARY = "https://appsweb.mohave.gov/data_apps/api/assessor_parcel_search/parcel_summary/"
+MOHAVE_AZ_CLOSE = datetime.date(2026, 11, 30)
+# The November 16 board agenda identified the already-bid Meadview parcel for disposition.
+# Only the other two November roster entries are eligible for this adapter.
+MOHAVE_AZ_OPEN = {
+    "209-07-148": ("Golden Valley", "Sacramento Ranchos Unit 5, Lot 1076", 3029.81),
+    "311-03-063E": ("Kingman", "Air-Rail Manor, part of Lots 6 and 21 outside the Interstate 40 right-of-way", 6188.75),
+}
+
+
+def parse_mohave_assessment(payload, pin):
+    matches = payload.get("result")
+    if payload.get("status") != 200 or not isinstance(matches, list) or len(matches) != 1:
+        return None
+    record = matches[0]
+    parcels = record.get("owner_summary")
+    references = record.get("property_reference_summary")
+    years = record.get("summary_by_year")
+    if not parcels or not references or not years or record.get("improvement_data") != []:
+        return None
+    parcel = parcels[0]
+    valuations = [year for year in years[0] if str(year.get("tax_year")) == str(MOHAVE_AZ_CLOSE.year)]
+    if (parcel.get("parcel_no") != pin or parcel.get("ownership_type") != "Government"
+            or len(valuations) != 1):
+        return None
+    value = valuations[0]
+    if (value.get("assessor_use_code") != "9500-STATE VACANT LAND"
+            or str(value.get("improvement_value", "")).strip() not in ("$0", "$0.00", "0", "0.0")
+            or not number(value.get("land_value"))
+            or number(value.get("land_value")) != number(value.get("full_cash_val"))):
+        return None
+    acres = number(references[0].get("parcel_size"))
+    if not acres:
+        return None
+    point = parcel.get("coordinates") or {}
+    lat, lon = point.get("latitude"), point.get("longitude")
+    if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+            and 34 <= lat <= 37 and -115 <= lon <= -112):
+        lat = lon = None
+    return acres, lat, lon
+
+
+def mohave_az_otc(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    day = now.astimezone(ZoneInfo("America/Phoenix")).date()
+    if not datetime.date(2026, 11, 1) <= day <= MOHAVE_AZ_CLOSE:
+        return [], {"complete": True, "upstream_total": 0}
+    page = fetch.text(MOHAVE_AZ_SALE)
+    roster = urllib.parse.urljoin(MOHAVE_AZ_SALE, MOHAVE_AZ_ROSTER)
+    if (f'href="{MOHAVE_AZ_ROSTER}"' not in page
+            or "Between April 15th and November 30th" not in clean(page)
+            or hashlib.sha256(fetch.bytes(roster)).hexdigest() != MOHAVE_AZ_ROSTER_SHA):
+        warn("Mohave County’s current bid terms or roster changed. Review updated offers before carrying them.")
+        return [], {"complete": True, "upstream_total": 0}
+    rows = []
+    for pin, (locality, description, bid) in MOHAVE_AZ_OPEN.items():
+        params = urllib.parse.urlencode({"parcel": pin, "type": "real"})
+        assessment = parse_mohave_assessment(fetch.json(MOHAVE_AZ_SUMMARY + "?" + params), pin)
+        if not assessment:
+            continue
+        acres, lat, lon = assessment
+        rows.append({
+            "id": "az-mohave-" + slug(pin), "source": "mohave-az-otc",
+            "title": f"{description}, {locality} (Mohave County tax-deed land)", "state": "AZ", "county": "Mohave",
+            "locality": locality, "address": "", "apn": pin, "acres": acres,
+            "lat": lat, "lon": lon, "geometry": None, "url": MOHAVE_AZ_SALE,
+            "price": bid, "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+            "offer_close_date": MOHAVE_AZ_CLOSE.isoformat(), "deadline": None,
+            "facts": [
+                fact("minimum_bid", f"${bid:,.2f} in the November roster, plus the county’s $40 processing fee.", roster),
+                fact("sale_terms", "Highest bid is subject to Board approval. Confirm when the Clerk must receive the bid and payment.", "="),
+                fact("acreage", f"{acres:g} acres recorded as vacant land by the county assessor.",
+                     MOHAVE_AZ_ASSESSOR + "?" + urllib.parse.urlencode({"parcel": pin.replace("-", "")})),
+            ],
+            "tags": ["tax deed", "over-the-counter"],
+        })
+    return rows, {"complete": True, "upstream_total": len(MOHAVE_AZ_OPEN)}
+
+
 TODD_MN_LAND = "https://www.toddcountymn.gov/government/departments/auditor_and_treasurer/tax_forfeited_land.php"
 
 
@@ -12033,8 +12117,14 @@ SOURCES = [
      "agency": "Denali Borough Land Office, Alaska", "url": DENALI_AK_LAND, "state": "AK",
      "run": denali_ak_land, "requires_sale_match": True,
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
+    {"id": "mohave-az-otc", "name": "Mohave County November over-the-counter tax-deed land",
+     "agency": "Mohave County Clerk of the Board, Arizona", "url": MOHAVE_AZ_SALE, "state": "AZ",
+     "run": mohave_az_otc, "requires_sale_match": True, "timezone": "America/Phoenix",
+     "about": "November tax-deed offers with published minimum bids, matched to the county’s current vacant-land assessments."},
 ]
 NOT_CARRIED = [
+    ("Sandy, Oregon industrial property catalogue", "https://www.ci.sandy.or.us/property/clackamas-county-property",
+     "The city site closed the connection before returning readable robots.txt. The listing was excluded."),
     ("Maui County tax sale notices", "https://www.mauicounty.gov/1748/Delinquent-Tax-Accounts",
      "The county's robots.txt returned HTTP 403. A delinquency or public-land record does not establish a current sale."),
     ("Rockingham, Vermont municipal property sale packet", "https://rockbf.org/public-notices",

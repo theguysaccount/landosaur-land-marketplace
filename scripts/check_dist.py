@@ -26,6 +26,7 @@ from lando.pages import listing_is_indexable  # noqa: E402
 
 HREF = re.compile(r'(?:href|src)="([^"]+)"')
 OFFICIAL = {
+    "mohave.gov",
     "douglascountywa.gov", "co.chelan.wa.us", "franklintownshipnj.org", "townofgreybull.com", "washingtoncountytn.org", "tnecd.com",
     "firstpark.com", "cms2.revize.com", "alamosacounty.org", "denaliborough.org", "metroatlantalandbank.org", "cumberlandmd.gov",
     "fultoncountyga.gov", "townofpalmer.com", "ci.florence.or.us", "co.lincoln.or.us", "alaska.edu", "kgbak.us", "sjgov.org",

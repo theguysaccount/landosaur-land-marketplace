@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T11:04:24Z",
+ "checked": "2026-11-28T11:35:38Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1948,6 +1948,24 @@
    "state": "MN",
    "upstream_total": 5,
    "url": "https://www.mndot.net/row/propsales.html"
+  },
+  "mohave-az-otc": {
+   "about": "November tax-deed offers with published minimum bids, matched to the county\u2019s current vacant-land assessments.",
+   "agency": "Mohave County Clerk of the Board, Arizona",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T11:35:38Z",
+   "last_success": "2026-11-28T11:35:38Z",
+   "message": "",
+   "name": "Mohave County November over-the-counter tax-deed land",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 7,
+   "state": "AZ",
+   "upstream_total": 2,
+   "url": "https://www.mohave.gov/departments/clerk-of-the-board/over-the-counter-tax-deed-sales/"
   },
   "montana-cad": {
    "about": "County- and city-owned vacant land tracts across Montana from the Montana Statewide Cadastral Framework with GIS outlines and acreage.",

@@ -2250,6 +2250,45 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("0122010689", fetch.json.call_args.args[0])
         fetch.bytes.assert_not_called()
 
+    def test_mohave_matches_the_reviewed_monthly_sale_to_current_vacant_assessments(self):
+        roster = b"Reviewed November bid roster fixture"
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = ('<p>Between April 15th and November 30th</p>'
+                                   f'<a href="{adapters.MOHAVE_AZ_ROSTER}">View PDF</a>')
+        fetch.bytes.return_value = roster
+        dated = {"tax_year": "2026", "land_value": "$4,716", "full_cash_val": "$4,716",
+                 "improvement_value": "$0", "assessor_use_code": "9500-STATE VACANT LAND"}
+
+        def assessment(pin, yearly):
+            return {"status": 200, "result": [{
+                "owner_summary": [{"parcel_no": pin, "ownership_type": "Government",
+                                   "owner_name": "PRESERVE NO NAMES",
+                                   "coordinates": {"latitude": 35.04574, "longitude": -114.235343}}],
+                "property_reference_summary": [{"parcel_size": "2.35 acres"}],
+                "summary_by_year": [[yearly]],
+                "improvement_data": [],
+            }]}
+
+        fetch.json.side_effect = [assessment("209-07-148", dated),
+                                  assessment("311-03-063E", {**dated, "improvement_value": "$10"})]
+        cutoff_day = datetime.datetime(2026, 11, 30, 18, tzinfo=datetime.timezone.utc)
+        sha = hashlib.sha256(roster).hexdigest()
+        with patch.object(adapters, "MOHAVE_AZ_ROSTER_SHA", sha):
+            rows, info = adapters.mohave_az_otc(fetch, cutoff_day, self.fail)
+            self.assertEqual(info, {"complete": True, "upstream_total": 2})
+            parcel, = rows
+            self.assertEqual((parcel["apn"], parcel["acres"], parcel["price"], parcel["offer_close_date"]),
+                             ("209-07-148", 2.35, 3029.81, "2026-11-30"))
+            self.assertIn("$40 processing fee", parcel["facts"][0]["value"])
+            self.assertNotIn("PRESERVE NO NAMES", repr(parcel))
+            self.assertNotIn("318-05-010C", repr(fetch.json.call_args_list))
+        warnings = []
+        self.assertFalse(adapters.mohave_az_otc(fetch, cutoff_day, warnings.append)[0])
+        self.assertEqual(len(warnings), 1)
+        fetch.reset_mock()
+        self.assertFalse(adapters.mohave_az_otc(fetch, cutoff_day + datetime.timedelta(days=1), self.fail)[0])
+        fetch.text.assert_not_called()
+
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
         attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,
                  "Subdivisio": "MEADOW LAKE SUBDIVISION", "Lot": "12", "Situs": "",

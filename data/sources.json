@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T06:32:22Z",
+ "checked": "2026-11-28T06:47:44Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1773,14 +1773,14 @@
    "complete": true,
    "count": 77,
    "failures": 0,
-   "last_attempt": "2026-11-27T22:37:59Z",
-   "last_success": "2026-11-27T22:37:59Z",
+   "last_attempt": "2026-11-28T06:44:13Z",
+   "last_success": "2026-11-28T06:44:13Z",
    "message": "",
    "name": "New Mexico tax auction notices matched to undeveloped Valencia parcels",
    "notes": [],
    "ok": true,
    "read": 77,
-   "seconds": 8,
+   "seconds": 7,
    "state": "NM",
    "upstream_total": 77,
    "url": "https://www.tax.newmexico.gov/businesses/property-tax-overview/delinquent-property-tax-auctions/"
@@ -1802,6 +1802,24 @@
    "state": "LA",
    "upstream_total": 213,
    "url": "https://www.noraworks.org/opportunities/"
+  },
+  "north-logan-ut-surplus": {
+   "about": "The city's posted invitation to purchase a portion of a vacant tract, with the published local closing time.",
+   "agency": "North Logan City, Utah",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T06:47:44Z",
+   "last_success": "2026-11-28T06:47:44Z",
+   "message": "",
+   "name": "North Logan sealed bids for surplus land",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 1,
+   "state": "UT",
+   "upstream_total": 1,
+   "url": "https://www.utah.gov/pmn/sitemap/notice/1124509.html"
   },
   "northumberland-pa-repository": {
    "about": "Parcels expressly labeled vacant in the county\u2019s current sealed-bid repository notice.",

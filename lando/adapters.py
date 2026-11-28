@@ -4921,6 +4921,8 @@ def parse_valencia_auction(text, now):
         return {}, None
     bids = {}
     for parcel in re.split(r"(?m)^\s*Item #\d+\b", text)[1:]:
+        if re.search(r"\b(?:REMOVED|WITHDRAWN|CANCELLED|CANCELED)\b", parcel.partition("\n")[0], re.I):
+            continue
         upc = re.search(r"(?m)^\s*UPC:\s*(\d{19})\s*$", parcel)
         price = re.search(r"(?m)^\s*Minimum Bid:\s*\$([\d,]+\.\d{2})\s*$", parcel)
         if upc and price and not re.search(r"\bMH\s*#|\bMOBILE HOME\b", parcel, re.I):
@@ -9235,7 +9237,55 @@ def metro_atlanta_landbank(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(urls)}
 
 
+NORTH_LOGAN_NOTICE = "https://www.utah.gov/pmn/sitemap/notice/1124509.html"
+
+
+def north_logan_ut_surplus(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(NORTH_LOGAN_NOTICE)
+    agenda = re.search(r'<dd class="agenda">(.+?)</dd>', page, re.S)
+    end = re.search(r"<dt>Event End Date &amp; Time</dt>\s*<dd>([^<]+)</dd>", page)
+    if not agenda or not end:
+        raise StructureError("North Logan's public land bid notice lost its agenda or closing date")
+    terms = clean(agenda[1])
+    if re.search(r"\b(?:bid|notice|sale|invitation) (?:has been |was )?(?:cancelled|canceled|withdrawn|closed)\b", terms, re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    parcel = re.search(r"Parcel Tax ID: Portion of (04-273-8001)\b", terms)
+    acreage = re.search(r"Acreage: approximately (\d+(?:\.\d+)?)\b", terms)
+    timed_bid = re.search(
+        r"Sealed Bids will be received .+? until (\d{1,2}:\d{2}\s*[ap]m)(?: \(noon\))? on \w+, (\w+ \d{1,2}, \d{4})\b",
+        terms, re.I,
+    )
+    if not parcel or not acreage or not timed_bid or "to Purchase LAND" not in terms:
+        raise StructureError("North Logan's sale terms no longer identify the offered tract")
+    when = datetime.datetime.strptime(clean(end[1]), "%B %d, %Y %I:%M %p")
+    if datetime.datetime.strptime(f"{timed_bid[2]} {timed_bid[1]}", "%B %d, %Y %I:%M %p") != when:
+        raise StructureError("North Logan's bid text and notice disagree about closing time")
+    when = when.replace(tzinfo=ZoneInfo("America/Denver"))
+    if when <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    row = {
+        "id": "ut-northlogan-042738001-portion", "source": "north-logan-ut-surplus",
+        "title": "1460 E 2600 North (North Logan surplus tract)", "state": "UT", "county": "Cache",
+        "locality": "North Logan", "address": "Approx. 1460 E 2600 North", "apn": f"Portion of {parcel[1]}",
+        "acres": number(acreage[1]), "price": None, "price_kind": "none", "offering": "auction", "status": "auction_open",
+        "deadline": when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": NORTH_LOGAN_NOTICE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("parcel_number", f"Portion of {parcel[1]} shown in Exhibit A", "="),
+                  fact("acreage", f"Approximately {acreage[1]} acres offered", "="),
+                  fact("sale_terms", "Sealed bids are due at the city offices by the published deadline.", "=")],
+        "tags": ["vacant land", "city surplus", "sealed bids"],
+        "terms": "The city is offering the portion shown in Exhibit A. See the official notice for bidding and closing terms.",
+    }
+    return [row], {"complete": True, "upstream_total": 1}
+
+
 SOURCES = [
+    {"id": "north-logan-ut-surplus", "name": "North Logan sealed bids for surplus land",
+     "agency": "North Logan City, Utah", "url": NORTH_LOGAN_NOTICE, "state": "UT",
+     "run": north_logan_ut_surplus, "requires_sale_match": True,
+     "about": "The city's posted invitation to purchase a portion of a vacant tract, with the published local closing time."},
     {"id": "metro-atlanta-landbank", "name": "Metro Atlanta Land Bank fee-simple vacant lots",
      "agency": "Metro Atlanta Land Bank Authority", "url": METRO_ATLANTA_LAND, "state": "GA",
      "run": metro_atlanta_landbank, "requires_sale_match": True,
@@ -9809,6 +9859,10 @@ NOT_CARRIED = [
      "The state DOT host returned HTML in place of robots.txt."),
     ("City of Euclid current land bank roster", "https://www.cityofeuclid.gov/Landbank-Property-Listing-and-Map",
      "The asset host for the city’s parcel-by-parcel inventory returned HTTP 403 for robots.txt."),
+    ("New Castle County Sheriff’s real estate sale lists", "https://www.newcastlede.gov/188/Sale-Lists",
+     "The county’s auction host returned HTTP 403 for robots.txt."),
+    ("Provo City surplus property notices", "https://www.provo.gov/272/Property-Management",
+     "The city’s property announcements host returned HTTP 403 for robots.txt."),
     ("Prince George’s County available surplus land", "https://www.princegeorgescountymd.gov/departments-offices/redevelopment-authority/surplus-real-property-program/available-county-surplus-real-property-disposition",
      "The county host returned HTTP 403 for robots.txt."),
     ("Northumberland County, Pennsylvania assessment parcel boundaries", "https://gis.norrycopa.net/arcgis/rest/services/Assessment/NC_Tax_Parcels/MapServer",

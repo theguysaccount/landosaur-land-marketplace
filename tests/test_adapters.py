@@ -45,6 +45,28 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_north_logan_lists_the_offered_portion_and_expires_at_noon(self):
+        page = ('<dt>Event End Date &amp; Time</dt><dd>December 8, 2026 12:00 PM</dd>'
+                '<dd class="agenda">INVITATION TO BID to Purchase LAND (Portion of Parcel 04-273-8001)\n'
+                'Parcel Tax ID: Portion of 04-273-8001\nAcreage: approximately 0.70\n'
+                'Sealed Bids will be received at the North Logan City offices until 12:00 pm (noon) '
+                'on Tuesday, December 8, 2026.</dd>')
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = page
+        rows, info = adapters.north_logan_ut_surplus(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual(info["upstream_total"], 1)
+        self.assertEqual((row["apn"], row["acres"], row["price"], row["geometry"]),
+                         ("Portion of 04-273-8001", 0.70, None, None))
+        self.assertEqual((row["offering"], row["status"]), ("auction", "auction_open"))
+        self.assertTrue(adapters.STATUS[row["status"]][1])
+        self.assertEqual(row["deadline"], "2026-12-08T19:00:00Z")
+        at_close = datetime.datetime(2026, 12, 8, 19, tzinfo=datetime.timezone.utc)
+        self.assertEqual(adapters.north_logan_ut_surplus(fetch, at_close, self.fail)[0], [])
+        fetch.text.return_value = page.replace("December 8, 2026 12:00 PM", "December 8, 2026 01:00 PM")
+        with self.assertRaises(adapters.StructureError):
+            adapters.north_logan_ut_surplus(fetch, NOW, self.fail)
+
     def test_south_suburban_uses_available_lots_only(self):
         def tr(pid, address, kind, status):
             return ("<tr><td><a>%s</a></td><td>%s</td><td>Joliet</td>"
@@ -1541,7 +1563,8 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
     def test_valencia_auction_uses_only_minimum_bid_and_expires(self):
         text = ("Public auction in Valencia County\nTIME: 10:00 AM\nDATE: Tuesday, December 15, 2026\n"
                 "Item #1 Case: 1\nUPC: 1019038365253000000\nDelinquent Owner: PRIVATE PERSON\nMinimum Bid: $2,400.00\n"
-                "Item #2 Case: 2\nUPC: 1019038365253000001\nMinimum Bid: $4,000.00\nProperty Description: LOT 11 MH#123\n")
+                "Item #2 Case: 2\nUPC: 1019038365253000001\nMinimum Bid: $4,000.00\nProperty Description: LOT 11 MH#123\n"
+                "Item #3 Case: 3 REMOVED\nUPC: 1019038365253000002\nMinimum Bid: $1,200.00\n")
         bids, deadline = adapters.parse_valencia_auction(text, NOW)
         self.assertEqual(bids, {"1019038365253000000": 2400})
         self.assertEqual(deadline, "2026-12-15T17:00:00Z")

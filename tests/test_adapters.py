@@ -45,6 +45,40 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_florence_requires_current_city_lot_and_exact_vacant_tax_account(self):
+        fetch = unittest.mock.Mock()
+        fixture_map = b"%PDF- visually reviewed availability fixture"
+        map_path = "/DocumentCenter/View/456/Lots"
+        fetch.text.return_value = f'Pacific View Business Park 11 remaining that are available for sale <a href="{map_path}">Lots</a>'
+        fetch.bytes.return_value = fixture_map
+        records = [
+            {"attributes": {"MAPTAXLOT": "1812224201002", "PROPACCT": "1772530", "AscendAcres": "0.27  ",
+                            "IMPVAL": 0, "LANDVAL": 51591, "BLDGTYPE": None, "NUMACCNTS": 1},
+             "geometry": {"rings": [[[-124.111, 43.991], [-124.110, 43.991], [-124.110, 43.992],
+                                    [-124.111, 43.991]]]}},
+            {"attributes": {"MAPTAXLOT": "1812221300300", "PROPACCT": "1620952", "AscendAcres": "2.11",
+                            "IMPVAL": 0, "LANDVAL": 352608, "BLDGTYPE": "Warehouse", "NUMACCNTS": 1}},
+            {"attributes": {"MAPTAXLOT": "1812221300900", "PROPACCT": "different", "AscendAcres": "0.75",
+                            "IMPVAL": 0, "LANDVAL": 145413, "BLDGTYPE": None, "NUMACCNTS": 1}},
+            {"attributes": {"MAPTAXLOT": "1812221300200", "PROPACCT": "1620945", "AscendAcres": "3.20",
+                            "IMPVAL": 0, "LANDVAL": 200000, "BLDGTYPE": None, "NUMACCNTS": 1}},
+        ]
+        digest = adapters.hashlib.sha256(fixture_map).hexdigest()
+        with patch.object(adapters, "FLORENCE_OR_MAPS", {map_path: digest}):
+            with patch.object(adapters, "_arcgis_query", return_value=records) as query:
+                rows, info = adapters.florence_or_business_park(fetch, NOW, self.fail)
+                row, = rows
+                self.assertEqual(info, {"complete": True, "upstream_total": 11})
+                self.assertEqual((row["apn"], row["acres"], row["price"]), ("1812224201002", 0.27, None))
+                self.assertTrue(row["geometry"])
+                self.assertIn("'CITY OF FLORENCE'", query.call_args.args[2])
+                self.assertNotIn("OWNNAME", query.call_args.args[3])
+                fetch.bytes.return_value = b"new map"
+                warnings = []
+                self.assertEqual(adapters.florence_or_business_park(fetch, NOW, warnings.append)[0], [])
+                self.assertEqual(len(warnings), 1)
+                query.assert_called_once()
+
     def test_fulton_tax_deed_requires_reviewed_notice_and_exact_vacant_tax_record(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = f'Sheriff’s Tax Deed <a href="{adapters.FULTON_GA_DECEMBER_ROSTER}">Latest sale</a>'

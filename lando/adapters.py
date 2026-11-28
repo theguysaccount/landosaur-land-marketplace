@@ -7531,6 +7531,77 @@ def oregon_dot_property_sales(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+FLORENCE_OR_LAND = "https://www.ci.florence.or.us/220/Pacific-View-Business-Park"
+FLORENCE_OR_PARCELS = ("https://lcmaps.lanecounty.org/arcgis/rest/services/"
+                      "LaneCountyMaps/AddressParcel/MapServer/2/query")
+# The city's availability table and color-coded parcel map are image-only PDFs.
+FLORENCE_OR_MAPS = {
+    "/DocumentCenter/View/456/Pacific-View-Business-Park-Lot-Availability---2024-PDF":
+        "05c53b072dedc37c1330e5ab16869f7a933a3dc992d1f352ce97cf5460acead2",
+    "/DocumentCenter/View/457/Pacific-View-Business-Park-Lots---2024-PDF":
+        "12c07fa86e0e076bb05ae6b62d974806c1f839906da52bcabc5abb283c0168e1",
+}
+# Availability labels matched to the exact Lane County map polygons and tax accounts.
+FLORENCE_OR_LOTS = {
+    "1812224200900": ("Lot 18", "1621208"),
+    "1812224201001": ("Lot 19", "1772522"),
+    "1812224201002": ("Lot 19.5", "1772530"),
+    "1812221300100": ("Lot 20", "1620937"),
+    "1812221300300": ("Lot 22", "1620952"),
+    "1812221300900": ("Lot 28", "1621018"),
+    "1812221302200": ("Lingcod Court Lot 2", "1837523"),
+    "1812221302300": ("Lingcod Court Lot 3", "1837531"),
+    "1812221302400": ("Lingcod Court Lot 4", "1837549"),
+    "1812221302500": ("Lingcod Court Lot 5", "1837556"),
+    "1812221302600": ("Lingcod Court Lot 6", "1837564"),
+}
+
+
+def florence_or_business_park(fetch, now, warn):
+    page = fetch.text(FLORENCE_OR_LAND)
+    count = len(FLORENCE_OR_LOTS)
+    if "Pacific View Business Park" not in clean(page):
+        raise StructureError("Florence’s business park page changed unexpectedly")
+    if (f"{count} remaining that are available for sale" not in clean(page)
+            or any(f'href="{path}"' not in page for path in FLORENCE_OR_MAPS)):
+        warn("Florence’s active lot count or map links changed. Review the city’s current offer before relisting.")
+        return [], {"complete": True, "upstream_total": 0}
+    for path, digest in FLORENCE_OR_MAPS.items():
+        if hashlib.sha256(fetch.bytes(urllib.parse.urljoin(FLORENCE_OR_LAND, path))).hexdigest() != digest:
+            warn("Florence replaced a lot map. Review current availability and parcel identities before relisting.")
+            return [], {"complete": True, "upstream_total": 0}
+    where = ("MAPTAXLOT IN (%s) AND UPPER(OWNNAME) IN ('CITY OF FLORENCE','FLORENCE CITY OF','FLORENCE, CITY OF')"
+             % quote_list(FLORENCE_OR_LOTS))
+    features = _arcgis_query(fetch, FLORENCE_OR_PARCELS, where,
+                            "MAPTAXLOT,PROPACCT,AscendAcres,IMPVAL,LANDVAL,BLDGTYPE,NUMACCNTS")
+    seen = Counter(feature["attributes"].get("MAPTAXLOT") for feature in features)
+    rows = []
+    for feature in features:
+        item = feature["attributes"]
+        pin = item.get("MAPTAXLOT")
+        lot = FLORENCE_OR_LOTS.get(pin)
+        acres = number(item.get("AscendAcres"))
+        if (not lot or seen[pin] != 1 or item.get("PROPACCT") != lot[1] or item.get("NUMACCNTS") != 1
+                or item.get("IMPVAL") != 0 or item.get("BLDGTYPE") not in ("", None)
+                or not number(item.get("LANDVAL")) or not acres):
+            continue
+        row = {
+            "id": "or-florence-pacific-view-" + pin, "source": "florence-or-business-park",
+            "title": f"{lot[0]} (Florence Pacific View Business Park)", "state": "OR", "county": "Lane",
+            "locality": "Florence", "apn": pin, "address": f"Pacific View Business Park, {lot[0]}",
+            "acres": acres, "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+            "deadline": None, "url": FLORENCE_OR_LAND, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city lists this vacant industrial lot for purchase.", "="),
+                      fact("sale_terms", "Contact the City of Florence for negotiable purchase terms.", "="),
+                      fact("acreage", f"{acres:g} acres in the Lane County assessment record.", "=")],
+            "tags": ["city land sale", "industrial land"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings") or [],
+                       FLORENCE_OR_PARCELS, "Lane County")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": count}
+
+
 GRAYS_HARBOR_WA_SALE = "https://www.graysharbor.gov/departments/foresty-tax-title/purchase-surplus-tax-title-property/"
 GRAYS_HARBOR_WA_ROSTER = "https://cms5.revize.com/revize/graysharborcounty/Forestry/2026%20Available%20Properties%20to%20Purchase_OTC.pdf"
 GRAYS_HARBOR_WA_PARCELS = "https://services3.arcgis.com/CxYgmwdx507LY5lO/arcgis/rest/services/Parcels___Grays_Harbor_County/FeatureServer/1/query"
@@ -9434,6 +9505,10 @@ def fulton_ga_tax_deed(fetch, now, warn):
 
 
 SOURCES = [
+    {"id": "florence-or-business-park", "name": "Florence Pacific View Business Park vacant lots",
+     "agency": "City of Florence, Oregon", "url": FLORENCE_OR_LAND, "state": "OR",
+     "run": florence_or_business_park, "requires_sale_match": True,
+     "about": "Vacant lots the city lists for purchase, matched to current Lane County assessment and parcel boundaries."},
     {"id": "fulton-ga-tax-deed", "name": "Fulton County Sheriff vacant land tax deeds",
      "agency": "Fulton County Sheriff, Georgia", "url": FULTON_GA_TAX_PAGE, "state": "GA",
      "run": fulton_ga_tax_deed, "requires_sale_match": True,
@@ -9961,6 +10036,11 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("John Day municipal industrial land catalog", "https://www.cityofjohnday.com/building/page/industrial-park",
+     "The city host closed the robots.txt connection. Later council records also contradict some older lot labels."),
+    ("Florence regional property marketing vendor",
+     "https://properties.zoomprospector.com/OREGON/property/0-Pacific-View-Drive-Florence-Oregon/A45C882B-AB8A-4057-B0EC-01F6F5971B6C",
+     "The vendor disallows the linked offer path. The City of Florence’s original sale materials are carried."),
     ("Arkansas county assessment vendor", "https://www.actdatascout.com/RealProperty/Arkansas/VanBuren",
      "The assessment vendor returned HTTP 403 for robots.txt."),
     ("Wyoming Business Council industrial sites vendor", "https://www.wyomingsites.com/",

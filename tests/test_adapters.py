@@ -45,6 +45,45 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_conrad_adopts_the_city_asking_price_and_excludes_reserved_lots(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = 'Industrial Park lots available for sale <a href="' + adapters.CONRAD_MT_PLAT + '">Map</a>'
+        fetch.bytes.return_value = b"checked city plat"
+        legal = "CONRAD EAST INDUSTRIAL PARK SUBDIVISION, S13, T28 N, R03 W, ACRES %s, LOT %s LOCATED IN PT OF COS 312880 OF NW4"
+        open_lot = {"PARCELID": "26398713201120000", "TaxYear": NOW.year, "TotalBuildingValue": 0,
+                    "TotalLandValue": 343, "LegalDescriptionShort": legal % ("5.64", "3")}
+        reserved = dict(open_lot, PARCELID="26398713201160000", LegalDescriptionShort=legal % ("5.72", "7"))
+        with patch.object(adapters, "CONRAD_MT_PLAT_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
+            adapters, "_arcgis_query", return_value=[{"attributes": item} for item in (open_lot, reserved)]
+        ):
+            rows, _ = adapters.conrad_mt_industrial_lots(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["acres"]), ("26398713201120000", 197400, 5.64))
+
+    def test_blue_hill_requires_current_free_offer_and_matching_vacant_plat(self):
+        fetch = unittest.mock.Mock()
+        banner = json.dumps({"announcementBarSettings": {"style": 2, "text": (
+            "FREE Lots Available - Sweezy’s 2nd Subdivision! The City is offering 10 available lots."
+        )}})
+        fetch.text.return_value = banner + ' "/s/AMENDED-COVS-pdf.pdf"'
+        fetch.bytes.return_value = b"verified marked sale plat"
+        covenant = ("Community Redevelopment Authority of the City of Blue Hill "
+                    "requires buyers to commence construction on the dwelling unit within nine (9) months.")
+        exact = {"Parcel_ID": "000324901", "Legal_Description": "LOT 3 BLOCK 3 SWEEZYS SECOND SUBDIVISION CITY OF BLUE HILL",
+                 "Property_Parcel_Status": "02", "Improvements_Value": 0, "Other_Impr_Value": 0, "ImpSF": 0}
+        combined = dict(exact, Parcel_ID="000324900", Improvements_Value=30000, Legal_Description=(
+            "LOTS 2-3 BLK 1 LOTS 1-4 BLK 2 LOTS 1 2 4 BLK 3 SWEEZYS 2ND SUBDIVISION TO SWEEZY'S ADDITION TO BLUE HILL"
+        ))
+        with patch.object(adapters, "BLUE_HILL_NE_PLAT_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
+            adapters, "pdf_text", return_value=covenant
+        ), patch.object(adapters, "_arcgis_query", return_value=[{"attributes": a} for a in (exact, combined)]):
+            rows, _ = adapters.blue_hill_ne_sweezys_lots(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["id"], row["apn"], row["price"], row["price_kind"]),
+                         ("ne-blue-hill-sweezys-3-3", "000324901", 0, "application"))
+        fetch.text.return_value = fetch.text.return_value.replace("10 available", "9 available")
+        self.assertEqual(adapters.blue_hill_ne_sweezys_lots(fetch, NOW, self.fail)[0], [])
+
     def test_beatrice_excludes_pending_bundles_improvements_and_recorded_sales(self):
         fetch = unittest.mock.Mock()
         program = "Corral Crossing lot purchase application corral-crossing-lot-pricing"

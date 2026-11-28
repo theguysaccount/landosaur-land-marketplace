@@ -1065,7 +1065,7 @@ class Site(object):
     def budget_land_page(self, ceiling):
         path = "/land-under-%d/" % ceiling
         label = money(ceiling)
-        eligible = [r for r in self.cat.current() if r["price"] is not None and 0 < r["price"] <= ceiling]
+        eligible = [r for r in self.cat.current() if r["price"] is not None and 0 <= r["price"] <= ceiling]
         by_state = Counter(r["state"] for r in eligible)
         counts = Counter(r["price_kind"] for r in eligible)
         kinds = (
@@ -2499,6 +2499,7 @@ class Site(object):
         others = [item for item in self.related_candidates[county_path] if item["id"] != r["id"]][:6]
 
         has_price = r.get("price") is not None and r["price"] > 0
+        free_program = r.get("price") == 0 and r["price_kind"] == "application"
         concierge_fee = round(r["price"] * 0.10, 2) if has_price else None
         turnkey_total = round(r["price"] + concierge_fee, 2) if has_price else None
 
@@ -2519,6 +2520,8 @@ class Site(object):
             else (esc(adapters.PRICE_KIND.get(r["price_kind"], "Agency figure")) if has_price
                   else (esc(cv["name"] + " avg") if (cv and cv.get("value")) else "See agency terms"))
         )
+        if free_program:
+            kpi_ppa, kpi_ppa_lbl, kpi_ppa_sub = "$0", "Official Program Price", "Program eligibility applies"
         kpi_right = esc(zoning_val) if zoning_val else (esc("Buildable: " + buildable_val) if buildable_val else esc(r["status_label"]))
         kpi_right_lbl = "Zoning" if zoning_val else ("Agency Flag" if buildable_val else "Offering Status")
         kpi_right_sub = esc(r["county_label"] + ", " + r["state"])
@@ -2591,11 +2594,11 @@ class Site(object):
         else:
             ledger_html = (
                 '<div class="fee-ledger">'
-                '<div class="fee-line"><span>Official agency price</span><strong>Set via agency review / offer</strong></div>'
+                '<div class="fee-line"><span>Official agency price</span><strong>%s</strong></div>'
                 '<div class="fee-line"><span>Landosaur Land Agent fee</span><strong>10%% only upon successful closing</strong></div>'
                 '<div class="fee-line due"><span>Due today to initiate full acquisition &amp; transfer</span><strong>$20.00</strong></div>'
                 '</div>'
-            )
+            ) % ("$0 under agency program terms" if free_program else "Set via agency review / offer")
 
         eligibility = ""
         if r["price_kind"] == "application":

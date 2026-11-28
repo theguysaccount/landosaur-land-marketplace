@@ -10503,7 +10503,133 @@ def minden_ne_west_estates(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(MINDEN_NE_AVAILABLE)}
 
 
+BLUE_HILL_NE_SALES = "https://www.bluehillne.com/contact-us"
+BLUE_HILL_NE_COVENANTS = "https://www.bluehillne.com/s/AMENDED-COVS-pdf.pdf"
+BLUE_HILL_NE_PLAT = ("https://static1.squarespace.com/static/59073fd915d5db2857ed5591/t/"
+                     "646e82559e59ef7d18b24f6f/1684963926090/website%2Bannouncement.pdf")
+BLUE_HILL_NE_PLAT_SHA = "edcfb88d7cefe55b745e76b467935c613c601cd0c49a1812d68f841be5ae0ee0"
+BLUE_HILL_NE_LOTS = {
+    (1, 2): 0.464, (1, 3): 0.466,
+    (2, 1): 0.463, (2, 2): 0.465, (2, 3): 0.463, (2, 4): 0.465,
+    (3, 1): 0.463, (3, 2): 0.465, (3, 3): 0.463, (3, 4): 0.465,
+}
+
+
+def blue_hill_ne_sweezys_lots(fetch, now, warn):
+    page = fetch.text(BLUE_HILL_NE_SALES)
+    banner = re.search(r'"announcementBarSettings"\s*:\s*\{\s*"style"\s*:\s*\d+\s*,\s*'
+                       r'"text"\s*:\s*("(?:\\.|[^"\\])*")', page)
+    notice = clean(json.loads(banner[1])).casefold() if banner else ""
+    if (not re.search(r"free lots available\b", notice) or "sweezy’s 2nd subdiv" not in notice
+            or not re.search(rf"city is offering {len(BLUE_HILL_NE_LOTS)} available lots\b", notice)
+            or urllib.parse.urlsplit(BLUE_HILL_NE_COVENANTS).path not in page):
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(BLUE_HILL_NE_PLAT)).hexdigest() != BLUE_HILL_NE_PLAT_SHA:
+        warn("The city’s marked Sweezy plat needs review.")
+        return [], {"complete": True, "upstream_total": 0}
+    terms = pdf_text(fetch, BLUE_HILL_NE_COVENANTS)
+    if ("Community Redevelopment Authority of the City of Blue Hill" not in clean(terms)
+            or "commence construction on the dwelling unit within nine (9) months" not in clean(terms)):
+        return [], {"complete": True, "upstream_total": 0}
+    singles_pin, combined_pin = "000324901", "000324900"
+    fields = "Parcel_ID,Legal_Description,Property_Parcel_Status,Improvements_Value,Other_Impr_Value,BuildingYear,ImpSF"
+    where = f"County_ID='181' AND Parcel_ID IN ({quote_list((singles_pin, combined_pin))})"
+    features = _arcgis_query(fetch, NEBRASKA_PUBLIC_PARCELS, where, fields, post=True)
+    combined_legal = "LOTS 2-3 BLK 1 LOTS 1-4 BLK 2 LOTS 1 2 4 BLK 3 SWEEZYS 2ND SUBDIVISION TO SWEEZY'S ADDITION TO BLUE HILL"
+    single_legal = "LOT 3 BLOCK 3 SWEEZYS SECOND SUBDIVISION CITY OF BLUE HILL"
+    matches = defaultdict(list)
+    for item in features:
+        matches[item["attributes"].get("Parcel_ID")].append(item)
+    rows = []
+    for (block, lot), acres in BLUE_HILL_NE_LOTS.items():
+        single = (block, lot) == (3, 3)
+        pin, legal = (singles_pin, single_legal) if single else (combined_pin, combined_legal)
+        if len(matches[pin]) != 1:
+            continue
+        item, = matches[pin]
+        a = item["attributes"]
+        if (clean(a.get("Legal_Description")) != legal or a.get("Property_Parcel_Status") != "02"
+                or number(a.get("BuildingYear"))
+                or any(a.get(k) != 0 for k in ("Improvements_Value", "Other_Impr_Value", "ImpSF"))):
+            continue
+        row = {
+            "id": f"ne-blue-hill-sweezys-{block}-{lot}", "source": "blue-hill-ne-homesites",
+            "title": f"Sweezy’s Second Subdivision, Block {block}, Lot {lot}, Blue Hill", "state": "NE",
+            "county": "Webster", "locality": "Blue Hill", "address": "", "apn": pin if single else "",
+            "acres": acres, "price": 0, "price_kind": "application", "offering": "sale", "status": "listed",
+            "deadline": None, "url": BLUE_HILL_NE_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city offers this vacant homesite first come, first served.", BLUE_HILL_NE_SALES),
+                      fact("program_price", "The city advertises free lots under its residential construction program.", BLUE_HILL_NE_SALES),
+                      fact("plat", f"The city’s marked plat shows Block {block}, Lot {lot} and its acreage.",
+                           BLUE_HILL_NE_PLAT + "#page=2"),
+                      fact("sale_terms", "Single-family construction must begin within nine months after closing.",
+                           BLUE_HILL_NE_COVENANTS)],
+            "tags": ["vacant land", "residential lots", "city development"],
+        }
+        if single:
+            apply_geometry(row, (item.get("geometry") or {}).get("rings", []), NEBRASKA_PUBLIC_PARCELS, "Nebraska parcel")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(BLUE_HILL_NE_LOTS)}
+
+
+CONRAD_MT_SALES = "https://www.cityofconrad.com/industrial-park-committee"
+CONRAD_MT_PLAT = "https://www.cityofconrad.com/_files/ugd/984806_9a43c34aa90147978eb6e0dd6dd4e963.pdf"
+CONRAD_MT_PLAT_SHA = "42d75f85df5fa34955e41c8b669a392bc1822cff9abad734f50c09f12c938563"
+CONRAD_MT_CAD = "https://gisservice.mt.gov/ArcGIS/rest/services/msdi_cadastral_map_v1/MapServer/1/query"
+# Open lots and current handwritten prices from the city’s marked sale plat.
+CONRAD_MT_AVAILABLE = {"1": (3.02, 90600), "3": (5.64, 197400), "6": (5.83, 233200)}
+
+
+def conrad_mt_industrial_lots(fetch, now, warn):
+    primary = fetch.text(CONRAD_MT_SALES)
+    if ("Industrial Park lots available for sale" not in clean(primary)
+            or urllib.parse.urlsplit(CONRAD_MT_PLAT).path not in primary):
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(CONRAD_MT_PLAT)).hexdigest() != CONRAD_MT_PLAT_SHA:
+        warn("The city changed its industrial sale plat. Its available lots and prices need review.")
+        return [], {"complete": True, "upstream_total": 0}
+    subdivision = "CONRAD EAST INDUSTRIAL PARK SUBDIVISION"
+    where = f"Subdivision='{subdivision}' AND UPPER(OwnerName) IN ('CITY OF CONRAD','CONRAD CITY OF')"
+    fields = "PARCELID,TaxYear,LegalDescriptionShort,TotalBuildingValue,TotalLandValue"
+    features = _arcgis_query(fetch, CONRAD_MT_CAD, where, fields, post=True)
+    rows = []
+    seen = Counter(item["attributes"].get("PARCELID") for item in features)
+    for item in features:
+        a = item["attributes"]
+        pin = a.get("PARCELID")
+        match = re.fullmatch(subdivision + r", S13, T28 N, R03 W, ACRES ([\d.]+), LOT (\d) LOCATED IN PT OF COS 312880 OF NW4",
+                             clean(a.get("LegalDescriptionShort")))
+        if (not match or match[2] not in CONRAD_MT_AVAILABLE or not pin or seen[pin] != 1
+                or a.get("TaxYear") != now.year or a.get("TotalBuildingValue") != 0 or not number(a.get("TotalLandValue"))):
+            continue
+        lot = match[2]
+        acres, price = CONRAD_MT_AVAILABLE[lot]
+        if number(match[1]) != acres:
+            continue
+        row = {
+            "id": "mt-conrad-industrial-" + slug(pin), "source": "conrad-mt-industrial-lots", "state": "MT",
+            "county": "Pondera", "locality": "Conrad", "address": "", "apn": pin,
+            "title": f"Conrad East Industrial Park, Lot {lot}, Conrad", "acres": acres, "price": price,
+            "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
+            "url": CONRAD_MT_PLAT, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city’s official sale plat still marks this lot available.", CONRAD_MT_PLAT),
+                      fact("sale_terms", "Contact the City of Conrad Industrial Park Committee for purchase terms.", CONRAD_MT_SALES)],
+            "tags": ["vacant land", "industrial land", "city development"],
+        }
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), CONRAD_MT_CAD, "Montana State Library")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(CONRAD_MT_AVAILABLE)}
+
+
 SOURCES = [
+    {"id": "conrad-mt-industrial-lots", "name": "Conrad East Industrial Park vacant lots",
+     "agency": "City of Conrad, Montana", "url": CONRAD_MT_SALES, "state": "MT",
+     "run": conrad_mt_industrial_lots, "requires_sale_match": True,
+     "about": "Individually priced and available city lots checked against the Montana State Library’s current parcel data."},
+    {"id": "blue-hill-ne-homesites", "name": "Blue Hill Sweezy’s Second Subdivision",
+     "agency": "City of Blue Hill Community Redevelopment Authority, Nebraska", "url": BLUE_HILL_NE_SALES, "state": "NE",
+     "run": blue_hill_ne_sweezys_lots, "requires_sale_match": True,
+     "about": "Individually offered residential lots in the city’s free homesite program, with recorded plat acreage."},
     {"id": "minden-ne-cra-homesites", "name": "Minden West Estates II homesites",
      "agency": "City of Minden Community Redevelopment Authority, Nebraska", "url": MINDEN_NE_SALES,
      "state": "NE", "run": minden_ne_west_estates, "requires_sale_match": True,
@@ -11083,6 +11209,9 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Pondera Port Authority sale catalog",
+     "https://www.ponderaportauthority.com/opportunitites.htm",
+     "The authority’s TLS certificate was expired during the robots.txt check. The independently published city sale plat and state assessor layer are carried."),
     ("Henderson Highland Addition sale map and city portal",
      "https://www.cityofhenderson.org/",
      "The host’s TLS certificate could not be validated for robots.txt, including with the system trust store."),

@@ -45,6 +45,26 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_killdeer_checks_current_marked_map_and_only_carries_vacant_offers(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = f'<img src="{adapters.KILLDEER_ND_MAP}"><h1>Lot Map</h1>'
+        fetch.bytes.return_value = b"verified city sale map"
+        parcel = {"SubdivisionPlat": "NORTH PRAIRIE ADDITION", "PrimaryParcelUse": "Residential",
+                  "TaxRollYear": NOW.year, "NumberStructures": 0, "CommercialStructureValue": 0,
+                  "ExemptStructureValue": 0, "ResidentialStructureValue": None, "PropertyAddress": "720 N PRAIRIE CT"}
+        features = [
+            {"attributes": dict(parcel, PID=f"1083013{lot:02d}", Block=3, Lot=str(lot), NumberStructures=structures),
+             "geometry": {"rings": [[[-102.7, 46.8], [-102.6995, 46.8], [-102.7, 46.8005], [-102.7, 46.8]]]}}
+            for lot, structures in ((2, 0), (3, 1), (9, 0), (11, 0))
+        ]
+        with patch.object(adapters, "KILLDEER_ND_MAP_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
+            adapters, "_arcgis_query", return_value=features
+        ):
+            rows, _ = adapters.killdeer_nd_north_prairie(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["id"], row["price"], row["acres"]),
+                         ("nd-killdeer-north-prairie-108301302", 12524, round(12524 / 43560, 4)))
+
     def test_centerville_matches_the_marked_sale_map_to_unimproved_county_lots(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = 'Lots now available! <a href="/s/Available-Lots.jpg">Current map</a>'

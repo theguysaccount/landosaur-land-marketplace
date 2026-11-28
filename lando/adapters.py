@@ -198,6 +198,8 @@ def outline_url(listing):
         return one_parcel_url(CHERRYHILL_NJ_GIS, "UNIQUEID='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "salem-nj-offers":
         return one_parcel_url(NJ_COMPOSITE_PARCELS, "PIN_NODUP='%s'" % listing["apn"].replace("'", "''"))
+    if listing["source"] == "killdeer-nd-north-prairie":
+        return one_parcel_url(KILLDEER_ND_GIS, "PID='%s'" % listing["apn"].replace("'", "''"), KILLDEER_ND_FIELDS)
     if listing["source"] == "centerville-sd-harvest-pointe":
         return one_parcel_url(CENTERVILLE_SD_GIS, "PARCEL='%s'" % listing["apn"].replace("'", "''"), CENTERVILLE_SD_FIELDS)
     if listing["source"] == "conrad-mt-industrial-park":
@@ -10674,7 +10676,72 @@ def centerville_sd_harvest_pointe(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(CENTERVILLE_SD_PRICES)}
 
 
+KILLDEER_ND_SALE = ("https://killdeer.com/index.asp?SEC=3DEA9AA9-3FEC-4D28-8019-402F445152CE"
+                   "&DE=13018AB4-7A1B-4B0F-B9F3-0B80CE336571")
+KILLDEER_ND_MAP = ("https://killdeer.com/vertical/Sites/%7B5BBD2810-FFAB-41CE-93F8-FCE368158911%7D/"
+                  "uploads/North_Prairie_Addition_Lot_Sign_-_Updated_Lot_Availablity_Revised_Web.jpg")
+KILLDEER_ND_MAP_SHA = "e0aef513540822cf4530246f29d25be6ffa3ccded7e070ad5d1747cf16a296bc"
+KILLDEER_ND_COVENANTS = "https://killdeer.com/uploads/dm/7991/North_Prairie_Addition_Covenants"
+KILLDEER_ND_GIS = "https://services.arcgis.com/4YineAQdtmx0tv46/arcgis/rest/services/Parcel_DunnND/FeatureServer/0/query"
+KILLDEER_ND_FIELDS = ("PID,SubdivisionPlat,Lot,Block,PrimaryParcelUse,TaxRollYear,PropertyAddress,"
+                      "ResidentialStructureValue,CommercialStructureValue,ExemptStructureValue,NumberStructures")
+# Square footage printed on the city’s reviewed availability map. The city asks $1 per square foot.
+# Includes neither the sold or pending lots nor frontage with conflicting parcel classifications.
+KILLDEER_ND_SQFT = {
+    (1, 2): 14049, (1, 3): 13037, (1, 4): 13041, (1, 5): 13046, (1, 6): 12880,
+    (2, 2): 14214, (2, 3): 14214, (2, 4): 14214, (2, 5): 14214, (2, 6): 14214, (2, 7): 14214, (2, 8): 14210,
+    (3, 1): 13581, (3, 2): 12524, (3, 3): 12424, (3, 4): 12644, (3, 5): 23955, (3, 6): 16537,
+    (3, 7): 13462, (3, 8): 11800, (3, 16): 12416, (3, 17): 12416, (3, 18): 12416, (3, 19): 12244,
+}
+
+
+def killdeer_nd_north_prairie(fetch, now, warn):
+    page = fetch.text(KILLDEER_ND_SALE)
+    if KILLDEER_ND_MAP.rsplit("/", 1)[-1] not in page or "Lot Map" not in clean(page):
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(KILLDEER_ND_MAP)).hexdigest() != KILLDEER_ND_MAP_SHA:
+        warn("Killdeer’s updated availability map needs review before carrying its lots or asking prices.")
+        return [], {"complete": True, "upstream_total": 0}
+    holders = ("CITY OF KILLDEER", "KILLDEER CITY OF", "KILLDEER, CITY OF", "KILLDEER CITY",
+               "CITY OF KILLDEER ND", "CITY OF KILLDEER, ND")
+    subdivision = "NORTH PRAIRIE ADDITION"
+    where = f"UPPER(SubdivisionPlat)='{subdivision}' AND UPPER(OwnerName) IN ({quote_list(holders)})"
+    features = _arcgis_query(fetch, KILLDEER_ND_GIS, where, KILLDEER_ND_FIELDS, post=True)
+    seen = Counter(item["attributes"].get("PID") for item in features)
+    rows = []
+    for item in features:
+        a = item["attributes"]
+        pin = a.get("PID")
+        block, lot = number(a.get("Block")), number(a.get("Lot"))
+        sqft = KILLDEER_ND_SQFT.get((block, lot))
+        if (not sqft or not pin or seen[pin] != 1 or a.get("SubdivisionPlat") != subdivision
+                or a.get("PrimaryParcelUse") != "Residential" or a.get("TaxRollYear") != now.year
+                or a.get("NumberStructures") != 0 or a.get("CommercialStructureValue") != 0
+                or a.get("ExemptStructureValue") != 0 or a.get("ResidentialStructureValue") not in (0, None)):
+            continue
+        row = {
+            "id": "nd-killdeer-north-prairie-" + slug(pin), "source": "killdeer-nd-north-prairie",
+            "state": "ND", "county": "Dunn", "locality": "Killdeer", "address": clean(a.get("PropertyAddress")),
+            "apn": pin, "title": f"North Prairie Addition, Block {block:g}, Lot {lot:g}, Killdeer",
+            "acres": round(sqft / 43560, 4), "price": sqft, "price_kind": "asking",
+            "offering": "sale", "status": "listed", "deadline": None, "url": KILLDEER_ND_SALE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city’s North Prairie map offers this individually identified vacant lot.", KILLDEER_ND_MAP),
+                      fact("price", f"{sqft:,} square feet at the city’s published asking rate of $1 per square foot.", KILLDEER_ND_MAP),
+                      fact("covenants", "Read the city’s recorded building and use restrictions before applying.", KILLDEER_ND_COVENANTS)],
+            "tags": ["vacant homesite", "city development"],
+        }
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), KILLDEER_ND_GIS, "Dunn County")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(KILLDEER_ND_SQFT)}
+
+
 SOURCES = [
+    {"id": "killdeer-nd-north-prairie", "name": "Killdeer North Prairie Addition vacant homesites",
+     "agency": "City of Killdeer, North Dakota", "url": KILLDEER_ND_SALE, "state": "ND",
+     "run": killdeer_nd_north_prairie, "requires_sale_match": True,
+     "about": "Homesites marked available on the city’s current lot map, matched to municipal parcels in Dunn County’s vacant parcel roll."},
     {"id": "centerville-sd-harvest-pointe", "name": "Centerville Harvest Pointe vacant homesites",
      "agency": "Centerville Development Corporation, South Dakota", "url": CENTERVILLE_SD_SALES, "state": "SD",
      "run": centerville_sd_harvest_pointe, "requires_sale_match": True,
@@ -11266,6 +11333,10 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Dunn County assessor property-card search", "https://dunn.northdakotaassessors.com/search/res/",
+     "The property search returned HTTP 403. The official county ArcGIS parcel layer is carried."),
+    ("Chamberlain’s old Smokey Groves plat hostname", "https://chamberlainwebpage.users.midstatesd.net/",
+     "The TLS certificate did not match the host, so robots rules could not be verified."),
     ("Vermillion Jolley Addition city sale documents", "https://www.vermillion.us/m/newsflash/home/detail/840",
      "The city site returns HTTP 403 for robots.txt."),
     ("Clark County, South Dakota, parcel assessor", "https://clark.sdcounties.org/director-of-equalization/",

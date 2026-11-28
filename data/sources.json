@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T01:06:18Z",
+ "checked": "2026-11-28T01:16:53Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -1209,6 +1209,42 @@
    "upstream_total": 77,
    "url": "https://www.tax.newmexico.gov/businesses/property-tax-overview/delinquent-property-tax-auctions/"
   },
+  "nora-la-inventory": {
+   "about": "Vacant lots in the authority's available inventory. Check application eligibility and pricing directly with the authority.",
+   "agency": "New Orleans Redevelopment Authority",
+   "complete": true,
+   "count": 213,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:13:51Z",
+   "last_success": "2026-11-28T01:13:51Z",
+   "message": "",
+   "name": "New Orleans Redevelopment Authority vacant lots",
+   "notes": [],
+   "ok": true,
+   "read": 213,
+   "seconds": 14,
+   "state": "LA",
+   "upstream_total": 213,
+   "url": "https://www.noraworks.org/opportunities/"
+  },
+  "oakland-mi-landbank": {
+   "about": "Vacant-class parcels on the county's interactive Land Bank application map.",
+   "agency": "Oakland County Land Bank Authority",
+   "complete": true,
+   "count": 438,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:11:19Z",
+   "last_success": "2026-11-28T01:11:19Z",
+   "message": "",
+   "name": "Oakland County Land Bank vacant lots",
+   "notes": [],
+   "ok": true,
+   "read": 438,
+   "seconds": 4,
+   "state": "MI",
+   "upstream_total": 440,
+   "url": "https://www.oaklandcountymi.gov/government/oakland-county-treasurer-s-office/land-bank/property-search"
+  },
   "odot-ok": {
    "about": "Statewide surplus highway right-of-way parcels across Oklahoma counties with GIS outlines, acreage, and PLSS descriptions.",
    "agency": "Oklahoma Department of Transportation",
@@ -1570,6 +1606,24 @@
    "state": "KS",
    "upstream_total": 8,
    "url": "https://www.snco.gov/"
+  },
+  "skagit-wa-foreclosure": {
+   "about": "Current foreclosure accounts with no assessed buildings and an unimproved or tree-land classification. Bid estimates appear in the parcel facts.",
+   "agency": "Skagit County Treasurer, Washington",
+   "complete": true,
+   "count": 7,
+   "failures": 0,
+   "last_attempt": "2026-11-28T01:16:53Z",
+   "last_success": "2026-11-28T01:16:53Z",
+   "message": "",
+   "name": "Skagit County vacant foreclosure tracts",
+   "notes": [],
+   "ok": true,
+   "read": 7,
+   "seconds": 4,
+   "state": "WA",
+   "upstream_total": 27,
+   "url": "https://www.skagitcountywa.gov/government/treasurer-s-office/tax-foreclosure/"
   },
   "south-suburban-landbank": {
    "about": "Available residential and commercial lots from the public Land Bank's vacant-land sale directory.",

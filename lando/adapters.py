@@ -6547,6 +6547,180 @@ def cuyahoga_oh_landbank(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+NORA_LA_SALE = "https://www.noraworks.org/opportunities/"
+NORA_LA_VIEW = "https://data.nola.gov/Housing-Land-Use-and-Blight/NORA-Uncommitted-Property-Inventory/5ktx-e9wc"
+NORA_LA_DATA = "https://data.nola.gov/resource/5ktx-e9wc.json"
+NOLA_PARCEL_GIS = "https://gis.nola.gov/arcgis/rest/services/LandBase/Parcels/MapServer/0/query"
+OAKLAND_MI_SALE = "https://www.oaklandcountymi.gov/government/oakland-county-treasurer-s-office/land-bank/property-search"
+OAKLAND_MI_MAP = "https://services1.arcgis.com/GE4Idg9FL97XBa3P/arcgis/rest/services/OCLBA_Properties_Public_View/FeatureServer/1/query"
+
+
+def nora_la_inventory(fetch, now, warn):
+    page = fetch.text(NORA_LA_SALE)
+    if "5ktx-e9wc" not in page or "available inventory" not in page.lower():
+        raise StructureError("The New Orleans Redevelopment Authority no longer links its available inventory")
+    where = "property_type='VACANT LOT'"
+    count_url = NORA_LA_DATA + "?" + urllib.parse.urlencode({"$where": where, "$select": "count(*) as total"})
+    count = int(fetch.json(count_url)[0]["total"])
+    catalog = []
+    for offset in range(0, count, 1000):
+        query = urllib.parse.urlencode({
+            "$where": where, "$select": "identifier,geopin_2,property_type,zoning,square_footage,property_address",
+            "$order": "identifier", "$limit": 1000, "$offset": offset,
+        })
+        catalog.extend(fetch.json(NORA_LA_DATA + "?" + query))
+    if len(catalog) != count:
+        raise StructureError("New Orleans available parcel count changed during the read")
+    pins = sorted({row["geopin_2"] for row in catalog if re.fullmatch(r"\d{7,10}", row.get("geopin_2") or "")})
+    indexed = {}
+    for offset in range(0, len(pins), 75):
+        block = pins[offset:offset + 75]
+        query = urllib.parse.urlencode({"f": "json", "where": "GEOPIN IN (%s)" % quote_list(block),
+                                        "outFields": "GEOPIN", "returnGeometry": "true", "outSR": 4326})
+        features = fetch.json(NOLA_PARCEL_GIS + "?" + query).get("features")
+        if not isinstance(features, list):
+            raise StructureError("New Orleans parcel outline query changed")
+        for f in features:
+            attr = f.get("attributes") or {}
+            if rings := (f.get("geometry") or {}).get("rings"):
+                indexed.setdefault(str(attr.get("GEOPIN")), []).extend(rings)
+    rows, seen = [], set()
+    for item in catalog:
+        pid = item.get("geopin_2") or ""
+        if pid not in pins or pid in seen:
+            continue
+        seen.add(pid)
+        address = clean(item.get("property_address") or "")
+        sqft = number(item.get("square_footage"))
+        facts = [fact("availability", "Advertised as a vacant lot in the redevelopment authority's available inventory", NORA_LA_VIEW)]
+        if zone := clean(item.get("zoning") or ""):
+            facts.append(fact("zoning", zone, NORA_LA_VIEW))
+        row = {
+            "id": "la-nora-" + pid, "source": "nora-la-inventory",
+            "title": "%s, New Orleans (redevelopment authority vacant lot)" % (address or "Parcel " + pid),
+            "state": "LA", "county": "Orleans", "locality": "New Orleans", "apn": pid,
+            "address": address, "acres": round(sqft / 43560, 6) if sqft else None,
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": NORA_LA_SALE, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["redevelopment authority", "application required"],
+        }
+        if rings := indexed.get(pid):
+            apply_geometry(row, rings, one_parcel_url(NOLA_PARCEL_GIS, "GEOPIN='%s'" % pid), "City of New Orleans GIS")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": count}
+
+
+def oakland_mi_landbank(fetch, now, warn):
+    page = clean(fetch.text(OAKLAND_MI_SALE))
+    if "Land bank-owned property can be viewed and applied for on the interactive map" not in page:
+        raise StructureError("Oakland County's property application instructions changed")
+    _, features = arcgis_query(fetch, OAKLAND_MI_MAP,
+                               "CLASSDESCRIPTION IN ('RESIDENTIAL - VACANT','COMMERCIAL - VACANT','INDUSTRIAL - VACANT')",
+                               "PIN,CLASSDESCRIPTION,Property_Street,Property_City,ACRES")
+    rows, seen = [], set()
+    for feature in features:
+        item = feature.get("attributes") or {}
+        pid = clean(item.get("PIN") or "")
+        if not re.fullmatch(r"\d{10}", pid) or pid in seen:
+            continue
+        seen.add(pid)
+        address = clean(item.get("Property_Street") or "").title()
+        city = clean(item.get("Property_City") or "").title()
+        listing_url = one_parcel_url(OAKLAND_MI_MAP, "PIN='%s'" % pid)
+        row = {
+            "id": "mi-oakland-lb-" + pid, "source": "oakland-mi-landbank",
+            "title": "%s, %s (county land bank vacant lot)" % (address or "Parcel " + pid, city or "Oakland County"),
+            "state": "MI", "county": "Oakland", "locality": city, "apn": pid,
+            "address": address, "acres": number(item.get("ACRES")), "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": OAKLAND_MI_SALE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county accepts applications for parcels displayed on its Land Bank property map", OAKLAND_MI_SALE),
+                      fact("land_class", clean(item.get("CLASSDESCRIPTION") or ""), listing_url),
+                      fact("eligibility", "Redevelopment or an eligible adjacent use requires county approval. See the application instructions.", OAKLAND_MI_SALE)],
+            "tags": ["land bank vacant lot", "application required"],
+        }
+        if rings := (feature.get("geometry") or {}).get("rings"):
+            apply_geometry(row, rings, listing_url, "Oakland County Land Bank Authority")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(features)}
+
+
+SKAGIT_WA_SALE = "https://www.skagitcountywa.gov/government/treasurer-s-office/tax-foreclosure/"
+SKAGIT_WA_GIS = "https://geo.skagitcountywa.gov/server/rest/services/Assessor/PropertyMap/MapServer/5/query"
+
+
+def skagit_wa_foreclosure(fetch, now, warn):
+    from xml.etree import ElementTree
+    from zipfile import ZipFile
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(SKAGIT_WA_SALE)
+    link = next((href for href, label in re.findall(r'<a\b[^>]*href=["\']([^"\']+\.docx)["\'][^>]*>(.*?)</a>', page, re.I | re.S)
+                 if re.search(r"\b\d{4}\s+Minimum\s*Bid List\b", clean(label), re.I)), None)
+    if not link:
+        raise StructureError("Skagit County's current minimum-bid worksheet link changed")
+    url = urllib.parse.urljoin(SKAGIT_WA_SALE, html.unescape(link))
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    with ZipFile(io.BytesIO(fetch.bytes(url))) as package:
+        document = ElementTree.fromstring(package.read("word/document.xml"))
+    tables = []
+    for table in document.findall(".//w:tbl", namespace):
+        tables.append([
+            ["".join(t.text or "" for t in cell.findall(".//w:t", namespace)).strip()
+             for cell in row.findall("./w:tc", namespace)]
+            for row in table.findall("./w:tr", namespace)
+        ])
+    when = next((row[1] for table in tables for row in table if len(row) >= 2 and "DATE & TIME OF SALE" in row[0].upper()), "")
+    match = re.search(r"(\w+)\s+(\d{1,2})\s*,\s*(\d{3}\s*\d)\s*@\s*(\d{1,2}:\d{2})\s*([AP])\.?M\.", when, re.I)
+    if not match:
+        raise StructureError("Skagit County's auction start date or time could not be verified")
+    month, day, year, clock, period = match.groups()
+    starts = datetime.datetime.strptime("%s %s, %s %s %sM" % (month, day, year.replace(" ", ""), clock, period.upper()),
+                                        "%B %d, %Y %I:%M %p").replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    if starts <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    roster = {}
+    for table in tables:
+        if not table or len(table[0]) < 5 or re.sub(r"\s+", "", table[0][-1].upper()) != "ESTIMATEDMINIMUMBID":
+            continue
+        for item in table[1:]:
+            pid = re.sub(r"\s+", "", item[0]) if item else ""
+            if re.fullmatch(r"P\d{3,6}", pid):
+                roster[pid] = number(re.sub(r"\s+", "", item[-1]))
+    if not roster:
+        raise StructureError("Skagit County's foreclosure account rows changed")
+    _, features = arcgis_query(fetch, SKAGIT_WA_GIS, "PARCELID IN (%s)" % quote_list(sorted(roster)),
+                               "PARCELID,BuildingValue,LandUse,Acres")
+    rows, seen = [], set()
+    for feature in features:
+        item = feature.get("attributes") or {}
+        pid = item.get("PARCELID")
+        if pid not in roster or pid in seen:
+            continue
+        if str(item.get("BuildingValue")).strip() != "0" or not re.match(r"^\((?:910|911|920)\)", str(item.get("LandUse") or "")):
+            continue
+        seen.add(pid)
+        acreage = number(item.get("Acres"))
+        facts = [fact("availability", "In the county's current tax foreclosure catalog and marked unimproved or tree land by the assessor", url),
+                 fact("auction_start", starts.strftime("%B %d, %Y at %I:%M %p Pacific"), url)]
+        if roster[pid]:
+            facts.append(fact("estimated_opening_bid", "County estimate $%s. Check the official auction for the final figure." % "{:,.2f}".format(roster[pid]), url))
+        row = {
+            "id": "wa-skagit-" + pid.lower(), "source": "skagit-wa-foreclosure",
+            "title": "Skagit County parcel %s (tax foreclosure land)" % pid,
+            "state": "WA", "county": "Skagit", "locality": "", "apn": pid,
+            "address": "", "acres": round(acreage, 6) if acreage else None, "price": None, "price_kind": "none",
+            "offering": "auction", "status": "auction_terms",
+            "deadline": starts.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": SKAGIT_WA_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": facts, "tags": ["tax foreclosure auction"],
+        }
+        if rings := (feature.get("geometry") or {}).get("rings"):
+            apply_geometry(row, rings, one_parcel_url(SKAGIT_WA_GIS, "PARCELID='%s'" % pid), "Skagit County Assessor GIS")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -6877,8 +7051,24 @@ SOURCES = [
      "agency": "Cuyahoga Land Bank", "url": CUYAHOGA_OH_SALE, "state": "OH",
      "run": cuyahoga_oh_landbank, "requires_sale_match": True,
      "about": "Parcels expressly labeled Vacant Land - Available in the county land bank's sale catalog."},
+    {"id": "nora-la-inventory", "name": "New Orleans Redevelopment Authority vacant lots",
+     "agency": "New Orleans Redevelopment Authority", "url": NORA_LA_SALE, "state": "LA",
+     "run": nora_la_inventory, "requires_sale_match": True,
+     "about": "Vacant lots in the authority's available inventory. Check application eligibility and pricing directly with the authority."},
+    {"id": "oakland-mi-landbank", "name": "Oakland County Land Bank vacant lots",
+     "agency": "Oakland County Land Bank Authority", "url": OAKLAND_MI_SALE, "state": "MI",
+     "run": oakland_mi_landbank, "requires_sale_match": True,
+     "about": "Vacant-class parcels on the county's interactive Land Bank application map."},
+    {"id": "skagit-wa-foreclosure", "name": "Skagit County vacant foreclosure tracts",
+     "agency": "Skagit County Treasurer, Washington", "url": SKAGIT_WA_SALE, "state": "WA",
+     "run": skagit_wa_foreclosure, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Current foreclosure accounts with no assessed buildings and an unimproved or tree-land classification. Bid estimates appear in the parcel facts."},
 ]
 NOT_CARRIED = [
+    ("Ingham County Land Bank property search", "https://inghamlandbank.org/properties",
+     "The official catalog's linked host did not serve robots.txt over verified TLS."),
+    ("Michigan State Land Bank Authority property search", "https://www.michigan.gov/leo/bureaus-agencies/landbank",
+     "The official catalog's linked host did not serve robots.txt over verified TLS."),
     ("Arkansas statewide parcel outline updates", "https://gis.arkansas.gov/",
      "The parcel GIS host returned HTML in place of robots.txt. Current sale records are carried from the separate COSL auction catalog."),
     ("Quad Cities Land Bank Authority", "https://www.qclba.org/",

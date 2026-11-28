@@ -8618,6 +8618,68 @@ def mohave_az_otc(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(MOHAVE_AZ_OPEN)}
 
 
+COWLITZ_WA_SALE = "https://www.co.cowlitz.wa.us/3324/2026-Foreclosure"
+COWLITZ_WA_ROSTER = "/DocumentCenter/View/38707/2026-Foreclosure-Property-Information"
+COWLITZ_WA_TERMS = "/DocumentCenter/View/39902/Cowlitz-County-Terms-and-Conditions-Foreclosure-2026"
+COWLITZ_WA_ROSTER_SHA = "ea7339f58120c2efdf9bea27c621701ff79b61c2f2f0af304d30b788b00934b1"
+COWLITZ_WA_ASSESSOR = "https://www.cowlitzinfo.net/CowlitzPropertyApp/CowlitzPropertyApp/Zoner/property_detail"
+COWLITZ_WA_START = datetime.datetime(2026, 12, 7, 17, tzinfo=datetime.timezone.utc)
+COWLITZ_WA_CLOSE = datetime.datetime(2026, 12, 7, 23, tzinfo=datetime.timezone.utc)
+# Exact entries on the reviewed county roster that qualify as undeveloped land.
+COWLITZ_WA_OPEN = {
+    "6204902": ("3045710", 0.25, 4447.43),
+    "2417301": ("3038913", 0.26, 4179.45),
+    "WK0412001": ("3015484", 3.7, 2195.44),
+}
+
+
+def is_cowlitz_undeveloped(report, pin, account):
+    fields = {label: clean(value) for label, value in re.findall(
+        r"<dt>(Parcel|Property ID|DOR Land Use Code)</dt>\s*<dd>(.*?)</dd>", report, re.S
+    )}
+    if fields != {"Parcel": pin, "Property ID": account, "DOR Land Use Code": "91 - Undeveloped land"}:
+        return False
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", report, re.I | re.S):
+        values = [clean(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.I | re.S)]
+        if len(values) != 6 or values[:2] != ["2026", "2027"]:
+            continue
+        land = number(values[2])
+        return bool(land and re.fullmatch(r"\$?0+(?:\.0+)?", values[3]) and land == number(values[4]))
+    return False
+
+
+def cowlitz_wa_foreclosure(fetch, now, warn):
+    if now >= COWLITZ_WA_CLOSE:
+        return [], {"complete": True, "upstream_total": 0}
+    page = fetch.text(COWLITZ_WA_SALE)
+    roster = urllib.parse.urljoin(COWLITZ_WA_SALE, COWLITZ_WA_ROSTER)
+    terms = urllib.parse.urljoin(COWLITZ_WA_SALE, COWLITZ_WA_TERMS)
+    if (f'href="{COWLITZ_WA_ROSTER}"' not in page or f'href="{COWLITZ_WA_TERMS}"' not in page
+            or "auction date for all parcels, except for parcel number 080980081, is December 7, 2026" not in clean(page)
+            or hashlib.sha256(fetch.bytes(roster)).hexdigest() != COWLITZ_WA_ROSTER_SHA):
+        warn("Cowlitz County’s notice or roster changed. Review the scheduled parcels before carrying them.")
+        return [], {"complete": True, "upstream_total": 0}
+    rows = []
+    for pin, (account, acres, bid) in COWLITZ_WA_OPEN.items():
+        assessment = COWLITZ_WA_ASSESSOR + "?" + urllib.parse.urlencode({"prop_id": account})
+        if not is_cowlitz_undeveloped(fetch.text(assessment), pin, account):
+            continue
+        rows.append({
+            "id": "wa-cowlitz-" + slug(pin), "source": "cowlitz-wa-foreclosure",
+            "title": f"Parcel {pin} (Cowlitz County vacant tax-deed land)",
+            "state": "WA", "county": "Cowlitz", "locality": "", "address": "", "apn": pin,
+            "acres": acres, "lat": None, "lon": None, "geometry": None, "url": COWLITZ_WA_SALE,
+            "price": bid, "price_kind": "min_bid", "offering": "auction",
+            "status": "auction_terms" if now < COWLITZ_WA_START else "auction_open",
+            "deadline": COWLITZ_WA_CLOSE.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "facts": [fact("minimum_bid", f"${bid:,.2f} published by the county, plus a 5% buyer premium.", roster),
+                      fact("availability", "The county schedules bidding from 9 a.m. to 3 p.m. Pacific on December 7. Check for withdrawals.", terms),
+                      fact("land_use", "The county assessor classifies the parcel as undeveloped land and records zero improvement value.", assessment)],
+            "tags": ["tax deed", "online auction"],
+        })
+    return rows, {"complete": True, "upstream_total": len(COWLITZ_WA_OPEN)}
+
+
 TODD_MN_LAND = "https://www.toddcountymn.gov/government/departments/auditor_and_treasurer/tax_forfeited_land.php"
 
 
@@ -8833,7 +8895,6 @@ def windham_ct_surplus(fetch, now, warn):
 
 
 RENVILLE_MN_LAND = "https://www.renvillecountymn.gov/notice-of-sale-of-tax-forfeited-land/"
-RENVILLE_MN_AUCTIONS = "https://publicsurplus.com/sms/renvillecotax,mn/list/current?orgid=1117057"
 # These county flyers show the exact auction boundaries with no structure inside them.
 RENVILLE_MN_VACANT_FLYERS = {
     "03-02819-00": "c77732298acad5f57420fb31cebd0f81b4463970b3e87d9352647ea86814f10f",
@@ -8850,13 +8911,8 @@ def renville_mn_forfeiture(fetch, now, warn):
     if "EMV Minimum Bid" not in roster:
         raise StructureError("Renville County’s current tax-forfeiture notice changed")
     flyers = {pin: url for url, pin in re.findall(r'<a href="(https://www\.renvillecountymn\.gov/[^"]+Forfeiture-Flyer-[^"]+\.pdf)"[^>]*>\s*(\d{2}-\d{5}-\d{2})\s*</a>', roster, re.I)}
-    auctions = fetch.text(RENVILLE_MN_AUCTIONS)
-    if "Renville" not in auctions:
-        raise StructureError("Renville County’s currently offered online lots could not be confirmed")
-    active = {pin: urllib.parse.urljoin(RENVILLE_MN_AUCTIONS, url)
-              for url, pin in re.findall(r'<a href="(/sms/renvillecotax,mn/auction/view\?auc=\d+)">\s*Renville County Tax Forfeiture Parcel\s+(\d{2}-\d{5}-\d{2})\s*</a>', auctions)}
     rows = []
-    for pin in sorted(RENVILLE_MN_VACANT_FLYERS.keys() & flyers.keys() & active.keys()):
+    for pin in sorted(RENVILLE_MN_VACANT_FLYERS.keys() & flyers.keys()):
         url = flyers[pin]
         report = clean(pdf_text(fetch, url, checked_sha256=RENVILLE_MN_VACANT_FLYERS[pin]))
         if not re.search(r"Parcel ID\s+" + re.escape(pin) + r"\b", report):
@@ -8878,7 +8934,7 @@ def renville_mn_forfeiture(fetch, now, warn):
             "price": number(amount[1]), "price_kind": "min_bid", "offering": "auction", "status": "auction_open",
             "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "url": url, "lat": None, "lon": None, "geometry": None,
-            "facts": [fact("availability", "The county lists this vacant tract in its current first-round online auction.", active[pin]),
+            "facts": [fact("availability", "The county lists this vacant tract in its first-round online auction notice.", RENVILLE_MN_LAND),
                       fact("sale_terms", "The displayed amount is the first auction’s starting bid. Additional fees apply.", RENVILLE_MN_LAND)],
             "tags": ["tax-forfeited land", "online auction"],
         })
@@ -12121,8 +12177,14 @@ SOURCES = [
      "agency": "Mohave County Clerk of the Board, Arizona", "url": MOHAVE_AZ_SALE, "state": "AZ",
      "run": mohave_az_otc, "requires_sale_match": True, "timezone": "America/Phoenix",
      "about": "November tax-deed offers with published minimum bids, matched to the county’s current vacant-land assessments."},
+    {"id": "cowlitz-wa-foreclosure", "name": "Cowlitz County December vacant tax-deed auctions",
+     "agency": "Cowlitz County Treasurer, Washington", "url": COWLITZ_WA_SALE, "state": "WA",
+     "run": cowlitz_wa_foreclosure, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Scheduled county tax-deed auctions with acreage and published minimum bids, matched to undeveloped assessments."},
 ]
 NOT_CARRIED = [
+    ("Cowlitz County assessor parcel boundaries", "https://www.co.cowlitz.wa.us/2890/Public-GIS-Datasets",
+     "The assessor’s parcel map terms require a data sharing agreement to disseminate boundaries. The independently published sale notice is carried."),
     ("Sandy, Oregon industrial property catalogue", "https://www.ci.sandy.or.us/property/clackamas-county-property",
      "The city site closed the connection before returning readable robots.txt. The listing was excluded."),
     ("Maui County tax sale notices", "https://www.mauicounty.gov/1748/Delinquent-Tax-Accounts",
@@ -12230,6 +12292,8 @@ NOT_CARRIED = [
      "The municipal website’s robots.txt disallows the linked price and parcel map PDFs."),
     ("Todd County linked Bid4Assets auction catalog", "https://www.bid4assets.com/ToddMN",
      "The vendor returned HTTP 403 for robots.txt. The county's separate official sale list is carried."),
+    ("Public Surplus auction catalog", "https://www.publicsurplus.com/",
+     "The vendor terms require written permission for automated collection. Independently published county lists are used where available."),
     ("Hawaii DCCA public foreclosure notice directory", "https://mfdr.ehawaii.gov/notices/index.html",
      "The notice host returned HTML in place of robots.txt."),
     ("Westmoreland County industrial park offers", "https://www.westmorelandcountypa.gov/596/Westmoreland-County-Airpark",

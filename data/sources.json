@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T11:35:38Z",
+ "checked": "2026-11-28T11:49:10Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -814,6 +814,24 @@
    "state": "MT",
    "upstream_total": 3,
    "url": "https://www.cityofconrad.com/industrial-park-committee"
+  },
+  "cowlitz-wa-foreclosure": {
+   "about": "Scheduled county tax-deed auctions with acreage and published minimum bids, matched to undeveloped assessments.",
+   "agency": "Cowlitz County Treasurer, Washington",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T11:49:10Z",
+   "last_success": "2026-11-28T11:49:10Z",
+   "message": "",
+   "name": "Cowlitz County December vacant tax-deed auctions",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 15,
+   "state": "WA",
+   "upstream_total": 3,
+   "url": "https://www.co.cowlitz.wa.us/3324/2026-Foreclosure"
   },
   "craven-nc-surplus": {
    "about": "County-owned unimproved land in the available-to-purchase workbook. Assessed values are not sale prices.",
@@ -2515,14 +2533,14 @@
    "complete": true,
    "count": 4,
    "failures": 0,
-   "last_attempt": "2026-11-28T02:44:31Z",
-   "last_success": "2026-11-28T02:44:31Z",
+   "last_attempt": "2026-11-28T11:44:51Z",
+   "last_success": "2026-11-28T11:44:51Z",
    "message": "",
    "name": "Renville County vacant tax-forfeiture auctions",
    "notes": [],
    "ok": true,
    "read": 4,
-   "seconds": 7,
+   "seconds": 5,
    "state": "MN",
    "upstream_total": 22,
    "url": "https://www.renvillecountymn.gov/notice-of-sale-of-tax-forfeited-land/"

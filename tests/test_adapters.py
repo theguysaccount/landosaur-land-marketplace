@@ -2250,6 +2250,27 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertNotIn("0122010689", fetch.json.call_args.args[0])
         fetch.bytes.assert_not_called()
 
+    def test_renville_uses_the_county_roster_and_flyer_for_current_auctions(self):
+        pin = "03-02819-00"
+        flyer = f"https://www.renvillecountymn.gov/wp-content/uploads/2026/10/Tax-Forfeiture-Flyer-{pin}.pdf"
+        roster = f'<p>EMV Minimum Bid</p><a href="{flyer}">{pin}</a>'
+        report = (f"Parcel ID {pin} Property Address: Birch Cooley Township Estimated Market Value "
+                  "First Sale: START November 23, 2026 at 8:00 AM END December 23, 2026 at 3:00 PM "
+                  "Starting Bid: $500.00 Second Sale Starting Bid: $245.80")
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = roster
+        with patch.object(adapters, "pdf_text", return_value=report) as pdf:
+            rows, info = adapters.renville_mn_forfeiture(fetch, NOW + datetime.timedelta(days=5), self.fail)
+            fetch.text.assert_called_once_with(adapters.RENVILLE_MN_LAND)
+            pdf.assert_called_once_with(fetch, flyer, checked_sha256=adapters.RENVILLE_MN_VACANT_FLYERS[pin])
+            self.assertEqual(info, {"complete": True, "upstream_total": 1})
+            parcel, = rows
+            self.assertEqual((parcel["apn"], parcel["price"], parcel["deadline"]),
+                             (pin, 500, "2026-12-23T21:00:00Z"))
+            self.assertEqual(parcel["facts"][0]["url"], adapters.RENVILLE_MN_LAND)
+            close = datetime.datetime(2026, 12, 23, 21, tzinfo=datetime.timezone.utc)
+            self.assertFalse(adapters.renville_mn_forfeiture(fetch, close, self.fail)[0])
+
     def test_mohave_matches_the_reviewed_monthly_sale_to_current_vacant_assessments(self):
         roster = b"Reviewed November bid roster fixture"
         fetch = unittest.mock.Mock()
@@ -2287,6 +2308,36 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         fetch.reset_mock()
         self.assertFalse(adapters.mohave_az_otc(fetch, cutoff_day + datetime.timedelta(days=1), self.fail)[0])
+        fetch.text.assert_not_called()
+
+    def test_cowlitz_checks_roster_and_exact_undeveloped_assessments(self):
+        roster = b"Reviewed Cowlitz County auction roster"
+        fetch = unittest.mock.Mock()
+        page = (f'<a href="{adapters.COWLITZ_WA_ROSTER}">Roster</a>'
+                f'<a href="{adapters.COWLITZ_WA_TERMS}">Terms</a>'
+                '<p>The auction date for all parcels, except for parcel number 080980081, is December 7, 2026.</p>')
+
+        def assessor(pin, account, land_use="91 - Undeveloped land", improvement="$00"):
+            return (f"<dt>Parcel</dt><dd>{pin}</dd><dt>Property ID</dt><dd>{account}</dd>"
+                    f"<dt>DOR Land Use Code</dt><dd>{land_use}</dd><dt>Taxpayer</dt><dd>PRIVATE PERSON</dd>"
+                    "<th>Assessment Year</th><tr><td>2026</td><td>2027</td><td>$44,700</td>"
+                    f"<td>{improvement}</td><td>$44,700</td><td>Notice</td></tr>")
+
+        fetch.bytes.return_value = roster
+        fetch.text.side_effect = [page, assessor("6204902", "3045710"),
+                                  assessor("2417301", "3038913", improvement="$800"),
+                                  assessor("WK0412001", "3015484", land_use="11 - Household, single family units")]
+        with patch.object(adapters, "COWLITZ_WA_ROSTER_SHA", hashlib.sha256(roster).hexdigest()):
+            rows, info = adapters.cowlitz_wa_foreclosure(fetch, NOW, self.fail)
+            self.assertEqual(info, {"complete": True, "upstream_total": 3})
+            parcel, = rows
+            self.assertEqual((parcel["apn"], parcel["price"], parcel["acres"], parcel["status"], parcel["deadline"]),
+                             ("6204902", 4447.43, .25, "auction_terms", "2026-12-07T23:00:00Z"))
+            self.assertIn("5% buyer premium", parcel["facts"][0]["value"])
+            self.assertNotIn("PRIVATE PERSON", repr(parcel))
+            self.assertIsNone(parcel["geometry"])
+        fetch.reset_mock()
+        self.assertFalse(adapters.cowlitz_wa_foreclosure(fetch, adapters.COWLITZ_WA_CLOSE, self.fail)[0])
         fetch.text.assert_not_called()
 
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):

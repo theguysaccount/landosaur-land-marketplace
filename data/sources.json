@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T09:31:18Z",
+ "checked": "2026-11-28T09:39:09Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1190,6 +1190,24 @@
    "state": "ME",
    "upstream_total": 3,
    "url": "https://gorhammaine.org/about/gorham-industrial-park/"
+  },
+  "grand-forks-nd-business-park": {
+   "about": "City Business Park lots priced in the regional economic development agency\u2019s sale sheet and verified in current public assessor records.",
+   "agency": "City of Grand Forks Growth Fund, North Dakota",
+   "complete": true,
+   "count": 4,
+   "failures": 0,
+   "last_attempt": "2026-11-28T09:39:09Z",
+   "last_success": "2026-11-28T09:39:09Z",
+   "message": "",
+   "name": "Grand Forks City Business Park vacant industrial land",
+   "notes": [],
+   "ok": true,
+   "read": 4,
+   "seconds": 5,
+   "state": "ND",
+   "upstream_total": 4,
+   "url": "https://grandforks.org/wp-content/uploads/edc-bd-26-gf-business-park-shovel-ready-site-cmyk-8.5x11.pdf"
   },
   "grays-harbor-wa-tax-title": {
    "about": "Currently listed tax-title tracts with published purchase prices and no assessed building value.",

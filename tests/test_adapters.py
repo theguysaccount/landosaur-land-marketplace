@@ -45,6 +45,27 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_grand_forks_matches_the_exact_lot_with_public_title_and_vacant_assessment(self):
+        notice = ("CITY OF GRAND FORKS BUSINESS PARK\nASKING PRICE\nCity of Grand Forks\n"
+                  "A - 8.5 Acres\nA - $1,851,040\nE - 7.18 Acres\nE - $1,563,845\nH - 4.36 Acres\nH - $949,150")
+        tax, parcels = [], []
+        for lot, sqft, structures in (("A", 370208, 0), ("E", 312769, 1), ("H", 306770, 0)):
+            pin = adapters.GRAND_FORKS_LOTS[lot]
+            tax.append({"attributes": {"ParcelID": pin.replace("-", ""), "TaxRollYear": NOW.year,
+                                       "NumberStructures": structures, "ResidentialStructureValue": 0,
+                                       "CommercialStructureValue": 0, "ExemptStructureValue": 0}})
+            parcels.append({"attributes": {"CountyPropNumberWithDashes": pin, "LegalDescription": f"LOT {lot} BLK 1",
+                                           "LotArea": str(sqft), "ImprovementValue": "0", "DwellingValue": "0"},
+                            "geometry": {"rings": [[[-97, 47], [-96.999, 47], [-97, 47.001], [-97, 47]]]}})
+        with patch.object(adapters, "pdf_text", return_value=notice), patch.object(
+            adapters, "_arcgis_query", side_effect=[tax, parcels]
+        ):
+            rows, info = adapters.grand_forks_nd_business_park(unittest.mock.Mock(), NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["acres"]), ("44-1244-00001-000", 1851040, 8.5))
+        self.assertEqual(info["upstream_total"], 3)
+        self.assertTrue(row["geometry"])
+
     def test_beresford_requires_matching_available_city_lot_and_price(self):
         fetch = unittest.mock.Mock()
         page = ['<script>{"name":"City of Beresford"}</script><h2 id="available-lots"></h2><h2 id="reserve-lot"></h2>']

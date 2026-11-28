@@ -206,6 +206,8 @@ def outline_url(listing):
         return one_parcel_url(ND_PARCEL_MAP, "UniqueGISID='38055-%s'" % listing["apn"], UNDERWOOD_MAP_FIELDS)
     if listing["source"] == "beresford-sd-fields":
         return one_parcel_url(BERESFORD_FIELDS_GIS, "Parcel.PID='%s'" % listing["apn"], BERESFORD_PARCEL_FIELDS)
+    if listing["source"] == "grand-forks-nd-business-park":
+        return one_parcel_url(GRAND_FORKS_GIS, "CountyPropNumberWithDashes='%s'" % listing["apn"], GRAND_FORKS_FIELDS)
     if listing["source"] == "centerville-sd-harvest-pointe":
         return one_parcel_url(CENTERVILLE_SD_GIS, "PARCEL='%s'" % listing["apn"].replace("'", "''"), CENTERVILLE_SD_FIELDS)
     if listing["source"] == "conrad-mt-industrial-park":
@@ -10924,7 +10926,85 @@ def beresford_sd_fields(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(offers)}
 
 
+GRAND_FORKS_SALES = ("https://grandforks.org/wp-content/uploads/"
+                     "edc-bd-26-gf-business-park-shovel-ready-site-cmyk-8.5x11.pdf")
+GRAND_FORKS_GIS = "https://www.gfgis.com/server2/rest/services/Public_Layers/NWS/MapServer/3/query"
+GRAND_FORKS_FIELDS = "CountyPropNumberWithDashes,LegalDescription,LotArea,PhysicalAddress,ImprovementValue,DwellingValue"
+GRAND_FORKS_LOTS = {
+    "A": "44-1244-00001-000", "E": "44-1244-00005-000",
+    "F": "44-1244-00006-000", "H": "44-1244-00007-001",
+}
+
+
+def grand_forks_nd_business_park(fetch, now, warn):
+    text = pdf_text(fetch, GRAND_FORKS_SALES)
+    if not all(term in text for term in ("CITY OF GRAND FORKS BUSINESS PARK", "ASKING PRICE", "City of Grand Forks")):
+        raise StructureError("The Grand Forks City Business Park asking-price sheet changed")
+    details = defaultdict(dict)
+    for label, value in re.findall(r"\b([A-Z])\s*-\s*([\d.]+)\s+Acres\b", text, re.I):
+        details[label]["acres"] = number(value)
+    for label, value in re.findall(r"\b([A-Z])\s*-\s*\$([\d,]+)\b", text):
+        details[label]["price"] = number(value)
+    if not details:
+        raise StructureError("The Grand Forks City Business Park lot table is missing")
+    current = {pin: label for label, pin in GRAND_FORKS_LOTS.items()
+               if details[label].get("price") and details[label].get("acres")}
+    if not current:
+        return [], {"complete": True, "upstream_total": 0}
+    holders = ("GRAND FORKS GROWTH FUND", "CITY OF GRAND FORKS", "GRAND FORKS CITY",
+               "GRAND FORKS GROWTH FUND JDA", "GRAND FORKS GROWTH FUND A JOBS DEVELOPMENT AUTHORITY")
+    raw_ids = [pin.replace("-", "") for pin in current]
+    assessment = _arcgis_query(
+        fetch, ND_PARCEL_TAX, f"CountyFIPS='38035' AND ParcelID IN ({quote_list(raw_ids)}) "
+        f"AND UPPER(OwnerName) IN ({quote_list(holders)})",
+        "ParcelID,TaxRollYear,NumberStructures,ResidentialStructureValue,CommercialStructureValue,ExemptStructureValue",
+        extra={"returnGeometry": "false"},
+    )
+    assessed = defaultdict(list)
+    for item in assessment:
+        assessed[item["attributes"].get("ParcelID")].append(item["attributes"])
+    parcels = _arcgis_query(fetch, GRAND_FORKS_GIS, f"CountyPropNumberWithDashes IN ({quote_list(current)})", GRAND_FORKS_FIELDS)
+    ids = Counter(item["attributes"].get("CountyPropNumberWithDashes") for item in parcels)
+    rows = []
+    for parcel in parcels:
+        a = parcel["attributes"]
+        pin = a.get("CountyPropNumberWithDashes")
+        lot = current.get(pin)
+        if not lot or ids[pin] != 1 or a.get("ImprovementValue") != "0" or a.get("DwellingValue") != "0":
+            continue
+        tax = assessed[pin.replace("-", "")]
+        if (len(tax) != 1 or tax[0].get("TaxRollYear") != now.year
+                or any(tax[0].get(field) != 0 for field in ("NumberStructures", "ResidentialStructureValue",
+                                                           "CommercialStructureValue", "ExemptStructureValue"))):
+            continue
+        price, acres = details[lot]["price"], details[lot]["acres"]
+        sqft = number(a.get("LotArea"))
+        if (not re.search(rf"\bLOT {lot} BLK 1\b", clean(a.get("LegalDescription")).upper())
+                or not sqft or price != sqft * 5 or abs(acres - sqft / 43560) > 0.02):
+            continue
+        row = {
+            "id": "nd-grand-forks-business-park-" + pin, "source": "grand-forks-nd-business-park",
+            "title": f"Grand Forks City Business Park, Lot {lot}", "state": "ND", "county": "Grand Forks",
+            "locality": "Grand Forks", "apn": pin, "address": clean(a.get("PhysicalAddress")), "acres": acres,
+            "price": price, "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
+            "url": GRAND_FORKS_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city’s regional development agency names and prices this lot in its City Business Park sale sheet.", "="),
+                      fact("price", f"The published lot price is based on {sqft:,.0f} square feet at $5 per square foot.", "="),
+                      fact("use", "Development-ready light industrial land. Confirm purchase terms with the city.",
+                           "=")],
+            "tags": ["vacant industrial land", "city development"],
+        }
+        apply_geometry(row, (parcel.get("geometry") or {}).get("rings", []), GRAND_FORKS_GIS, "City of Grand Forks")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(current)}
+
+
 SOURCES = [
+    {"id": "grand-forks-nd-business-park", "name": "Grand Forks City Business Park vacant industrial land",
+     "agency": "City of Grand Forks Growth Fund, North Dakota", "url": GRAND_FORKS_SALES, "state": "ND",
+     "run": grand_forks_nd_business_park, "requires_sale_match": True,
+     "about": "City Business Park lots priced in the regional economic development agency’s sale sheet and verified in current public assessor records."},
     {"id": "beresford-sd-fields", "name": "The Fields at Beresford vacant homesites",
      "agency": "City of Beresford, South Dakota", "url": BERESFORD_SALES, "state": "SD",
      "run": beresford_sd_fields, "requires_sale_match": True,
@@ -11529,6 +11609,16 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Graham County tax-deed sale notices", "https://www.graham.az.gov/731/Tax-Deed-Sales",
+     "The official listings and linked notices returned HTTP 403. The separately published parcel map does not establish sale status."),
+    ("Yavapai County tax-deed roster and assessor GIS", "https://www.yavapaiaz.gov/Mapping-and-Properties/Property-Taxes/Tax-Deed-Sales",
+     "The county’s robots.txt exceeded the verification size limit. The linked assessor GIS also failed TLS certificate validation."),
+    ("Mohave County assessor map service", "https://mcgis.mohave.gov/arcgis/rest/services",
+     "The published ArcGIS path is disallowed by robots.txt. The over-the-counter roster does not establish vacancy."),
+    ("Grand Forks city council and regional property directory webpages", "https://www.grandforksgov.com/",
+     "City robots.txt returns HTTP 403; the regional property page also returns HTTP 403. The published City Business Park sale sheet and official assessor GIS are carried."),
+    ("Grand Forks EDC LocationOne property map", "https://app.locationone.com/sites",
+     "The host serves HTML for robots.txt. The separately published City Business Park sale sheet is carried."),
     ("Bowman County Crossroads Business Park lots", "https://bowmannd.com/economic-development/crossroads-business-park/",
      "The publisher returns HTTP 403 for robots.txt; the dedicated park domain redirects to that publisher."),
     ("Forman industrial lot map", "https://formannd.com/commercial-and-land-for-sale-rent",

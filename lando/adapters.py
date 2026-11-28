@@ -15,7 +15,7 @@ import json
 import math
 import re
 import urllib.parse
-from collections import Counter
+from collections import Counter, defaultdict
 
 from .net import FetchError
 
@@ -10186,7 +10186,119 @@ def shasta_ca_tax_auction(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(features)}
 
 
+ALBANY_GA_DISPOSITION = ("https://www.albanyga.gov/City-Departments/Community-Economic-Development/"
+                         "Property-for-Sale-Disposition")
+ALBANY_GA_CAD = ("https://services6.arcgis.com/VKHi8CC6pMIyYUIs/arcgis/rest/services/"
+                 "Parcels_Public_View/FeatureServer/0/query")
+ALBANY_GA_PIN = r"[A-Z0-9-]{5}/[A-Z0-9-]{5}/[A-Z0-9]{3}"
+
+
+def albany_ga_disposition_pdf(body):
+    from pypdf import PdfReader
+
+    pdf = PdfReader(io.BytesIO(body))
+    if not 1 <= len(pdf.pages) <= 60:
+        raise StructureError("Unexpected page count for Albany’s vacant land report")
+    report = []
+    marks = defaultdict(list)
+    for page in pdf.pages:
+        layout = page.extract_text(extraction_mode="layout")
+        if "RED BOLD ---Pending Sale" not in layout:
+            raise StructureError("Albany’s report lacks its pending-sale legend")
+        report.append(layout)
+        color = [(0.0, 0.0, 0.0)]
+
+        def before(op, args, cm, tm):
+            if op == b"q":
+                color.append(color[-1])
+            elif op == b"Q" and len(color) > 1:
+                color.pop()
+            elif op == b"rg":
+                color[-1] = tuple(map(float, args))
+            elif op == b"g":
+                color[-1] = (float(args[0]),) * 3
+            elif op in (b"k", b"sc", b"scn"):
+                color[-1] = None
+
+        def on_text(label, cm, tm, font, size):
+            pins = re.findall(ALBANY_GA_PIN, label)
+            for pin in pins:
+                marks[pin].append(color[-1])
+
+        page.extract_text(visitor_operand_before=before, visitor_text=on_text)
+    return "\n".join(report), marks
+
+
+def parse_albany_ga_vacant_report(report, marks):
+    if not re.search(r"DCED Disposition List of\s+VACANT LAND\s*\(\d+\)", report):
+        raise StructureError("Albany’s vacant land report header changed")
+    pattern = (r"^[ \t]*\d+[ \t]+(.+?)[ \t]{2,}([\d.]+)[ \t]+([\w-]+)"
+               r"[ \t]+Vacant Land[ \t]+(" + ALBANY_GA_PIN + r")[ \t]*$")
+    candidates = re.findall(pattern, report, re.M)
+    if not candidates or any(pin not in marks for _, _, _, pin in candidates):
+        raise StructureError("Albany’s parcel rows or pending-sale colors could not be read")
+    rows = {}
+    for address, acres, zone, pin in candidates:
+        # The source prints pending parcels in red. Carry only one ordinary black row per PIN.
+        if marks[pin] == [(0.0, 0.0, 0.0)] and number(acres):
+            rows[pin] = (clean(address).title(), number(acres), zone)
+    return rows, len(candidates)
+
+
+def albany_ga_vacant_sales(fetch, now, warn):
+    page = fetch.text(ALBANY_GA_DISPOSITION)
+    if "Disposition Application" not in clean(page):
+        raise StructureError("Albany’s official purchase application is missing")
+    reports = set()
+    for href, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        url = urllib.parse.urljoin(ALBANY_GA_DISPOSITION, html.unescape(href))
+        parts = urllib.parse.urlsplit(url)
+        path = urllib.parse.unquote(parts.path).lower()
+        if (parts.hostname == "www.albanyga.gov" and "disposition" in clean(label).lower()
+                and re.search(r"/dced-disposition-list-[\d-]+-of-vacant-land\.pdf$", path)):
+            reports.add(url)
+    if len(reports) != 1:
+        raise StructureError("Albany’s current vacant land report link changed")
+    url, = reports
+    roster, source_total = parse_albany_ga_vacant_report(*albany_ga_disposition_pdf(fetch.bytes(url)))
+    ids = list(roster)
+    fields = "ParcelNum,YearBuilt,YearBuiltInt,CombinationWith,NonContig,SiteCity,Jurisdiction"
+    ownership = "UPPER(Name) LIKE 'CITY OF ALBANY%' OR UPPER(Name) LIKE 'ALBANY%CITY%'"
+    found = []
+    for index in range(0, len(ids), 50):
+        where = f"ParcelNum IN ({quote_list(ids[index:index + 50])}) AND ({ownership})"
+        found.extend(_arcgis_query(fetch, ALBANY_GA_CAD, where, fields, post=True))
+    seen = Counter(f["attributes"].get("ParcelNum") for f in found)
+    rows = []
+    for feature in found:
+        attr = feature["attributes"]
+        pin = attr.get("ParcelNum")
+        if (pin not in roster or seen[pin] != 1 or attr.get("SiteCity") != "ALBANY" or attr.get("Jurisdiction") != "CITY"
+                or number(attr.get("YearBuilt")) or number(attr.get("YearBuiltInt"))
+                or clean(attr.get("CombinationWith")) or clean(attr.get("NonContig"))):
+            continue
+        address, acres, zone = roster[pin]
+        row = {
+            "id": "ga-albany-disposition-" + slug(pin), "source": "albany-ga-city-vacant",
+            "title": f"{address}, Albany (vacant city land)", "state": "GA",
+            "county": "Dougherty", "locality": "Albany", "apn": pin, "address": address, "acres": acres,
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+            "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city lists this vacant parcel for purchase applications.", url),
+                      fact("zoning", zone, url), fact("sale_terms", "Use the City of Albany disposition application.",
+                                                      ALBANY_GA_DISPOSITION)],
+            "tags": ["vacant land", "city redevelopment", "purchase application"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), ALBANY_GA_CAD, "Albany–Dougherty")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": source_total}
+
+
 SOURCES = [
+    {"id": "albany-ga-city-vacant", "name": "Albany vacant city land",
+     "agency": "City of Albany Department of Community and Economic Development, Georgia",
+     "url": ALBANY_GA_DISPOSITION, "state": "GA", "run": albany_ga_vacant_sales, "requires_sale_match": True,
+     "about": "City-listed vacant land open to purchase applications, matched to current municipal parcel records."},
     {"id": "shasta-ca-tax-deed", "name": "Shasta County vacant land tax deeds",
      "agency": "Shasta County Treasurer-Tax Collector, California", "url": SHASTA_CA_AUCTION_TERMS, "state": "CA",
      "run": shasta_ca_tax_auction, "requires_sale_match": True, "timezone": "America/Los_Angeles",

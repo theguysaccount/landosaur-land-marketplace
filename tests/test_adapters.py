@@ -45,6 +45,30 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_albany_requires_a_non_pending_sale_row_and_current_vacancy(self):
+        fetch = unittest.mock.Mock()
+        pdf_url = "https://www.albanyga.gov/files/dced-disposition-list-11-13-26-of-vacant-land.pdf"
+        fetch.text.return_value = f'<a href="{pdf_url}">Disposition List</a> Disposition Application'
+        offered, pending, improved = "00123/00004/001", "00123/00004/002", "00123/00004/003"
+        report = f"""DCED Disposition List of VACANT LAND (3)
+1  12 MAIN STREET  0.24  R-2  Vacant Land  {offered}
+2  14 MAIN STREET  0.25  R-2  Vacant Land  {pending}
+3  16 MAIN STREET  0.26  R-2  Vacant Land  {improved}
+"""
+        marks = {offered: [(0, 0, 0)], pending: [(1, 0, 0)], improved: [(0, 0, 0)]}
+        empty = {"ParcelNum": offered, "SiteCity": "ALBANY", "Jurisdiction": "CITY", "YearBuiltInt": 0}
+        features = [{"attributes": empty}, {"attributes": dict(empty, ParcelNum=improved, YearBuiltInt=1984)}]
+        with patch.object(adapters, "albany_ga_disposition_pdf", return_value=(report, marks)), patch.object(
+            adapters, "_arcgis_query", return_value=features
+        ) as query:
+            rows, meta = adapters.albany_ga_vacant_sales(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["acres"]), (offered, None, 0.24))
+        self.assertEqual(meta["upstream_total"], 3)
+        self.assertNotIn(pending, query.call_args.args[2])
+        self.assertNotIn("Name", query.call_args.args[3])
+        self.assertEqual(row["facts"][0]["url"], pdf_url)
+
     def test_shasta_carries_only_active_individual_land_auction_items(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = (

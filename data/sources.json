@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T08:17:47Z",
+ "checked": "2026-11-28T08:29:24Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -54,6 +54,24 @@
    "state": "AK",
    "upstream_total": null,
    "url": "https://alaskamentalhealthtrust.org/otc-parcel/"
+  },
+  "albany-ga-city-vacant": {
+   "about": "City-listed vacant land open to purchase applications, matched to current municipal parcel records.",
+   "agency": "City of Albany Department of Community and Economic Development, Georgia",
+   "complete": true,
+   "count": 210,
+   "failures": 0,
+   "last_attempt": "2026-11-28T08:29:24Z",
+   "last_success": "2026-11-28T08:29:24Z",
+   "message": "",
+   "name": "Albany vacant city land",
+   "notes": [],
+   "ok": true,
+   "read": 210,
+   "seconds": 9,
+   "state": "GA",
+   "upstream_total": 331,
+   "url": "https://www.albanyga.gov/City-Departments/Community-Economic-Development/Property-for-Sale-Disposition"
   },
   "albany-landbank": {
    "about": "Vacant residential and commercial land bank parcels across Albany County, New York with GIS outlines, zoning, and acreage.",

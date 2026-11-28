@@ -45,6 +45,30 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_beresford_requires_matching_available_city_lot_and_price(self):
+        fetch = unittest.mock.Mock()
+        page = ['<script>{"name":"City of Beresford"}</script><h2 id="available-lots"></h2><h2 id="reserve-lot"></h2>']
+        features = []
+        for block, lot, marker, value in ((1, 1, "available-icon-dark", 0), (2, 1, "available-icon-dark", 0),
+                                          (2, 2, "Sold-Icon", 0), (2, 3, "available-icon-dark", 10),
+                                          (2, 4, "unknown-icon", 0)):
+            layer = f"b{block}l{lot}"
+            card = (f'<div class="vision-data" data-layer-id="{layer}"><h3>Block {block}, Lot {lot}</h3>'
+                    '<p>Price: $50,000.00</p><p>Size: 10,660 SF</p></div>')
+            page.extend([card, card, f'[data-layer-id="{layer}"] .vision-body {{background-image:url(/status/{marker}.svg);}}'])
+            attributes = {"Parcel.PID": f"260.82.{block:02d}.{lot:03d}", "Parcel.Block": str(block), "Parcel.Lot": str(lot),
+                          "Parcel.LegalDesc": f"Lot {lot}, Block {block}, Bak First Add, City of Beresford",
+                          "GIS_Parcels.Class1": "CITY", "GIS_Parcels.Value1": value}
+            features.append({"attributes": attributes,
+                             "geometry": {"rings": [[[-96.78, 43.09], [-96.779, 43.09], [-96.78, 43.091], [-96.78, 43.09]]]}})
+        fetch.text.return_value = "".join(page)
+        with patch.object(adapters, "_arcgis_query", return_value=features):
+            rows, info = adapters.beresford_sd_fields(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["acres"]), ("260.82.02.001", 50000, 0.2447))
+        self.assertEqual(info["upstream_total"], 2)
+        self.assertTrue(row["geometry"])
+
     def test_underwood_requires_city_count_and_excludes_residual_or_improved_lots(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = ("Lots for Sale The City of Underwood currently owns 3 lots east of "

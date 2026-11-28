@@ -204,6 +204,8 @@ def outline_url(listing):
         return one_parcel_url(FNSB_PARCELS, "PAN=%s" % listing["apn"], FNSB_FIELDS)
     if listing["source"] == "underwood-nd-westridge":
         return one_parcel_url(ND_PARCEL_MAP, "UniqueGISID='38055-%s'" % listing["apn"], UNDERWOOD_MAP_FIELDS)
+    if listing["source"] == "beresford-sd-fields":
+        return one_parcel_url(BERESFORD_FIELDS_GIS, "Parcel.PID='%s'" % listing["apn"], BERESFORD_PARCEL_FIELDS)
     if listing["source"] == "centerville-sd-harvest-pointe":
         return one_parcel_url(CENTERVILLE_SD_GIS, "PARCEL='%s'" % listing["apn"].replace("'", "''"), CENTERVILLE_SD_FIELDS)
     if listing["source"] == "conrad-mt-industrial-park":
@@ -10839,7 +10841,94 @@ def underwood_nd_westridge(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": published_count}
 
 
+BERESFORD_SALES = "https://behereberesford.com/#available-lots"
+BERESFORD_FIELDS_GIS = "https://gis.lincolncountysd.gov/arcgis/rest/services/ParcelRelate/MapServer/0/query"
+BERESFORD_PARCEL_FIELDS = ("Parcel.PID,Parcel.LegalDesc,Parcel.Lot,Parcel.Block,Parcel.Address,"
+                           "GIS_Parcels.Class1,GIS_Parcels.Class2,GIS_Parcels.Class3,"
+                           "GIS_Parcels.Value1,GIS_Parcels.Value12,GIS_Parcels.Value13")
+
+
+def parse_beresford_sale_map(page):
+    if ('id="available-lots"' not in page or 'id="reserve-lot"' not in page
+            or not re.search(r'"name"\s*:\s*"City of Beresford"', page)):
+        raise StructureError("The Fields city reservation map was not found")
+    icons = defaultdict(set)
+    for layer, style in re.findall(r'\[data-layer-id="([\w-]+)"\]\s+\.vision-body\s*\{([^}]+)\}', page):
+        icon = re.search(r"background-image\s*:\s*url\([\"']?([^\"')]+)", style)
+        if icon:
+            icons[layer].add(urllib.parse.urlsplit(icon[1]).path.rsplit("/", 1)[-1].lower())
+    cards = re.findall(r'<div class="vision-data" data-layer-id="([\w-]+)">(.*?)</div>', page, re.S)
+    if not cards:
+        raise StructureError("The Fields map does not identify any lot cards")
+    offers = defaultdict(set)
+    for layer, card in cards:
+        text = clean(card)
+        lot = re.search(r"\bBlock\s*(\d+),\s*Lot\s*(\d+)\b", text, re.I)
+        price = re.search(r"\bPrice:\s*\$([\d,]+(?:\.\d{2})?)\b", text, re.I)
+        size = re.search(r"\bSize:\s*([\d,]+)\s*SF\b", text, re.I)
+        if not lot:
+            continue
+        key = tuple(map(int, lot.groups()))
+        is_available = icons[layer] == {"available-icon-dark.svg"} and not re.search(r"\b(sold|reserved|pending)\b", text, re.I)
+        offers[key].add((is_available, number(price[1]) if price else None, number(size[1]) if size else None))
+    available = {}
+    for key, cards in offers.items():
+        if key[0] == 1 or len(cards) != 1:  # Block 1 includes paired twin-home lots.
+            continue
+        (is_available, price, sqft), = cards
+        if is_available and price and sqft:
+            available[key] = (price, sqft)
+    return available
+
+
+def beresford_sd_fields(fetch, now, warn):
+    offers = parse_beresford_sale_map(fetch.text(BERESFORD_SALES))
+    if not offers:
+        return [], {"complete": True, "upstream_total": 0}
+    holders = ("CITY OF BERESFORD", "BERESFORD CITY OF", "BERESFORD, CITY OF", "BERESFORD CITY", "CITY OF BERESFORD, SD")
+    where = ("UPPER(Parcel.Location)='BERESFORD' AND UPPER(Parcel.LegalDesc) LIKE '%BAK FIRST ADD%' "
+             f"AND UPPER(GIS_Parcels.Name) IN ({quote_list(holders)})")
+    features = _arcgis_query(fetch, BERESFORD_FIELDS_GIS, where, BERESFORD_PARCEL_FIELDS)
+    ids = Counter(item["attributes"].get("Parcel.PID") for item in features)
+    rows = []
+    for item in features:
+        a = item["attributes"]
+        pin = a.get("Parcel.PID") or ""
+        block, lot = number(a.get("Parcel.Block")), number(a.get("Parcel.Lot"))
+        offer = offers.get((block, lot))
+        if not offer or not re.fullmatch(r"\d{3}\.\d{2}\.\d{2}\.\d{3}", pin) or ids[pin] != 1:
+            continue
+        legal = f"LOT {lot:g}, BLOCK {block:g}, BAK FIRST ADD, CITY OF BERESFORD"
+        if (clean(a.get("Parcel.LegalDesc")).upper() != legal or clean(a.get("GIS_Parcels.Class1")) != "CITY"
+                or clean(a.get("GIS_Parcels.Class2")) or clean(a.get("GIS_Parcels.Class3"))
+                or a.get("GIS_Parcels.Value1") != 0 or a.get("GIS_Parcels.Value12") not in (None, 0)
+                or a.get("GIS_Parcels.Value13") not in (None, 0)):
+            continue
+        price, sqft = offer
+        row = {
+            "id": "sd-beresford-fields-" + slug(pin), "source": "beresford-sd-fields",
+            "title": f"The Fields, Block {block:g}, Lot {lot:g}, Beresford", "state": "SD", "county": "Lincoln",
+            "locality": "Beresford", "apn": pin, "address": clean(a.get("Parcel.Address")),
+            "acres": round(sqft / 43560, 4), "price": price, "price_kind": "asking",
+            "offering": "sale", "status": "listed", "deadline": None, "url": BERESFORD_SALES,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city’s sale map marks this individually priced homesite available for reservation.", "="),
+                      fact("acreage", f"The city lists {sqft:,.0f} square feet.", "="),
+                      fact("reservation", "Use the city’s reservation form to confirm availability and sale terms.",
+                           "https://behereberesford.com/#reserve-lot")],
+            "tags": ["vacant homesite", "city development"],
+        }
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), BERESFORD_FIELDS_GIS, "Lincoln County")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
+
+
 SOURCES = [
+    {"id": "beresford-sd-fields", "name": "The Fields at Beresford vacant homesites",
+     "agency": "City of Beresford, South Dakota", "url": BERESFORD_SALES, "state": "SD",
+     "run": beresford_sd_fields, "requires_sale_match": True,
+     "about": "Available and individually priced city homesites matched to Lincoln County parcel records and outlines."},
     {"id": "underwood-nd-westridge", "name": "Underwood Westridge Estates vacant homesites",
      "agency": "City of Underwood, North Dakota", "url": UNDERWOOD_SALES, "state": "ND",
      "run": underwood_nd_westridge, "requires_sale_match": True,
@@ -11440,6 +11529,12 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Bowman County Crossroads Business Park lots", "https://bowmannd.com/economic-development/crossroads-business-park/",
+     "The publisher returns HTTP 403 for robots.txt; the dedicated park domain redirects to that publisher."),
+    ("Forman industrial lot map", "https://formannd.com/commercial-and-land-for-sale-rent",
+     "The city host refused the robots.txt connection. The state assessor records alone do not identify which lots are offered."),
+    ("Lisbon city lot sale page", "https://cityoflisbon.net/2024/10/14/lot-for-sale/",
+     "The city’s robots.txt disallows the listed sale page."),
     ("McLean County assessor property-card search", "https://mclean.northdakotaassessors.com/search/res/",
      "The property search returned HTTP 403. The independently published North Dakota GIS Hub parcel and tax-roll services are carried."),
     ("Dunn County assessor property-card search", "https://dunn.northdakotaassessors.com/search/res/",

@@ -27,6 +27,23 @@ try {
         if (/^#[a-z][a-z0-9-]*$/i.test(url.hash)) {
           await page.eval(`document.getElementById(${JSON.stringify(url.hash.slice(1))})?.scrollIntoView({ behavior: "instant", block: "start" })`);
         }
+        await page.eval(`new Promise((resolve) => {
+          const map = [...document.querySelectorAll('.leaflet-container')].find((element) => {
+            const bounds = element.getBoundingClientRect();
+            return bounds.height && bounds.top < innerHeight && bounds.bottom > 0;
+          });
+          if (!map) return resolve();
+          const cutoff = performance.now() + 3500;
+          function waitForTiles() {
+            const tiles = [...map.querySelectorAll('img.leaflet-tile')];
+            if (performance.now() >= cutoff || (tiles.some((tile) => tile.naturalWidth) && tiles.every((tile) => tile.complete))) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(waitForTiles);
+          }
+          waitForTiles();
+        })`);
         await page.eval(`Promise.race([
           document.fonts.ready,
           new Promise((resolve) => setTimeout(resolve, 1200))

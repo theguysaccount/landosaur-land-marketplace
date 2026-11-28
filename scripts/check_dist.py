@@ -53,7 +53,7 @@ OFFICIAL = {
     "clearlakeadc.com", "clarkcountylandbank.org", "athenscountylandbank.com", "rtcwashoe.com", "waycrossga.gov",
     "cityofhuntington.com", "oregon.gov", "graysharbor.gov", "alpha.creativecirclecdn.com", "countyofelkpa.gov", "dorchestermd.gov",
     "toddcountymn.gov", "jacksoncountyohlandbank.org", "knoxadf.com", "chesterfieldtwp.org", "windhamct.gov", "renvillecountymn.gov",
-    "fcidc.com", "loraincountyauditor.gov", "kcgov.us", "claremontnh.com",
+    "fcidc.com", "loraincountyauditor.gov", "kcgov.us", "claremontnh.com", "providenceri.gov", "cityoflidgerwoodnd.com",
     "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us", "hokecounty.net", "wsdot.wa.gov", "itascacountymn.gov", "valencia.nm.us", "tax.newmexico.gov", "stlouiscountymn.gov", "fnsb.gov",
 }
 

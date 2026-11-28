@@ -1069,6 +1069,59 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_providence_requires_fee_simple_and_uses_published_close(self):
+        import io
+        from zipfile import ZipFile
+
+        def document(offer):
+            word = ('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+                    '<w:p><w:r><w:t>246 Prairie Avenue (Plat 45/Lot 911)</w:t></w:r></w:p>'
+                    '<w:p><w:r><w:t>The Agency cleared the site of its structures. As the Property is 4.6 acres,</w:t></w:r></w:p>'
+                    '<w:p><w:r><w:t>The Agency will consider proposals that offer either %s.</w:t></w:r></w:p>'
+                    '<w:p><w:r><w:t>PROPOSAL SUBMISSIONS</w:t><w:br/>'
+                    '<w:t>Proposals are due Friday December 4</w:t></w:r>'
+                    '<w:r><w:t>th</w:t></w:r><w:r><w:t>, 2026 by 4:00 PM</w:t></w:r></w:p></w:body></w:document>') % offer
+            package = io.BytesIO()
+            with ZipFile(package, "w") as doc:
+                doc.writestr("word/document.xml", word)
+            return package.getvalue()
+
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = '<a href="/offer.docx">View the 246 Prairie Avenue RFP</a>'
+        fetch.bytes.return_value = document("fee simple land acquisition, or ground lease")
+        rings = [[[-71.4, 41.81], [-71.399, 41.81], [-71.4, 41.811], [-71.4, 41.81]]]
+        match = {"attributes": {"PlatLot": "PR 045-0911-0000"}, "geometry": {"rings": rings}}
+        with patch.object(adapters, "_arcgis_query", return_value=[match, match]) as query:
+            rows, _ = adapters.providence_ri_prairie(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["acres"], row["price"], row["deadline"]), (4.6, None, "2026-12-04T21:00:00Z"))
+            self.assertTrue(row["geometry"])
+            expired, _ = adapters.providence_ri_prairie(fetch, NOW + datetime.timedelta(days=13), self.fail)
+            self.assertEqual(expired, [])
+            self.assertEqual(query.call_count, 1)
+        fetch.bytes.return_value = document("a ground lease")
+        with self.assertRaises(adapters.StructureError):
+            adapters.providence_ri_prairie(fetch, NOW, self.fail)
+
+    def test_lidgerwood_lists_only_reviewed_vacant_lot_and_rechecks_minutes(self):
+        import hashlib
+
+        names = tuple(adapters.LIDGERWOOD_ND_EVIDENCE)
+        market = ('<h1>Residential Lots For Sale</h1><p>Submit a letter of intent</p>'
+                  f'<a href="{adapters.LIDGERWOOD_ND_LIST}">List</a>')
+        minutes = ''.join(f'<a class="link" href="/uploads/{name}">Minutes</a>' for name in names[1:])
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [market, minutes, market, minutes]
+        fetch.bytes.return_value = b"reviewed document"
+        hashes = dict.fromkeys(names, hashlib.sha256(fetch.bytes.return_value).hexdigest())
+        with patch.object(adapters, "LIDGERWOOD_ND_EVIDENCE", hashes):
+            rows, _ = adapters.lidgerwood_nd_lots(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"]), ("47-0001-03190.000", None))
+            fetch.bytes.return_value = b"updated council disposition"
+            with self.assertRaises(adapters.StructureError):
+                adapters.lidgerwood_nd_lots(fetch, NOW, self.fail)
+
     def test_claremont_requires_current_marketing_and_a_vacant_assessment(self):
         sale = '<h2>Commercial Industrial Lots for Sale in the Syd Clarke Industrial Park</h2>'
         roster = '<p>Syd Clarke Drive: 187-2, 187-2-5, 187-2-6</p><p>Ashleys Landing: 163-3</p>'

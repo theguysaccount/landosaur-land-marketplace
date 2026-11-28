@@ -8126,6 +8126,109 @@ def claremont_nh_industrial(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(lots)}
 
 
+PROVIDENCE_RI_RFP = "https://www.providenceri.gov/planning/246-prairie-ave-rfp/"
+PROVIDENCE_RI_SITE = "https://www.providenceri.gov/planning/246-prairie-ave/"
+PROVIDENCE_RI_GIS = "https://risegis.ri.gov/hosting/rest/services/RIDEM/Tax_Parcels/MapServer/0/query"
+
+
+def parse_providence_prairie_terms(terms):
+    from zoneinfo import ZoneInfo
+
+    if (not re.search(r"246 Prairie Avenue .*?\(Plat\s+45\s*/\s*Lot\s+911\)", terms, re.I)
+            or not re.search(r"consider proposals that offer either fee simple land acquisition", terms, re.I)
+            or not re.search(r"cleared the site of its structures", terms, re.I)):
+        raise StructureError("Providence’s Prairie Avenue RFP no longer verifies the cleared parcel and purchase option")
+    area = re.search(r"\bthe Property is ([\d.]+) acres\b", terms, re.I)
+    schedule = re.search(r"\bProposals are due\s+\w+\s+(\w+\s+\d{1,2})(?:st|nd|rd|th)?\s*,\s*(\d{4})\s+by\s+(\d{1,2}:\d{2}\s*[AP]M)\b", terms, re.I)
+    if not area or not schedule:
+        raise StructureError("Providence’s Prairie Avenue RFP no longer verifies its acreage and submission deadline")
+    day, year, clock = schedule.groups()
+    deadline = datetime.datetime.strptime("%s %s %s" % (day, year, clock.upper()), "%B %d %Y %I:%M %p")
+    return number(area[1]), deadline.replace(tzinfo=ZoneInfo("America/New_York"))
+
+
+def providence_ri_prairie(fetch, now, warn):
+    from xml.etree import ElementTree
+    from zipfile import ZipFile
+
+    page = fetch.text(PROVIDENCE_RI_RFP)
+    if re.search(r"\b(?:RFP|solicitation) (?:is |was )?(?:closed|cancelled|withdrawn)\b", clean(page), re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    links = re.findall(r'<a\b[^>]*href=["\']([^"\']+\.docx)["\'][^>]*>(.*?)</a>', page, re.I | re.S)
+    link = next((href for href, label in links if clean(label) == "View the 246 Prairie Avenue RFP"), None)
+    if not link:
+        raise StructureError("Providence’s Prairie Avenue solicitation link changed")
+    url = urllib.parse.urljoin(PROVIDENCE_RI_RFP, html.unescape(link))
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    with ZipFile(io.BytesIO(fetch.bytes(url))) as package:
+        document = ElementTree.fromstring(package.read("word/document.xml"))
+    prefix = "{%s}" % namespace["w"]
+    word_tags = {prefix + "t", prefix + "br", prefix + "cr", prefix + "tab"}
+    terms = clean(" ".join("".join((part.text or "") if part.tag == prefix + "t" else " "
+                                   for part in paragraph.iter() if part.tag in word_tags)
+                           for paragraph in document.findall(".//w:p", namespace)))
+    acres, deadline = parse_providence_prairie_terms(terms)
+    if deadline <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    key = "PR 045-0911-0000"
+    features = _arcgis_query(fetch, PROVIDENCE_RI_GIS, "PlatLot='%s'" % key, "PlatLot")
+    geometries = [feature.get("geometry") for feature in features if feature["attributes"].get("PlatLot") == key]
+    if not geometries or not geometries[0] or any(geometry != geometries[0] for geometry in geometries):
+        raise StructureError("Providence’s Prairie Avenue parcel does not have a unique verified boundary")
+    row = {
+        "id": "ri-providence-045-0911-0000", "source": "providence-ri-prairie",
+        "title": "246 Prairie Avenue (Providence redevelopment land)", "state": "RI", "county": "Providence",
+        "locality": "Providence", "apn": "045-0911-0000", "address": "246 Prairie Avenue",
+        "acres": acres, "price": None, "price_kind": "none", "offering": "proposal", "status": "proposal_open",
+        "deadline": deadline.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": PROVIDENCE_RI_RFP, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The agency invites qualified redevelopment proposals, including fee-simple purchase. It also considers ground leases.", url),
+                  fact("land_use", "The former building was demolished. An environmental remedial action plan is part of the solicitation.", PROVIDENCE_RI_SITE),
+                  fact("sale_terms", "Proposals must include an affordable-housing component. The agency board must approve the transfer.", url),
+                  fact("boundary_use", "For general reference, planning and guidance only. The outline is not a legal boundary or a professional survey.", PROVIDENCE_RI_GIS)],
+        "tags": ["redevelopment land", "purchase proposals"],
+    }
+    apply_geometry(row, geometries[0].get("rings", []), PROVIDENCE_RI_GIS, "Rhode Island Department of Environmental Management")
+    return [row], {"complete": True, "upstream_total": 1}
+
+
+LIDGERWOOD_ND_LOTS = "https://www.cityoflidgerwoodnd.com/index.asp?SEC=048E0664-5172-4644-860F-FCB33875DC36"
+LIDGERWOOD_ND_COUNCIL = "https://www.cityoflidgerwoodnd.com/index.asp?DE=A686D4A9-1DF8-49FB-9975-814DF9A40594&SEC=05B426C9-E1E5-4C89-B81C-6275A66BB490"
+LIDGERWOOD_ND_LIST = "/uploads/dm/11683/City_Property__empty_lots.pdf"
+# The roster is scanned. Review it with the latest special and regular council meetings before extending this set.
+LIDGERWOOD_ND_EVIDENCE = {
+    "City_Property__empty_lots.pdf": "6a538a44cef4fbc235a1d55cf444ab818582f72b2680411a6bb18ca0cef4c608",
+    "Special_Meeting_October_19_2026(1).pdf": "58a26693a864a791f0dc972d01a4b74d702143d3c839f98bb790b445f0b9c02d",
+    "November_02_2026_Minutes.pdf": "43689b11694c416a3cb2e3b425cdba387d39df3ff4af652ec812ce8ba6220b03",
+}
+
+
+def lidgerwood_nd_lots(fetch, now, warn):
+    page = fetch.text(LIDGERWOOD_ND_LOTS)
+    if not re.search(r"<h1>\s*Residential Lots For Sale\s*</h1>", page, re.I) or "Submit a letter of intent" not in clean(page):
+        return [], {"complete": True, "upstream_total": 0}
+    if LIDGERWOOD_ND_LIST not in page:
+        raise StructureError("Lidgerwood’s city lot list changed")
+    minutes = fetch.text(LIDGERWOOD_ND_COUNCIL)
+    links = [html.unescape(raw).strip() for raw in re.findall(r'<a class="link" href="([^"<>]+\.pdf)">', minutes)]
+    latest = {link.rsplit("/", 1)[-1]: urllib.parse.urljoin(LIDGERWOOD_ND_COUNCIL, link) for link in links[-2:]}
+    inventory = urllib.parse.urljoin(LIDGERWOOD_ND_LOTS, LIDGERWOOD_ND_LIST)
+    evidence = {inventory.rsplit("/", 1)[-1]: inventory, **latest}
+    if evidence.keys() != LIDGERWOOD_ND_EVIDENCE.keys() or any(
+            hashlib.sha256(fetch.bytes(url)).hexdigest() != LIDGERWOOD_ND_EVIDENCE[name] for name, url in evidence.items()):
+        raise StructureError("Lidgerwood’s lot list or council decisions changed and require renewed review")
+    return [{
+        "id": "nd-lidgerwood-47-0001-03190-000", "source": "lidgerwood-nd-lots",
+        "title": "Lot 16, Block 27 (Lidgerwood municipal land)", "state": "ND", "county": "Richland",
+        "locality": "Lidgerwood", "apn": "47-0001-03190.000", "address": "", "acres": None,
+        "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+        "url": LIDGERWOOD_ND_LOTS, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The city includes this vacant lot in its purchase list and invites letters of intent.", inventory),
+                  fact("sale_terms", "Include the proposed use and development timeline in a letter of intent to the city.", "=")],
+        "tags": ["city-owned vacant lot", "purchase proposals"],
+    }], {"complete": True, "upstream_total": 1}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -8572,8 +8675,22 @@ SOURCES = [
      "agency": "Claremont Development Authority", "url": CLAREMONT_NH_SALES, "state": "NH",
      "run": claremont_nh_industrial, "requires_sale_match": True,
      "about": "Individual Syd Clarke Industrial Park lots named in the authority's marketing roster and checked against the assessor."},
+    {"id": "providence-ri-prairie", "name": "Providence 246 Prairie Avenue redevelopment land",
+     "agency": "Providence Redevelopment Agency", "url": PROVIDENCE_RI_RFP, "state": "RI", "timezone": "America/New_York",
+     "run": providence_ri_prairie, "requires_sale_match": True,
+     "about": "A cleared municipal land-bank parcel whose open redevelopment solicitation allows fee-simple purchase proposals."},
+    {"id": "lidgerwood-nd-lots", "name": "Lidgerwood available city residential lots",
+     "agency": "City of Lidgerwood, North Dakota", "url": LIDGERWOOD_ND_LOTS, "state": "ND",
+     "run": lidgerwood_nd_lots, "requires_sale_match": True,
+     "about": "Unimproved city lots offered for purchase and checked against current council decisions."},
 ]
 NOT_CARRIED = [
+    ("City of Providence municipal parcel server", "https://webgis.providenceri.gov/server/rest/services",
+     "The municipal parcel server timed out on robots.txt. The Rhode Island DEM independently publishes the Providence parcel outline."),
+    ("Kauaʻi County real property tax site", "https://www.kauaipropertytax.com/",
+     "The host refused connections for robots.txt."),
+    ("General Services Administration auction catalog", "https://realestatesales.gov/",
+     "The host’s robots.txt disallows the auction catalog."),
     ("Claremont Development Authority price schedules and site plans", "https://www.claremontnh.com/opportunityzone",
      "The municipal website’s robots.txt disallows the linked price and parcel map PDFs."),
     ("Todd County linked Bid4Assets auction catalog", "https://www.bid4assets.com/ToddMN",

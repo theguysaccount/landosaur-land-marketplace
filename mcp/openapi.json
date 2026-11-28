@@ -160,7 +160,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Xray"
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/Xray" },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["utility"],
+                      "properties": {
+                        "utility": { "$ref": "#/components/schemas/CountyUtility" }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -201,7 +211,19 @@
             "schema": {
               "type": "string"
             },
-            "description": "A U.S. place or both lat and lon are required."
+            "description": "A U.S. place or both lat and lon are required for a full X-Ray."
+          },
+          {
+            "name": "layer",
+            "in": "query",
+            "schema": { "type": "string", "const": "utility" },
+            "description": "Return only the electric utility data. Supply county_fips."
+          },
+          {
+            "name": "county_fips",
+            "in": "query",
+            "schema": { "type": "string", "pattern": "^[0-9]{5}$" },
+            "description": "Five-digit U.S. county FIPS code for the utility-only lookup. Preserve leading zeros."
           }
         ]
       }
@@ -1023,50 +1045,7 @@
             ]
           },
           "utility": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "providers": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "ownership": {
-                          "type": "string"
-                        },
-                        "residential_usd_per_kwh": {
-                          "anyOf": [
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      }
-                    }
-                  },
-                  "state_residential_usd_per_kwh": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/CountyUtility"
           },
           "disclaimer": {
             "type": "string"
@@ -1075,8 +1054,42 @@
         "required": [
           "lat",
           "lon",
-          "checked_at"
+          "checked_at",
+          "utility"
         ]
+      },
+      "CountyUtility": {
+        "type": "object",
+        "properties": {
+          "status": { "enum": ["ok", "unavailable"] },
+          "county_fips": { "type": ["string", "null"], "pattern": "^[0-9]{5}$" },
+          "state_code": { "type": ["string", "null"], "pattern": "^[A-Z]{2}$" },
+          "year": { "type": ["integer", "null"] },
+          "source": { "type": "string", "format": "uri" },
+          "state_commission_url": { "type": ["string", "null"], "format": "uri" },
+          "state_average_usd_per_kwh": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+          "state_average_source": { "type": ["string", "null"], "format": "uri" },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "ownership", "residential_usd_per_kwh"],
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "ownership": { "type": ["string", "null"] },
+                "residential_usd_per_kwh": {
+                  "type": ["number", "null"],
+                  "exclusiveMinimum": 0,
+                  "description": "EIA-861 bundled residential sales average in the provider's state."
+                }
+              }
+            }
+          },
+          "note": { "type": "string" }
+        },
+        "required": ["status", "county_fips", "state_code", "year", "source", "state_commission_url",
+                     "state_average_usd_per_kwh", "state_average_source", "providers", "note"]
       },
       "ListingInput": {
         "type": "object",

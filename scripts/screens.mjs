@@ -6,7 +6,7 @@ import { launch } from "./cdp.mjs";
 
 const base = (process.argv[2] || "http://127.0.0.1:4651").replace(/\/$/, "");
 const out = path.resolve(process.argv[3] || "docs/screens");
-const defaults = ["/", "/deals/", "/tax-sales/", "/land-atlas/", "/services/", "/xray/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/land/ks-snco-0973604015014000/"];
+const defaults = ["/", "/deals/", "/tax-sales/", "/land-atlas/", "/services/", "/xray/", "/analyze/?utilityCounty=05045#tab-power", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/land/ks-snco-0973604015014000/"];
 const routes = process.argv.length > 4 ? process.argv.slice(4) : defaults;
 const ready = {
   "/": "/listings match/.test(document.querySelector('#map-count')?.textContent)",
@@ -24,6 +24,9 @@ try {
         await page.goto(base + route);
         const url = new URL(route, base);
         if (ready[url.pathname]) await page.waitFor(ready[url.pathname], 15000);
+        if (url.pathname === "/analyze/" && url.searchParams.has("utilityCounty")) {
+          await page.waitFor("!document.getElementById('pwr-utility-picker').hidden", 15000);
+        }
         if (url.pathname === "/services/" && url.searchParams.has("parcel") && url.searchParams.get("paid") !== "1") {
           await page.waitFor("document.querySelector('#selected-parcel-banner[aria-busy=false]:not([hidden])')", 15000);
         }

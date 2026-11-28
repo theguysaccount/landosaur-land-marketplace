@@ -1,6 +1,6 @@
 /* Landosaur Land Deal, Financing, Electricity & Valuation Workbench (/analyze/).
  * Deterministic planning calculations ported from original/src/lib/analysis.ts.
- * Runs 100% in the browser; never submits user inputs or invents estimates. */
+ * Calculations run in the browser. The utility lookup sends only a county FIPS code. */
 (function () {
   "use strict";
   var root = document.getElementById("analyzer-app");
@@ -358,14 +358,6 @@
     var rate = Number(params.get("kwhRate"));
     if (rate > 0 && rate < 5) {
       fPower.kwhRate.value = String(rate);
-      var utilityHint = document.getElementById("pwr-utility-hint");
-      if (utilityHint) {
-        var state = /^[A-Z]{2}$/.test(params.get("eiaState") || "") ? " for " + params.get("eiaState") : "";
-        var year = /^20\d{2}$/.test(params.get("eiaYear") || "") ? " (" + params.get("eiaYear") + ")" : "";
-        utilityHint.hidden = false;
-        utilityHint.textContent = "EIA state residential average" + state + year + ": $" + rate +
-          " per kWh. Enter your utility’s current tariff when you have a quote.";
-      }
       activateTab("tab-power");
     }
     if (params.get("sun")) {
@@ -377,6 +369,7 @@
     }
   }
   var hashMatch = location.hash.match(/a=([^&]+)/);
+  var savedRate = false;
   if (hashMatch && fCost) {
     decodeURIComponent(hashMatch[1]).split(",").forEach(function (kv) {
       var p = kv.split(":");
@@ -384,8 +377,82 @@
       if (!el) return;
       if (el.type === "checkbox") el.checked = p[1] === "1";
       else if (p[1] != null) el.value = p[1];
+      if (p[0] === "kwhRate") savedRate = true;
     });
   }
+
+  function loadUtilityRates(county, keepRate) {
+    var input = fPower.kwhRate;
+    var picker = document.getElementById("pwr-utility-picker");
+    var select = document.getElementById("pwr-utility-source");
+    var hint = document.getElementById("pwr-utility-hint");
+    function showHint(message, source) {
+      hint.replaceChildren();
+      hint.hidden = !message;
+      if (!message) return;
+      hint.append(message);
+      if (source) {
+        var link = document.createElement("a");
+        link.href = source;
+        link.textContent = "EIA source";
+        hint.append(" ", link);
+      }
+    }
+    if (keepRate) showHint("Rate saved in this analysis link. Confirm your current tariff with the utility.");
+    if (!/^\d{5}$/.test(county || "")) return;
+    activateTab("tab-power");
+    input.addEventListener("input", function () {
+      keepRate = true;
+      select.value = "";
+      showHint("");
+    });
+    var base = document.body.getAttribute("data-base") || "";
+    fetch(base + "/api/xray/?layer=utility&county_fips=" + county)
+      .then(function (response) {
+        if (!response.ok) throw new Error("Utility lookup failed");
+        return response.json();
+      })
+      .then(function (data) {
+        var utility = data.utility;
+        var rates = new Map();
+        function addRate(value, label, amount, source) {
+          if (!(amount > 0) || !source) return;
+          rates.set(value, { label: label, amount: amount, source: source });
+          select.add(new Option(label, value));
+        }
+        addRate("state", utility.state_code + " statewide", utility.state_average_usd_per_kwh, utility.state_average_source);
+        utility.providers.forEach(function (provider) {
+          addRate(String(provider.id), provider.name, provider.residential_usd_per_kwh, utility.source);
+        });
+        if (!rates.size) {
+          if (!keepRate) showHint("No residential average is available for this county. Enter a current rate from your utility.");
+          return;
+        }
+        function applyRate() {
+          var selected = rates.get(select.value);
+          if (!selected) {
+            input.value = "";
+            showHint("");
+          } else {
+            input.value = String(selected.amount);
+            showHint(selected.label + " · " + utility.year + " EIA " +
+              (select.value === "state" ? "residential average" : "bundled residential average") +
+              " · $" + selected.amount + "/kWh. Confirm service and current tariffs with the utility.", selected.source);
+          }
+          updatePower();
+        }
+        picker.hidden = false;
+        select.addEventListener("change", applyRate);
+        if (!keepRate && rates.has("state")) {
+          select.value = "state";
+          applyRate();
+        }
+      })
+      .catch(function () {
+        if (!keepRate) showHint("Utility averages are temporarily unavailable. Enter a current rate from your utility.");
+      });
+  }
+  if (fPower) loadUtilityRates(params.get("utilityCounty"), savedRate || fPower.kwhRate.value !== "");
 
   var copyBtn = document.getElementById("copy-analysis");
   if (copyBtn && fCost) {

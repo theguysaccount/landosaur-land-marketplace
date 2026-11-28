@@ -148,6 +148,8 @@
           if (d.climate && d.climate.winter_min_sun_hours != null) u.searchParams.set("sun", String(d.climate.winter_min_sun_hours));
           window.LandosaurXray.powerContext(u.searchParams, d);
           anaLink.href = u.pathname + u.search;
+          var utilityLink = xrayBox.querySelector("[data-xray-power-link]");
+          if (utilityLink) utilityLink.href = anaLink.href;
         }
       });
     }

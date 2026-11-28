@@ -212,11 +212,46 @@ try {
            "boundary or acreage missing from acquisition and share links");
     if (!isLocal) {
       await page.waitFor("document.querySelector('[data-utility-card] li')", 15000);
-      const power = await page.eval(`document.querySelector('#xray-actions a[href*="/analyze/"]').href`);
+      const power = await page.eval(`document.querySelector('[data-xray-power-link]').href`);
+      const query = new URL(power).searchParams;
+      assert(query.get("utilityCounty") && Number(query.get("acres")) > 0, "utility link lost the drawn tract context");
       await page.goto(power);
+      await page.waitFor("document.getElementById('pwr-utility-source').value === 'state'");
       assert(await page.eval("!document.getElementById('tab-power').hidden && document.getElementById('form-power').kwhRate.value > 0"),
              "EIA rate did not open and prefill the power comparison");
     }
+  });
+  await step("power comparison verifies EIA sources and preserves manually shared rates", async () => {
+    await page.goto(base + "/analyze/?utilityCounty=05045");
+    const rates = await page.eval(`fetch("/api/xray/?layer=utility&county_fips=05045")
+      .then(response => response.json())
+      .then(({ utility }) => [utility.state_average_usd_per_kwh,
+        utility.providers.find(provider => provider.id === 4280).residential_usd_per_kwh])`);
+    await page.waitFor("document.getElementById('pwr-utility-source').value === 'state'");
+    assert(await page.eval(`Number(document.getElementById('form-power').kwhRate.value) === ${rates[0]} &&
+      document.querySelector('#pwr-utility-hint a').href.includes('epa_02_10.html')`), "published Arkansas statewide rate missing");
+    await page.eval(`(() => {
+      const source = document.getElementById('pwr-utility-source');
+      source.value = '4280';
+      source.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    assert(await page.eval(`Number(document.getElementById('form-power').kwhRate.value) === ${rates[1]} &&
+      document.querySelector('#pwr-utility-hint a').href.includes('/electricity/data/eia861/')`), "reported Conway Corporation rate missing");
+    await page.eval(`(() => {
+      const rate = document.getElementById('form-power').kwhRate;
+      rate.value = '0.31';
+      rate.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    assert(await page.eval(`document.getElementById('pwr-utility-hint').hidden &&
+      document.getElementById('pwr-utility-source').value === ''`), "edited rate kept EIA attribution");
+    await page.goto(base + "/analyze/?utilityCounty=05045&kwhRate=0.99&eiaState=CA&eiaYear=2025");
+    await page.waitFor("!document.getElementById('pwr-utility-picker').hidden");
+    assert(await page.eval(`document.getElementById('form-power').kwhRate.value === '0.99' &&
+      !document.querySelector('#pwr-utility-hint a')`), "shared rate incorrectly changed or attributed to EIA");
+    await page.goto(base + "/analyze/?utilityCounty=05045#a=kwhRate%3A0.25");
+    await page.waitFor("!document.getElementById('pwr-utility-picker').hidden");
+    assert(await page.eval(`document.getElementById('form-power').kwhRate.value === '0.25' &&
+      !document.querySelector('#pwr-utility-hint a')`), "saved rate incorrectly changed or attributed to EIA");
   });
   await step("Atlas momentum, regions, inflation adjustment and embeds use the published series", async () => {
     await page.goto(base + "/land-atlas/");
@@ -441,9 +476,10 @@ try {
     await page.viewport(375, 812, true);
     const bad = [];
     const listingRel = new URL(listing, base).pathname.replace(new URL(base + "/").pathname, "/");
-    for (const p of ["/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/research/buying-land-in-texas/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
+    for (const p of ["/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/research/buying-land-in-texas/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/?utilityCounty=05045", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
       if (p === "/") await page.waitFor("/listings match/.test(document.getElementById('map-count').textContent)");
+      if (p.startsWith("/analyze/")) await page.waitFor("!document.getElementById('pwr-utility-picker').hidden");
       if (p === "/land-atlas/") {
         await page.waitFor("document.querySelector('#county-explorer-body tr')");
         const tableOverflow = await page.eval(`(() => {

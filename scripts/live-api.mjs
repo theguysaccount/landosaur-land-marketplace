@@ -13,6 +13,10 @@ const checks = [
   ["/api/xray/?lat=35.42&lon=-92.45", 200, (body) => body.usgs?.elevation_ft > 0 &&
     body.county?.fips === "05141" && body.utility?.providers.some((provider) =>
       provider.ownership === "Cooperative" && provider.residential_usd_per_kwh > 0)],
+  ["/api/xray/?layer=utility&county_fips=05045", 200, ({ utility }) => utility?.county_fips === "05045" &&
+    utility.state_average_usd_per_kwh > 0 && utility.state_average_source?.includes("epa_02_10.html") &&
+    utility.state_commission_url?.includes("viewCommissionRoster") &&
+    utility.providers.some((provider) => provider.id === 4280 && provider.residential_usd_per_kwh > 0)],
   ["/openapi.json", 200, (body) => /^3\.1\./.test(body.openapi) && Object.keys(body.paths).filter((key) => key.startsWith("/api/")).length === 6],
   ["/data/atlas.json", 200, (body) => body.states.length === 50 && body.counties.length > 3000],
   ["/.well-known/landosaur-agent.json", 200, (body) => Array.isArray(body.endpoints) || typeof body.endpoints === "object"],

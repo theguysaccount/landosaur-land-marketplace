@@ -354,8 +354,13 @@
       });
       utilities.appendChild(list);
     }
+    if (utility.state_average_usd_per_kwh > 0 || providers.some(function (p) { return p.residential_usd_per_kwh > 0; })) {
+      var compare = el("a", "xray-src", "Compare utility rates and off-grid costs →");
+      compare.setAttribute("data-xray-power-link", "");
+      utilities.appendChild(compare);
+    }
     if (utility.state_commission_url) {
-      var stateDirectory = el("a", "xray-src", "Find your state utility commission ↗");
+      var stateDirectory = el("a", "xray-src", (co.state_name ? co.state_name : "State") + " utility commission ↗");
       stateDirectory.href = utility.state_commission_url;
       stateDirectory.rel = "noopener noreferrer";
       stateDirectory.target = "_blank";
@@ -396,11 +401,7 @@
 
   function powerContext(params, data) {
     var utility = data?.utility || {};
-    if (utility.state_average_usd_per_kwh > 0) {
-      params.set("kwhRate", String(utility.state_average_usd_per_kwh));
-      params.set("eiaYear", String(utility.year));
-      if (data.county?.state_code) params.set("eiaState", data.county.state_code);
-    }
+    if (utility.county_fips) params.set("utilityCounty", utility.county_fips);
     return params;
   }
 
@@ -505,6 +506,8 @@
     if (drawn) anaParams.set("acres", drawn.shape.acres.toFixed(4));
     var ana = el("a", "button", "Open Deal & Power Analyzer →");
     ana.href = base + "/analyze/?" + anaParams;
+    var utilityLink = outEl.querySelector("[data-xray-power-link]");
+    if (utilityLink && d) utilityLink.href = ana.href;
     actionBar.replaceChildren(ana);
 
     var fields = new URLSearchParams({ service: "unlisted_outreach", lat: lat.toFixed(6), lon: lon.toFixed(6) });

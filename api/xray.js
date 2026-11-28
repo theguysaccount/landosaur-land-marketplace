@@ -96,13 +96,16 @@ export function utilityForCounty(county) {
   }
   const data = utilityData;
   const matches = data?.counties[county?.fips];
-  const stateRate = data?.state_residential_usd_per_kwh[county?.state_code] ?? null;
+  const stateRateSource = data?.state_residential_source ?? null;
+  const stateRate = stateRateSource ? (data.state_residential_usd_per_kwh[county?.state_code] ?? null) : null;
   return {
-    status: matches?.length ? "ok" : "unavailable",
+    status: matches?.length || stateRate ? "ok" : "unavailable",
     year: data?.year ?? null,
     source: EIA_SOURCE,
-    state_commission_url: data?.state_commission_directory ?? null,
+    state_commission_url: data?.state_commission_urls?.[county?.state_code] ?? data?.state_commission_directory ?? null,
     state_average_usd_per_kwh: stateRate,
+    state_average_source: stateRateSource,
+    state_code: county?.state_code ?? null,
     county_fips: county?.fips ?? null,
     providers: matches?.map((key) => data.utilities[key]) ?? [],
     note: "EIA reports distribution equipment by county. Confirm address-level service and current tariffs with a provider.",
@@ -924,6 +927,13 @@ function jsonResp(body, status = 200) {
 export async function GET(request) {
   try {
     const url = new URL(request.url);
+    if (url.searchParams.get("layer") === "utility") {
+      const fips = url.searchParams.get("county_fips") ?? "";
+      if (!/^\d{5}$/.test(fips)) return jsonResp({ error: "Provide a five-digit U.S. county FIPS code." }, 400);
+      const county = loadCountyMap().get(fips);
+      if (!county) return jsonResp({ error: "County FIPS code not found." }, 404);
+      return jsonResp({ utility: utilityForCounty({ fips, state_code: county.state }) }, 200);
+    }
     const q = url.searchParams.get("q");
     let lat = url.searchParams.get("lat") != null ? Number(url.searchParams.get("lat")) : NaN;
     let lon = url.searchParams.get("lon") != null ? Number(url.searchParams.get("lon")) : NaN;

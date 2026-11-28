@@ -25,7 +25,7 @@ function endpointInput(path, method) {
 
 const definitions = [
   ["search_land", "/api/search/", "get", "Search active public-agency and direct parcels by price, acreage, state, keyword, or drawn polygon."],
-  ["parcel_xray", "/api/xray/", "get", "Check federal parcel data by coordinates or U.S. place, including electric utility and county benchmarks."],
+  ["parcel_xray", "/api/xray/", "get", "Check federal parcel data by coordinates or U.S. place. For electric utility rates alone, set layer to utility and supply the five-digit county_fips."],
   ["get_land_atlas", "/data/atlas.json", "get", "Get Landosaur's national and state benchmarks and inventory counts, optionally filtered by two-letter state."],
   ["create_land_alert", "/api/alerts/", "post", "Save an approved search and get live JSON and Atom feed URLs."],
   ["publish_land_listing", "/api/listings/", "post", "Publish a real seller-authorized direct listing. Save the returned private edit token."],

@@ -5,7 +5,7 @@
 #   ./scripts/publish.sh --refresh             # Refresh the official sale feeds and verify
 #   ./scripts/publish.sh --refresh-only a,b    # Refresh specific agency IDs and verify
 #   ./scripts/publish.sh --refresh-only a,b --crawl-only  # Refresh data for review
-#   ./scripts/publish.sh --refresh-intelligence --crawl-only  # Refresh EIA-861 and CPI-U
+#   ./scripts/publish.sh --refresh-intelligence --crawl-only  # Refresh electricity, commission and CPI-U data
 #   ./scripts/publish.sh --no-deploy           # Build and verify locally
 #   ./scripts/publish.sh --no-deploy --regen-og # Re-render the committed share cards
 #   ./scripts/publish.sh --verify-live changed-urls.txt  # Resume a deployed release after a live check fails

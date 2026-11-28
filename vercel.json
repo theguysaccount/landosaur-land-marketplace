@@ -36,7 +36,7 @@
     }
   },
   "rewrites": [
-    { "source": "/land/:parcel", "destination": "/api/parcel?parcel=:parcel" }
+    { "source": "/land/:parcel/", "destination": "/api/parcel/?parcel=:parcel" }
   ],
   "redirects": [
     { "source": "/buying-help", "destination": "/research/buying-land/", "permanent": true },

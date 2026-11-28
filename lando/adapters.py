@@ -448,7 +448,11 @@ def arkansas_listing(r, now):
         end.strftime("%Y-%m-%d %H:%M UTC") if end else "not set"), "=", "ar_window"))
     bids = r.get("NumberOfBids") or 0
     if bids:
-        facts.append(fact("bids", "%d bid%s, current bid $%s" % (bids, "" if bids == 1 else "s", "{:,.2f}".format(float(r.get("CurrentBid") or 0))), "="))
+        current_bid = number(r.get("CurrentBid"))
+        bid_summary = "%d bid%s" % (bids, "" if bids == 1 else "s")
+        if current_bid is not None:
+            bid_summary += ", current bid $%s" % "{:,.2f}".format(current_bid)
+        facts.append(fact("bids", bid_summary, "="))
     added = str(r.get("Added") or "")[:10]
     if re.match(r"^\d{4}-\d{2}-\d{2}$", added):
         facts.append(fact("added_to_auction_list", added, "="))
@@ -6721,6 +6725,168 @@ def skagit_wa_foreclosure(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(roster)}
 
 
+COLLETON_SC_SALE = "https://colletoncounty.org/delinquent-tax/tax-sale"
+COLLETON_SC_GIS = "https://services1.arcgis.com/m0cnLGKdhwao8WvM/arcgis/rest/services/WebDataLayers/FeatureServer/11/query"
+COLLETON_VACANT = {"VACANT RESIDENTIAL", "VACANT COMMERCIAL", "VACANT AGRICULTURAL", "VACANT INDUSTRIAL", "OTHER VACANT"}
+
+
+def colleton_sc_auction(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(COLLETON_SC_SALE)
+    link = next((href for href, label in re.findall(r'<a\b[^>]*href=["\']([^"\']+\.pdf)["\'][^>]*>(.*?)</a>',
+                                                    page, re.I | re.S)
+                 if re.search(r"\b\d{4}\s+Tax Sale Listing\b", clean(label), re.I)), None)
+    visible = clean(page)
+    date = re.search(r"Date:\s+\w+,\s+(\w+\s+\d{1,2})(?:st|nd|rd|th)?,\s+(\d{4})", visible, re.I)
+    time = re.search(r"Bidding Begins:\s+(\d{1,2}:\d{2})\s+([ap])\.m\.", visible, re.I)
+    if not (link and date and time):
+        raise StructureError("Colleton County's current tax-sale document or auction time changed")
+    starts = datetime.datetime.strptime("%s, %s %s %sM" % (date[1], date[2], time[1], time[2].upper()),
+                                        "%B %d, %Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+    if starts <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    url = urllib.parse.urljoin(COLLETON_SC_SALE, html.unescape(link))
+    report = pdf_text(fetch, url)
+    if "Map Number" not in report or "Total Tax Due" not in report:
+        raise StructureError("Colleton County's current sale roster headings changed")
+    parcels = {}
+    for pin, legal, acres in re.findall(r"^[^\n]*?[ \t]{2,}(\d{3}-\d{2}-\d{2}-\d{3}\.\d{3})[ \t]{2,}"
+                                        r"(.*?)[ \t]{2,}([\d.]+)[ \t]{2,}[\d,]+\.\d{2}[ \t]*$",
+                                        report, re.M):
+        if re.search(r"\b(?:VIN|MOBILE HOME|TIMESHARE|EASEMENT|RIGHT.OF.WAY|COMMON AREA)\b", legal, re.I):
+            continue
+        parcels[pin] = number(acres)
+    if not parcels:
+        raise StructureError("Colleton County's tax-sale parcel numbers were not found")
+    ids = sorted(parcels)
+    rows, seen = [], set()
+    for offset in range(0, len(ids), 220):
+        block = ids[offset:offset + 220]
+        features = _arcgis_query(fetch, COLLETON_SC_GIS, "PIN IN (%s)" % quote_list(block),
+                                 "PIN,PropertyClass,Acreage", count=1000, post=True)
+        for feature in features:
+            item = feature.get("attributes") or {}
+            pid = item.get("PIN")
+            kind = clean(item.get("PropertyClass") or "").upper()
+            if pid not in parcels or pid in seen or kind not in COLLETON_VACANT:
+                continue
+            seen.add(pid)
+            parcel_url = one_parcel_url(COLLETON_SC_GIS, "PIN='%s'" % pid)
+            row = {
+                "id": "sc-colleton-" + slug(pid), "source": "colleton-sc-auction",
+                "title": "Colleton County parcel %s (tax-sale land)" % pid,
+                "state": "SC", "county": "Colleton", "locality": "", "apn": pid,
+                "acres": parcels[pid] or number(item.get("Acreage")), "price": None, "price_kind": "none",
+                "offering": "auction", "status": "auction_terms",
+                "deadline": starts.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "url": COLLETON_SC_SALE, "address": "", "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("availability", "In the county's current tax-sale notice with a vacant land classification in the county parcel map", url),
+                          fact("auction_start", starts.strftime("%B %d, %Y at %I:%M %p ET"), COLLETON_SC_SALE),
+                          fact("redemption", "The county's tax-sale terms give eligible parties 12 months to redeem.", COLLETON_SC_SALE)],
+                "tags": ["tax sale auction", "redemption applies"],
+            }
+            if rings := (feature.get("geometry") or {}).get("rings"):
+                apply_geometry(row, rings, parcel_url, "Colleton County GIS")
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(parcels)}
+
+
+LUZERNE_PA_REPO = "https://luzernecountytaxclaim.com/repository/"
+LUZERNE_PA_PARCELS = "https://gis.luzernecounty.org/server/rest/services/PublicMap/MapServer/1/query"
+LUZERNE_PIN = re.compile(r"\b(\d{2})-([A-Z0-9]{3,6})\s*-([A-Z0-9]{3})-([A-Z0-9]{3})-([A-Z0-9]{3})\b")
+
+
+def luzerne_repo_offers(report, policy, today):
+    from calendar import monthrange
+
+    amount = re.search(r"minimum amount that will be accepted for repository bids is \$([\d,.]+)\s+for unimproved parcels",
+                       clean(policy), re.I)
+    cutoff_policy = re.search(r"for a period of three \(3\) months after the sale", clean(policy), re.I)
+    if not amount or not cutoff_policy or not re.search(r"IDENTIFICATION\s+D VALUE\s+LOCATION", report):
+        raise StructureError("Luzerne County's repository price rules or roster layout changed")
+    floor = number(amount[1])
+    if floor is None:
+        raise StructureError("Luzerne County repository minimum was not found")
+    rows = {}
+    for line in report.splitlines():
+        match = LUZERNE_PIN.search(line)
+        if not match:
+            continue
+        remaining = line[match.end():]
+        if re.search(r"\b(?:driveway|common area|easement|roadway|right.of.way|mineral|leasehold|undivided|pending|withdrawn|removed|sold)\b", remaining, re.I):
+            continue
+        city, plate, section, lot, suffix = match.groups()
+        padded = "%s-%-6s-%s-%s-%s" % (city, plate, section, lot, suffix)
+        date = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", remaining)
+        price = None
+        if date:
+            sold = datetime.datetime.strptime(date[1], "%m/%d/%Y").date()
+            year, month = divmod(sold.year * 12 + sold.month - 1 + 3, 12)
+            after_three_months = datetime.date(year, month + 1, min(sold.day, monthrange(year, month + 1)[1]))
+            if today >= after_three_months:
+                price = floor
+        parts = re.split(r"[ \t]{2,}", remaining.strip())
+        address = next((clean(v) for v in parts[1:] if v.strip() and not re.match(r"\d{1,2}/\d{1,2}/\d{4}", v)), "")
+        rows[padded] = ("-".join(match.groups()), address, price)
+    if not rows:
+        raise StructureError("Luzerne County's current repository parcel IDs could not be read")
+    return rows
+
+
+def luzerne_pa_repository(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(LUZERNE_PA_REPO)
+    links = {clean(label): urllib.parse.urljoin(LUZERNE_PA_REPO, html.unescape(href))
+             for href, label in re.findall(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.{0,550}?)</a>',
+                                           page, re.I | re.S)}
+    policy = links.get("Repository Policy")
+    url = next((href for label, href in links.items() if label.startswith("Repository Listing as of")), None)
+    if not policy or not url:
+        raise StructureError("Luzerne County's current repository list or rules link changed")
+    roster = luzerne_repo_offers(pdf_text(fetch, url), pdf_text(fetch, policy),
+                                  now.astimezone(ZoneInfo("America/New_York")).date())
+    rows, seen, matched = [], set(), set()
+    ids = sorted(roster)
+    for offset in range(0, len(ids), 200):
+        chunk = ids[offset:offset + 200]
+        features = _arcgis_query(fetch, LUZERNE_PA_PARCELS, "LONG_PIN IN (%s)" % quote_list(chunk),
+                                 "LONG_PIN,Land_FAV,Building_FAV,TOTAL_FAV", count=1000, post=True)
+        for feature in features:
+            item = feature.get("attributes") or {}
+            raw_id = item.get("LONG_PIN")
+            if raw_id not in roster:
+                continue
+            matched.add(raw_id)
+            land = number(item.get("Land_FAV"))
+            if raw_id in seen or str(item.get("Building_FAV")).strip() != "0" or not land or number(item.get("TOTAL_FAV")) != land:
+                continue
+            pid, address, price = roster[raw_id]
+            seen.add(raw_id)
+            rings = (feature.get("geometry") or {}).get("rings") or []
+            acres = round(rings_acres(rings), 5) if rings else None
+            facts = [fact("availability", "Available in the county repository with no building value in county assessment records", url)]
+            if price is not None:
+                facts.append(fact("price", "Published minimum bid for unimproved repository land after the initial sale period. Fees and approvals apply.", policy))
+            if acres:
+                facts.append(fact("acreage", "%g acres calculated from the county parcel outline" % acres, LUZERNE_PA_REPO, "gis_area"))
+            row = {
+                "id": "pa-luzerne-" + slug(pid), "source": "luzerne-pa-repository",
+                "title": "%s, Luzerne County (vacant repository land)" % (address or "Parcel " + pid),
+                "state": "PA", "county": "Luzerne", "locality": "", "apn": pid,
+                "address": address, "acres": acres or None, "price": price, "price_kind": "min_bid" if price is not None else "none",
+                "offering": "sale", "status": "listed", "deadline": None, "url": LUZERNE_PA_REPO,
+                "lat": None, "lon": None, "geometry": None, "facts": facts, "tags": ["tax repository"],
+            }
+            if rings:
+                apply_geometry(row, rings, one_parcel_url(LUZERNE_PA_PARCELS, "LONG_PIN='%s'" % raw_id), "Luzerne County GIS")
+            rows.append(row)
+    if len(matched) < 0.65 * len(roster):
+        raise StructureError("too few Luzerne County repository parcels match the county assessment map")
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -7063,8 +7229,20 @@ SOURCES = [
      "agency": "Skagit County Treasurer, Washington", "url": SKAGIT_WA_SALE, "state": "WA",
      "run": skagit_wa_foreclosure, "requires_sale_match": True, "timezone": "America/Los_Angeles",
      "about": "Current foreclosure accounts with no assessed buildings and an unimproved or tree-land classification. Bid estimates appear in the parcel facts."},
+    {"id": "colleton-sc-auction", "name": "Colleton County vacant tax-sale parcels",
+     "agency": "Colleton County Delinquent Tax Office", "url": COLLETON_SC_SALE, "state": "SC",
+     "run": colleton_sc_auction, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Current tax-sale roster matched by ID to vacant land classifications in county GIS. Confirm opening bids with the county."},
+    {"id": "luzerne-pa-repository", "name": "Luzerne County vacant tax repository land",
+     "agency": "Luzerne County Tax Claim Bureau", "url": LUZERNE_PA_REPO, "state": "PA",
+     "run": luzerne_pa_repository, "requires_sale_match": True,
+     "about": "Vacant parcels from the county's current repository and public assessment GIS. The customary minimum applies after the initial period."},
 ]
 NOT_CARRIED = [
+    ("Cambria County, Pennsylvania tax claim sales", "https://www.cambriacountypa.gov/tax-claim/",
+     "The county website returned HTTP 403 for robots.txt."),
+    ("Stevens County, Washington foreclosure sales", "https://www.stevenscountywa.gov/21023",
+     "The county returned HTTP 403 for its current sale page."),
     ("Ingham County Land Bank property search", "https://inghamlandbank.org/properties",
      "The official catalog's linked host did not serve robots.txt over verified TLS."),
     ("Michigan State Land Bank Authority property search", "https://www.michigan.gov/leo/bureaus-agencies/landbank",

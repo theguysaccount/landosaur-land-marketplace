@@ -5,23 +5,35 @@
 
 let cache = { at: 0, map: new Map() };
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const USER_AGENT = "landosaur-land-marketplace/1.0 (+https://github.com/theguysaccount/landosaur-land-marketplace)";
+
+async function catalogHasNoRestrictions() {
+  const reply = await fetch("https://auction.cosl.org/robots.txt", {
+    headers: { "User-Agent": USER_AGENT }, redirect: "error", signal: AbortSignal.timeout(3000),
+  });
+  if ([404, 410].includes(reply.status)) return true;
+  // The live resolver handles a missing or empty policy. Use the official portal if rules appear.
+  return reply.ok && (await reply.text()).split("\n").every((line) => !line.split("#", 1)[0].trim());
+}
 
 async function resolveCoslUrl(propId) {
   const idStr = String(propId || "").replace(/[^0-9]/g, "");
   if (!idStr) return null;
   const now = Date.now();
   if (!cache.map.size || now - cache.at > CACHE_TTL_MS) {
+    if (!(await catalogHasNoRestrictions())) return null;
     const fresh = new Map();
     for (let page = 1; page <= 10; page++) {
+      if (page > 1) await new Promise((resolve) => setTimeout(resolve, 1000));
       const resp = await fetch(
         `https://auction.cosl.org/auctions/grid_read?page=${page}&pageSize=500`,
         {
           headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "User-Agent": USER_AGENT,
             Accept: "application/json, text/plain, */*",
           },
-          signal: AbortSignal.timeout(9000),
+          redirect: "error",
+          signal: AbortSignal.timeout(3500),
         }
       );
       if (!resp.ok) break;

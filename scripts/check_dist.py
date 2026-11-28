@@ -38,7 +38,7 @@ OFFICIAL = {
     "montgomeryal.gov", "cityofwaterlooiowa.com", "wycokck.org", "snco.gov",
     "wilmingtonde.gov", "hartfordct.gov", "cityofomaha.org", "bluefieldwv.gov",
     "memphistn.gov", "warwickri.gov", "boston.gov",
-    "albanycountywy.gov", "oklahoma.gov", "sos.ms.gov", "horrycountysc.gov",
+    "albanycountywy.gov", "oklahoma.gov", "sos.ms.gov", "horrycountysc.gov", "colletoncounty.org",
     "portland.gov", "mauicounty.gov", "lasvegasnevada.gov", "peterboroughnh.gov",
     "cityofyankton.org", "burleigh.gov", "vcgi.vermont.gov", "dnrc.mt.gov",
     "cityofboise.org", "auburnmaine.gov", "portlandmaine.gov",
@@ -49,6 +49,7 @@ OFFICIAL = {
     "venangocountypa.gov", "maricopa.gov", "sandiegocounty.gov", "rawlinswy.gov", "multco.us", "portal.ct.gov",
     "gorhammaine.org", "beltramicountymn.gov", "ralbaltoonapa.com", "cravencountync.gov", "mndot.net", "yorkdevco.com",
     "cityofschenectady.gov", "co.muskegon.mi.us", "cuyahogalandbank.org", "noraworks.org", "oaklandcountymi.gov", "skagitcountywa.gov",
+    "luzernecountytaxclaim.com",
     "city.milwaukee.gov", "detroitmi.gov", "co.lucas.oh.us", "co.sauk.wi.us", "hokecounty.net", "wsdot.wa.gov", "itascacountymn.gov", "valencia.nm.us", "tax.newmexico.gov", "stlouiscountymn.gov", "fnsb.gov",
 }
 
@@ -249,14 +250,17 @@ def main(dist, data_dir=None):
 
     cat = Catalog(data_dir)
     for r in cat.listings:
-        if os.path.join("land", r["slug"], "index.html") not in files:
+        rel = os.path.join("land", r["slug"], "index.html")
+        if rel not in files:
             problems.append("listing %s has no page" % r["id"])
         elif config.INDEXABLE and listing_is_indexable(r) and cat.listing_path(r) not in indexable:
             problems.append("priced/deadline listing %s should be indexable" % r["id"])
+        elif r["available"] and (r.get("acres") or 0) >= 1 and rel in archive_paths:
+            problems.append("current rural listing %s should have a static page" % r["id"])
     csv_text = open(os.path.join(dist, "data", "listings.csv"), encoding="utf-8").read()
     if "Owner" in csv_text.splitlines()[0]:
         problems.append("listings.csv has an owner column")
-    print("checked %d static HTML files and %d archived dossiers, %d listings, %d indexable pages: %d problems" % (
+    print("checked %d static HTML files and %d on-demand dossiers, %d listings, %d indexable pages: %d problems" % (
         len(pages), len(archive_paths), len(cat.listings), len(indexable), len(problems)))
     for p in problems[:200]:
         print("  " + p)

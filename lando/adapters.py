@@ -10294,7 +10294,228 @@ def albany_ga_vacant_sales(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": source_total}
 
 
+BEATRICE_NE_SALES = "https://www.beatrice.ne.gov/business-development/available-real-estate/"
+NEBRASKA_PUBLIC_PARCELS = ("https://giscat.ne.gov/enterprise/rest/services/"
+                           "StatewideParcelsExternal/FeatureServer/0/query")
+BEATRICE_GAGE_SALES = ("https://services1.arcgis.com/32wfTde6zPzZl2pZ/arcgis/rest/services/"
+                       "Gage_Sales_040726_View/FeatureServer/3/query")
+BEATRICE_ADDITIONS = (
+    ("Corral Crossing", "corral-crossing"),
+    ("Heritage Heights", "heritage-heights"),
+)
+
+
+def parse_beatrice_ne_schedule(page):
+    tables = re.findall(r"<table\b.*?</table>", page, re.I | re.S)
+    if len(tables) != 1:
+        raise StructureError("Beatrice’s lot pricing table changed")
+    rows = {}
+    for tr in re.findall(r"<tr\b[^>]*>(.*?)</tr>", tables[0], re.I | re.S):
+        cells = [clean(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", tr, re.I | re.S)]
+        if len(cells) < 5:
+            continue
+        lot, block, address, size, price, *notes = cells
+        if (not lot.isdigit() or not block.isdigit() or not address or not number(size)
+                or not re.fullmatch(r"\$[\d,]+(?:\.\d{2})?", price)
+                or re.search(r"\b(?:pending|reserved|under contract|sold|withdrawn)\b|<(?:del|s|strike)\b",
+                             tr, re.I)):
+            continue
+        key = (block, lot)
+        if key in rows:
+            raise StructureError("Beatrice’s pricing table repeats a legal lot")
+        rows[key] = (address, round(number(size) / 43560, 4), number(price))
+    addresses = Counter(address.casefold() for address, _, _ in rows.values())
+    return {key: row for key, row in rows.items() if addresses[row[0].casefold()] == 1}
+
+
+def beatrice_ne_city_lots(fetch, now, warn):
+    primary = fetch.text(BEATRICE_NE_SALES)
+    rows, upstream_total = [], 0
+    fields = ("Parcel_ID,Legal_Description,Property_Parcel_Status,Improvements_Value,"
+              "Other_Impr_Value,BuildingYear,ImpSF")
+    for name, path in BEATRICE_ADDITIONS:
+        program = BEATRICE_NE_SALES + path + "-addition/"
+        schedule = program + path + "-lot-pricing/"
+        if name not in clean(primary):
+            continue
+        terms = fetch.text(program)
+        if "lot purchase application" not in clean(terms).casefold() or schedule not in terms and path + "-lot-pricing" not in terms:
+            continue
+        offers = parse_beatrice_ne_schedule(fetch.text(schedule))
+        upstream_total += len(offers)
+        where = f"County_ID='067' AND UPPER(Legal_Description) LIKE '%{name.upper()} ADD%'"
+        parcels = _arcgis_query(fetch, NEBRASKA_PUBLIC_PARCELS, where, fields, post=True)
+        numbers = [item["attributes"].get("Parcel_ID") for item in parcels]
+        numbers = [pin for pin in numbers if pin]
+        if not numbers:
+            continue
+        where = f"parcelid IN ({quote_list(numbers)})"
+        recent_sales = _arcgis_query(fetch, BEATRICE_GAGE_SALES, where, "parcelid", extra={"returnGeometry": "false"})
+        sold = {item["attributes"].get("parcelid") for item in recent_sales}
+        verified = defaultdict(list)
+        for item in parcels:
+            a = item["attributes"]
+            m = re.fullmatch(r"LOT (\d+) BLK (\d+) " + name.upper() + r" ADD", clean(a.get("Legal_Description")))
+            if m:
+                verified[(m[2], m[1])].append(item)
+        for (block, lot), (address, acres, price) in offers.items():
+            matches = verified[(block, lot)]
+            if len(matches) != 1:
+                continue
+            item, = matches
+            a = item["attributes"]
+            pin = a["Parcel_ID"]
+            if (not pin or pin in sold or a.get("Property_Parcel_Status") != "02" or number(a.get("BuildingYear"))
+                    or any(a.get(k) != 0 for k in ("Improvements_Value", "Other_Impr_Value", "ImpSF"))):
+                continue
+            row = {
+                "id": "ne-beatrice-city-" + slug(pin), "source": "beatrice-ne-city-lots",
+                "title": f"{address}, Beatrice ({name} vacant residential lot)", "state": "NE", "county": "Gage",
+                "locality": "Beatrice", "address": address, "apn": pin, "acres": acres, "price": price,
+                "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
+                "url": schedule, "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("lot", f"{name} Addition, Block {block}, Lot {lot}", schedule),
+                          fact("sale_terms", "Request a city purchase application. Residential construction deadlines and covenants apply.", program)],
+                "tags": ["vacant land", "residential lots", "city development"],
+            }
+            apply_geometry(row, (item.get("geometry") or {}).get("rings", []), NEBRASKA_PUBLIC_PARCELS, "Nebraska parcel")
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": upstream_total}
+
+
+GREGORY_SD_SALES = "https://cityofgregorysd.gov/economic_development"
+GREGORY_SD_GIS = "https://gis.districtiii.org/server/rest/services/GREGORY_COUNTY_WEB_LAYERS/MapServer/"
+GREGORY_SD_MAP_SHA = "0b009f5091626bdf1cd9bc149f2cc2bff058599a8e4890d3f60b076192c97570"
+# Block, lot and acreage as labeled on the city’s sale map. Its sold, future and drainage lots are excluded.
+GREGORY_SD_AVAILABLE = {
+    ("1", "1"): 0.49, ("2", "1"): 0.31, ("2", "2"): 0.46, ("2", "3"): 0.46, ("2", "4"): 0.33,
+    ("2", "5"): 0.26, ("2", "6"): 0.34, ("2", "7"): 0.34, ("2", "8"): 0.30, ("2", "9"): 0.29,
+    ("4", "1"): 0.36, ("4", "G"): 0.92, ("6", "F"): 0.92, ("8", "1"): 0.64,
+}
+
+
+def gregory_sd_grandview(fetch, now, warn):
+    page = fetch.text(GREGORY_SD_SALES)
+    link = next((html.unescape(href).strip() for href, label in re.findall(
+        r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S
+    ) if clean(label) == "Grandview Addition - Lots For Sale"), "")
+    url = urllib.parse.urljoin(GREGORY_SD_SALES, link)
+    parts = urllib.parse.urlsplit(url)
+    if not link or parts.hostname != "cityofgregorysd.gov" or not parts.path.lower().endswith(".pdf"):
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(url)).hexdigest() != GREGORY_SD_MAP_SHA:
+        warn("The city changed the Grandview map. Its current sale markings need review.")
+        return [], {"complete": True, "upstream_total": 0}
+    where = ("UPPER(CAMA_LEGAL1) LIKE '%GRANDVIEW ADD%' AND "
+             "UPPER(CAMA_OWNERNAME) IN ('GREGORY BUSINESS & INDUSTRIAL DEV','CITY OF GREGORY')")
+    fields = "PID,CAMA_LEGAL1,CAMA_YEAR_BUILT,VAL_YEAR_1,VAL_TOTAL_BLDG_VALUE_1,VAL_TOTAL_MH_VAL_1"
+    assessments = _arcgis_query(fetch, GREGORY_SD_GIS + "5/query", where, fields,
+                                extra={"returnGeometry": "false"}, post=True)
+    cadastral = _arcgis_query(fetch, GREGORY_SD_GIS + "21/query", "ADDITION='GRANDVIEW'", "BLOCK,LOT")
+    plots = defaultdict(list)
+    for item in cadastral:
+        a = item["attributes"]
+        plots[(a.get("BLOCK"), a.get("LOT"))].append((item.get("geometry") or {}).get("rings", []))
+    rows = []
+    seen = Counter(a["attributes"].get("PID") for a in assessments)
+    for item in assessments:
+        a = item["attributes"]
+        match = re.fullmatch(r"LOT\s*([A-Z0-9]+)\s+BLK\s*(\d+) GRANDVIEW ADDN", clean(a.get("CAMA_LEGAL1")))
+        pin = a.get("PID")
+        if (not match or not pin or seen[pin] != 1 or number(a.get("VAL_YEAR_1")) != now.year
+                or a.get("CAMA_YEAR_BUILT") != 0
+                or any(not re.fullmatch(r"\$?0(?:\.0{2})?", clean(a.get(field)))
+                       for field in ("VAL_TOTAL_BLDG_VALUE_1", "VAL_TOTAL_MH_VAL_1"))):
+            continue
+        key = (match[2], match[1])
+        if key not in GREGORY_SD_AVAILABLE or len(plots[key]) != 1:
+            continue
+        block, lot = key
+        row = {
+            "id": "sd-gregory-grandview-" + slug(pin), "source": "gregory-sd-grandview", "county": "Gregory",
+            "title": f"Grandview Addition, Block {block}, Lot {lot}, Gregory", "state": "SD", "locality": "Gregory",
+            "address": "", "apn": pin, "acres": GREGORY_SD_AVAILABLE[key], "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": url, "lat": None, "lon": None,
+            "geometry": None,
+            "facts": [fact("availability", "The city’s Grandview map designates this vacant lot for sale.", url),
+                      fact("sale_terms", "Contact the City of Gregory for current terms and to submit a purchase inquiry.",
+                           GREGORY_SD_SALES)],
+            "tags": ["vacant land", "city development"],
+        }
+        apply_geometry(row, plots[key][0], GREGORY_SD_GIS + "21", "Gregory County cadastral")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(GREGORY_SD_AVAILABLE)}
+
+
+MINDEN_NE_SALES = "https://www.mindennebraska.org/213/Housing-Developments"
+MINDEN_NE_MAP = "https://docs.google.com/presentation/d/1LRDxbl8chNqXcxrXpNDQq2tdrvcP4xZK0iFMDdyxuc4"
+MINDEN_NE_MAP_SHA = "e427d444e1cede58590b9dd079652c9b111abcd980e91455a4c2d8a11b5d9bcf"
+# Available single-family lots only, as labeled on the city’s priced sale map.
+MINDEN_NE_AVAILABLE = {
+    2: (0.371, 35000, ""), 4: (0.430, 35000, ""), 12: (0.388, 35000, "1024 W Evergreen St"),
+    27: (0.465, 40000, "429 N Oak St"), 32: (0.391, 40000, "238 N Oak St"),
+    33: (0.391, 40000, "226 N Oak St"), 34: (0.407, 40000, "212 N Oak St"),
+    35: (0.473, 40000, "130 N Oak St"),
+}
+
+
+def minden_ne_west_estates(fetch, now, warn):
+    page = fetch.text(MINDEN_NE_SALES)
+    if MINDEN_NE_MAP + "/edit" not in page or "Map of Available Lots" not in clean(page):
+        return [], {"complete": True, "upstream_total": 0}
+    if hashlib.sha256(fetch.bytes(MINDEN_NE_MAP + "/export/pdf")).hexdigest() != MINDEN_NE_MAP_SHA:
+        warn("The city changed the West Estates II map. Its current sale markings need review.")
+        return [], {"complete": True, "upstream_total": 0}
+    where = "County_ID='099' AND UPPER(Legal_Description) LIKE '%MINDEN WEST ESTATES PHASE II%'"
+    fields = "Parcel_ID,Legal_Description,Property_Parcel_Status,Improvements_Value,Other_Impr_Value,BuildingYear,ImpSF"
+    cadastral = _arcgis_query(fetch, NEBRASKA_PUBLIC_PARCELS, where, fields, post=True)
+    if not cadastral:
+        raise StructureError("Minden West Estates II is absent from the cadastral layer")
+    exact = defaultdict(list)
+    for item in cadastral:
+        match = re.fullmatch(r"LOT (\d+) MINDEN WEST ESTATES PHASE II", clean(item["attributes"].get("Legal_Description")))
+        if match:
+            exact[int(match[1])].append(item)
+    rows = []
+    for lot, (acres, price, address) in MINDEN_NE_AVAILABLE.items():
+        matches = exact[lot]
+        if len(matches) > 1:
+            continue
+        item = matches[0] if matches else {}
+        a = item.get("attributes", {})
+        if a and (a.get("Property_Parcel_Status") != "02" or number(a.get("BuildingYear"))
+                  or any(a.get(k) != 0 for k in ("Improvements_Value", "Other_Impr_Value", "ImpSF"))):
+            continue
+        row = {
+            "id": f"ne-minden-west-estates-ii-{lot}", "source": "minden-ne-cra-homesites",
+            "title": f"Minden West Estates II, Lot {lot}, Minden", "state": "NE", "county": "Kearney",
+            "locality": "Minden", "address": address, "apn": a.get("Parcel_ID", ""), "acres": acres, "price": price,
+            "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
+            "url": MINDEN_NE_SALES, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city’s sales map identifies this lot as available and publishes its price.",
+                           MINDEN_NE_MAP + "/edit"),
+                      fact("sale_terms", "Contact the Minden Community Redevelopment Authority to purchase.",
+                           MINDEN_NE_SALES)],
+            "tags": ["vacant land", "residential lots", "city development"],
+        }
+        apply_geometry(row, (item.get("geometry") or {}).get("rings", []), NEBRASKA_PUBLIC_PARCELS, "Nebraska parcel")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(MINDEN_NE_AVAILABLE)}
+
+
 SOURCES = [
+    {"id": "minden-ne-cra-homesites", "name": "Minden West Estates II homesites",
+     "agency": "City of Minden Community Redevelopment Authority, Nebraska", "url": MINDEN_NE_SALES,
+     "state": "NE", "run": minden_ne_west_estates, "requires_sale_match": True,
+     "about": "Vacant single-family lots explicitly marked available and priced on the public redevelopment authority’s map."},
+    {"id": "beatrice-ne-city-lots", "name": "Beatrice vacant homesites",
+     "agency": "City of Beatrice, Nebraska", "url": BEATRICE_NE_SALES, "state": "NE",
+     "run": beatrice_ne_city_lots, "requires_sale_match": True,
+     "about": "Official residential lot prices paired with the corresponding legal lots in the public assessor records."},
+    {"id": "gregory-sd-grandview", "name": "Gregory Grandview vacant lots",
+     "agency": "City of Gregory and Gregory Business and Industrial Development Corporation, South Dakota",
+     "url": GREGORY_SD_SALES, "state": "SD", "run": gregory_sd_grandview, "requires_sale_match": True,
+     "about": "Available lots on the city’s sale map, checked against county assessor records and current plats."},
     {"id": "albany-ga-city-vacant", "name": "Albany vacant city land",
      "agency": "City of Albany Department of Community and Economic Development, Georgia",
      "url": ALBANY_GA_DISPOSITION, "state": "GA", "run": albany_ga_vacant_sales, "requires_sale_match": True,
@@ -10862,6 +11083,9 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Henderson Highland Addition sale map and city portal",
+     "https://www.cityofhenderson.org/",
+     "The host’s TLS certificate could not be validated for robots.txt, including with the system trust store."),
     ("Shasta County tax auction document page and PrimeGov attachment",
      "https://www.shastacounty.gov/tax-collector/page/tax-auction",
      "The county document page returned HTTP 403 and PrimeGov disallows the board attachment path. The independent county GIS and published board calendar are carried."),

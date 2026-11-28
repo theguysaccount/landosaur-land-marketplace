@@ -45,6 +45,69 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_beatrice_excludes_pending_bundles_improvements_and_recorded_sales(self):
+        fetch = unittest.mock.Mock()
+        program = "Corral Crossing lot purchase application corral-crossing-lot-pricing"
+        table = """<table>
+            <tr><td>1</td><td>2</td><td>1412 Wagon Circle</td><td>11,370</td><td>$36,000</td></tr>
+            <tr><td>2</td><td>2</td><td>1408 Wagon Circle</td><td>7,898</td><td>$31,000</td></tr>
+            <tr><td>3</td><td>2</td><td>1404 Wagon Circle</td><td>12,742</td><td>$41,000</td></tr>
+            <tr><td>4</td><td>2</td><td>1400 Wagon Circle</td><td>10,500</td><td>$36,000</td><td>Pending</td></tr>
+            <tr><td>1 &amp; 2</td><td>1</td><td>1424 &amp; 1422 N. 15th Street</td><td>15,717</td><td>$51,000</td></tr>
+        </table>"""
+        fetch.text.side_effect = ["Corral Crossing", program, table]
+        vacant = {"Parcel_ID": "123", "Legal_Description": "LOT 1 BLK 2 CORRAL CROSSING ADD",
+                  "Property_Parcel_Status": "02", "Improvements_Value": 0, "Other_Impr_Value": 0, "ImpSF": 0}
+        assessed = [
+            vacant, dict(vacant, Parcel_ID="124", Legal_Description="LOT 2 BLK 2 CORRAL CROSSING ADD"),
+            dict(vacant, Parcel_ID="125", Legal_Description="LOT 3 BLK 2 CORRAL CROSSING ADD", Improvements_Value=21000),
+        ]
+        features = [{"attributes": item} for item in assessed]
+        with patch.object(adapters, "_arcgis_query", side_effect=[features, [{"attributes": {"parcelid": "124"}}]]) as query:
+            rows, meta = adapters.beatrice_ne_city_lots(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["id"], row["price"], row["acres"]), ("ne-beatrice-city-123", 36000, 0.261))
+        self.assertEqual(meta["upstream_total"], 3)
+        self.assertEqual(query.call_args.args[3], "parcelid")
+
+    def test_gregory_matches_only_reviewed_vacant_individual_plat_lots(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = '<a href="/map.pdf">Grandview Addition - Lots For Sale</a>'
+        fetch.bytes.return_value = b"fixture sale map"
+        vacant = {"PID": "100", "CAMA_LEGAL1": "LOT1 BLK 2 GRANDVIEW ADDN", "CAMA_YEAR_BUILT": 0,
+                  "VAL_YEAR_1": NOW.year, "VAL_TOTAL_BLDG_VALUE_1": "$0", "VAL_TOTAL_MH_VAL_1": "$0"}
+        features = [
+            {"attributes": vacant},
+            {"attributes": dict(vacant, PID="200", CAMA_LEGAL1="LOT 2 BLK 2 GRANDVIEW ADDN", CAMA_YEAR_BUILT=2025)},
+            {"attributes": dict(vacant, PID="300", CAMA_LEGAL1="LOT 9 BLK 4 GRANDVIEW ADDN")},
+        ]
+        plots = [{"attributes": {"BLOCK": block, "LOT": lot}} for block, lot in (("2", "1"), ("2", "2"), ("4", "9"))]
+        with patch.object(adapters, "GREGORY_SD_MAP_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
+            adapters, "_arcgis_query", side_effect=[features, plots]
+        ):
+            rows, _ = adapters.gregory_sd_grandview(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["apn"], row["acres"], row["price"]), ("100", 0.31, None))
+        with patch.object(adapters, "_arcgis_query") as query:
+            self.assertEqual(adapters.gregory_sd_grandview(fetch, NOW, lambda warning: None)[0], [])
+            query.assert_not_called()
+
+    def test_minden_available_map_prices_and_excludes_conflicting_assessments(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = f'<a href="{adapters.MINDEN_NE_MAP}/edit">Map of Available Lots</a>'
+        fetch.bytes.return_value = b"fixture sale map"
+        improved = {"Parcel_ID": "432", "Legal_Description": "LOT 2 MINDEN WEST ESTATES PHASE II",
+                    "Property_Parcel_Status": "01", "Improvements_Value": 80000, "BuildingYear": 2026}
+        with patch.object(adapters, "MINDEN_NE_MAP_SHA", adapters.hashlib.sha256(fetch.bytes.return_value).hexdigest()), patch.object(
+            adapters, "_arcgis_query", return_value=[{"attributes": improved}]
+        ):
+            rows, _ = adapters.minden_ne_west_estates(fetch, NOW, self.fail)
+        offered = {r["id"]: r for r in rows}
+        self.assertNotIn("ne-minden-west-estates-ii-2", offered)
+        self.assertNotIn("ne-minden-west-estates-ii-3", offered)
+        self.assertEqual(offered["ne-minden-west-estates-ii-32"]["price"], 40000)
+        self.assertFalse(offered["ne-minden-west-estates-ii-32"]["apn"])
+
     def test_albany_requires_a_non_pending_sale_row_and_current_vacancy(self):
         fetch = unittest.mock.Mock()
         pdf_url = "https://www.albanyga.gov/files/dced-disposition-list-11-13-26-of-vacant-land.pdf"

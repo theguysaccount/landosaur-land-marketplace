@@ -230,6 +230,50 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertIn("City estimate $81,862.04", repr(rows[0]["facts"]))
         self.assertIn("contamination", repr(rows[0]["facts"]))
 
+    def test_venango_separates_price_tiers_and_excludes_withdrawals(self):
+        title = "PROPERTIES AVAILABLE FOR SALE BY THE TAX CLAIM\nBUREAU\n"
+        first = "The minimum bid is $1,000.00 for these properties and $500.00 for the mobile homes.\n"
+        second = "The minimum bid is $600.00 for these properties and $300.00 for the mobile homes.\n"
+        vacant = " " * 73 + "2.00 ACRES VACANT LAND\n"
+        report = (title + first + "Private Test Name       01,003.-005..-000      TEST ROAD\n" + vacant +
+                  "*Private Test Name      01,003.-006..-000      WITHDRAWN ROAD\n" + vacant + second +
+                  "Private Test Name       01,003.-007..-000      TEST STREET\n" + vacant +
+                  "Private Test Name       01,003.-008..-000      OLD RAILROAD R.O.W.\n" + vacant)
+        rows = adapters.parse_venango_repository(report, "https://www.venangocountypa.gov/list.pdf")
+        self.assertEqual([(r["apn"], r["price"], r["acres"]) for r in rows],
+                         [("01,003.-005..-000", 1000, 2.0), ("01,003.-007..-000", 600, 2.0)])
+        self.assertNotIn("Private Test Name", repr(rows))
+
+    def test_maricopa_offered_land_omits_ambiguous_duplicates_and_partial_apns(self):
+        def item(apn, number):
+            return (f"<tr><td>Assessor's Parcel Number: {apn} District Parcel Number: {number} "
+                    "Location: Test Place Size: 1.2 acres +/- Present Use: Vacant Land Shape of Property: "
+                    "Minimum Bid: To be determined Required Deposit: Listing Package</td></tr>")
+
+        page = ("Available for Sale" + item("Portion of 401-42-269B", "TEST-01") +
+                item("401-42-271", "TEST-02") + item("401-42-271", "TEST-03"))
+        rows = adapters.parse_maricopa_land(page)
+        self.assertEqual([(r["id"], r["price"], r["apn"]) for r in rows],
+                         [("az-maricopa-excess-test-01", None, "")])
+
+    def test_san_diego_prices_only_active_sealed_bid_lots(self):
+        page = ("Assessor’s Parcel Number: 381-051-17 Size: 11.71 acres Description: Subject site is currently vacant land. "
+                "The minimum bid for Property 1 is seven million dollars ($7,000,000). "
+                "Sealed bids will be accepted until 4:30PM on January 15, 2027.")
+        row = adapters.parse_san_diego_sale(page, "https://www.sandiegocounty.gov/test.html", NOW)
+        self.assertEqual((row["apn"], row["price"], row["deadline"]), ("381-051-17", 7000000, "2027-01-16T00:30:00Z"))
+        self.assertIsNone(adapters.parse_san_diego_sale(page, "https://www.sandiegocounty.gov/test.html",
+                                                       NOW + datetime.timedelta(days=120)))
+
+    def test_rawlins_reserve_is_the_offer_floor_and_not_the_lien(self):
+        report = ("SP-2026-001 Bid Submission Deadline Thursday, December 3, 2026 – 2:00PM MST "
+                  "Property Information Item Description Property ID 1 Legal Description Lot 1 (commonly known as "
+                  "619 W. Spruce Street) Zoning C2 Approximate Area 17,160 SF / 0.39 Acres Current title is held by "
+                  "the city Reserve Price $59,800.00 Abatement Lien Information $65,029.76")
+        row = adapters.parse_rawlins_spruce_sale(report, "https://www.rawlinswy.gov/packet", NOW)
+        self.assertEqual((row["price"], row["acres"], row["deadline"]), (59800, 0.39, "2026-12-03T21:00:00Z"))
+        self.assertNotIn("65,029.76", repr(row))
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,

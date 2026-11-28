@@ -15,6 +15,7 @@ import json
 import math
 import re
 import urllib.parse
+from collections import Counter
 
 from .net import FetchError
 
@@ -4662,10 +4663,13 @@ def wsdot_surplus(fetch, now, warn):
 ITASCA_URL = "https://www.itascacountymn.gov/304/Real-Estate"
 
 
-def pdf_text(fetch, url, *, extraction_mode="layout"):
+def pdf_text(fetch, url, *, extraction_mode="layout", checked_sha256=None):
     from pypdf import PdfReader
 
-    reader = PdfReader(io.BytesIO(fetch.bytes(url)))
+    body = fetch.bytes(url)
+    if checked_sha256 and hashlib.sha256(body).hexdigest() != checked_sha256:
+        raise StructureError("The PDF changed and its site photographs need renewed verification")
+    reader = PdfReader(io.BytesIO(body))
     if not 1 <= len(reader.pages) <= 60:
         raise StructureError("Unexpected page count for county sale PDF")
     return "\n".join(page.extract_text(extraction_mode=extraction_mode) for page in reader.pages)
@@ -5681,6 +5685,187 @@ def rochester_ny_environmental(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+VENANGO_PA_TAX = "https://www.venangocountypa.gov/departments/tax_claim_bureau.php"
+
+
+def parse_venango_repository(report, url):
+    if not re.search(r"PROPERTIES AVAILABLE FOR SALE BY THE TAX CLAIM\s+BUREAU", report):
+        raise StructureError("Venango County's repository offer list changed")
+    price = None
+    rows = []
+    lines = report.splitlines()
+    for line, following in zip(lines, lines[1:]):
+        heading = re.search(r"minimum bid is \$([\d,.]+) for these properties", line, re.I)
+        if heading:
+            price = number(heading[1])
+        pid = re.search(r"\b\d{2},[\dA-Z.]+-[\dA-Z.]+-\d{3}\b", line)
+        if not pid or not price or "*" in line[:pid.start()]:
+            continue
+        site = line[pid.end():].strip()
+        acres = re.fullmatch(r"\s{35,}([\d.]+) acres? vacant land\s*", following, re.I)
+        if not acres or re.search(r"\b(?:R\.O\.W|right of way|railroad|undivided|interest|strip)\b", site, re.I):
+            continue
+        rows.append({
+            "id": "pa-venango-" + slug(pid[0]), "source": "venango-pa-repository",
+            "title": "Venango County parcel %s (repository sale)" % pid[0],
+            "state": "PA", "county": "Venango", "locality": "", "apn": pid[0], "address": "",
+            "acres": number(acres[1]), "price": price, "price_kind": "min_bid", "offering": "sale",
+            "status": "listed", "deadline": None, "url": VENANGO_PA_TAX, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("parcel_number", pid[0], url),
+                      fact("minimum_bid", "$%s repository minimum" % "{:,.2f}".format(price), url),
+                      fact("availability", "Listed as vacant land available for repository bids", url)],
+            "tags": ["county tax repository", "vacant land"],
+        })
+    if price is None:
+        raise StructureError("Venango County repository minimum-bid schedule changed")
+    return rows
+
+
+def venango_pa_repository(fetch, now, warn):
+    page = fetch.text(VENANGO_PA_TAX)
+    link = re.search(r'\bhref="(/?Documents/Departments/Tax(?:%20| )Claim/Reposit[oa]ry[^"<]+\.pdf(?:\?[^"<]*)?)"', page, re.I)
+    if not link:
+        raise StructureError("Venango County's current repository list link changed")
+    path = "/" + html.unescape(link[1]).lstrip("/").replace(" ", "%20")
+    url = urllib.parse.urljoin(VENANGO_PA_TAX, path)
+    rows = parse_venango_repository(pdf_text(fetch, url, extraction_mode="layout"), url)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+MARICOPA_AZ_SALE = "https://www.maricopa.gov/5325/Available-for-Sale"
+
+
+def parse_maricopa_land(page):
+    if "Available for Sale" not in page:
+        raise StructureError("Maricopa County excess land catalog changed")
+    candidates = []
+    for raw in re.findall(r"<tr\b[^>]*>(.*?)</tr>", page, re.I | re.S):
+        text = clean(raw)
+        if "Present Use: Vacant Land" not in text or "Listing Package" not in text:
+            continue
+        item = re.search(r"Assessor.s Parcel Number:\s*(Portion of )?([\d]{3}-[\d]{2}-[\d]{3}[A-Z]?)\s+"
+                         r"District Parcel Number:\s*([A-Z0-9-]+)\s+Location:", text, re.I)
+        area = re.search(r"Size:\s*([\d.]+) acres?\b", text, re.I)
+        if not item or not area or re.search(r"\b(?:pending|withdrawn|sold|removed from sale)\b", text, re.I):
+            continue
+        price = re.search(r"Minimum Bid:\s*\$([\d,.]+)\s+Required Deposit", text, re.I)
+        got_price = number(price[1]) if price else None
+        flood = re.search(r"(?:in|within) (?:a )?Zone ([A-Z][A-Z0-9-]{0,12})", text, re.I)
+        facts = [fact("parcel_number", ("Portion of " if item[1] else "") + item[2], "="),
+                 fact("sale_program", "County excess land parcel " + item[3], "=")]
+        if flood:
+            facts.append(fact("fema_flood", "County identifies flood zone " + flood[1], "="))
+        if "will have a deed restriction" in text:
+            facts.append(fact("deed_restriction", "County reports a flood-control acquisition deed restriction", "="))
+        candidates.append((item[2], {
+            "id": "az-maricopa-excess-" + slug(item[3]), "source": "maricopa-az-excess",
+            "title": "Maricopa County excess land parcel " + item[3], "state": "AZ", "county": "Maricopa",
+            "locality": "", "apn": "" if item[1] else item[2], "address": "", "acres": number(area[1]),
+            "price": got_price, "price_kind": "min_bid" if got_price else "none", "offering": "sale", "status": "listed",
+            "deadline": None, "url": MARICOPA_AZ_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": facts, "tags": ["county excess land", "vacant land"],
+        }))
+    counts = Counter(pid for pid, _ in candidates)
+    return [row for pid, row in candidates if counts[pid] == 1]
+
+
+def maricopa_az_excess(fetch, now, warn):
+    rows = parse_maricopa_land(fetch.text(MARICOPA_AZ_SALE))
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+SAN_DIEGO_CA_SALE = "https://www.sandiegocounty.gov/content/sdc/general_services/Real_Estate/Prop_4_Sale/RES_P4S.html"
+
+
+def parse_san_diego_sale(page, url, now):
+    from zoneinfo import ZoneInfo
+
+    text = clean(page)
+    if "site is currently vacant land" not in text.lower():
+        return None
+    parcel = re.search(r"Assessor.s Parcel Number:\s*(\d{3}-\d{3}-\d{2})", text, re.I)
+    area = re.search(r"\bSize:\s*([\d.]+) acres\b", text, re.I)
+    bid = re.search(r"minimum bid for Property \d+ is [^$]{0,180}\(\$([\d,]+)\)", text, re.I)
+    deadline = re.search(r"Sealed bids will be accepted until (\d{1,2}:\d{2}\s*[AP]M) on ([A-Za-z]+ \d{1,2}, \d{4})", text, re.I)
+    if not (parcel and area and bid and deadline):
+        raise StructureError("San Diego County vacant parcel sale terms changed")
+    end = datetime.datetime.strptime(deadline[2] + " " + deadline[1].replace(" ", ""), "%B %d, %Y %I:%M%p")
+    end = end.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    if end <= now:
+        return None
+    city = re.search(r"in the City of ([A-Za-z ]{2,35}), California\b", text, re.I)
+    return {
+        "id": "ca-san-diego-surplus-" + parcel[1], "source": "san-diego-ca-surplus",
+        "title": "San Diego County surplus land parcel " + parcel[1], "state": "CA", "county": "San Diego",
+        "locality": city[1] if city else "", "apn": parcel[1], "address": "", "acres": number(area[1]),
+        "price": number(bid[1]), "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+        "deadline": end.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": url, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("parcel_number", parcel[1], "="), fact("availability", "County lists the site as vacant land", "="),
+                  fact("sale_program", "Sealed submissions are followed by a public auction", "=")],
+        "tags": ["county surplus land", "sealed bid"],
+    }
+
+
+def san_diego_ca_surplus(fetch, now, warn):
+    page = fetch.text(SAN_DIEGO_CA_SALE)
+    if "Properties for Sale" not in page:
+        raise StructureError("San Diego County sale page changed")
+    urls = set(re.findall(r'\bhref="(https://www\.sandiegocounty\.gov/[^"<>]+/vacantland_[a-z0-9]+\.html)"', page, re.I))
+    rows = []
+    for url in sorted(urls):
+        row = parse_san_diego_sale(fetch.text(url), url, now)
+        if row:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+RAWLINS_WY_SALE = "https://www.rawlinswy.gov/bids.aspx?bidID=347"
+# The city's bid package photographs show an unbuilt, paved redevelopment site.
+RAWLINS_WY_VERIFIED_PACKET = "b37587ec33f4b1c8ffb6ed1789dff73802e55649e8cd73ad37e881007369c20c"
+
+
+def parse_rawlins_spruce_sale(report, url, now):
+    from zoneinfo import ZoneInfo
+
+    text = " ".join(report.split())
+    end = re.search(r"Bid Submission Deadline \w+, ([A-Za-z]+ \d{1,2}, \d{4}) [–-] (\d{1,2}:\d{2}\s*[AP]M) MS?T", text, re.I)
+    details = re.search(r"Property Information Item Description Property ID 1 .{0,450}?commonly known as (619 W\. Spruce Street)"
+                        r".{0,260}?Approximate Area [\d,]+ SF / ([\d.]+) Acres .{0,180}?Reserve Price \$([\d,.]+)", text, re.I)
+    if "SP-2026-001" not in text or not end or not details:
+        raise StructureError("Rawlins Spruce Street bid package layout changed")
+    close = datetime.datetime.strptime(end[1] + " " + end[2].replace(" ", ""), "%B %d, %Y %I:%M%p")
+    close = close.replace(tzinfo=ZoneInfo("America/Denver"))
+    if close <= now:
+        return None
+    return {
+        "id": "wy-rawlins-spruce-619", "source": "rawlins-wy-surplus",
+        "title": "%s, Rawlins (city surplus land sale)" % details[1],
+        "state": "WY", "county": "Carbon", "locality": "Rawlins", "apn": "", "address": details[1],
+        "acres": number(details[2]), "price": number(details[3]), "price_kind": "min_bid",
+        "offering": "auction", "status": "auction_terms",
+        "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": RAWLINS_WY_SALE, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("sale_program", "City sealed bid SP-2026-001", url),
+                  fact("availability", "Paved redevelopment lot shown in the city's bid photographs", url),
+                  fact("title_terms", "The city says the abatement lien will be released when the quitclaim deed is recorded", url)],
+        "tags": ["city surplus land", "sealed bid"],
+    }
+
+
+def rawlins_wy_surplus(fetch, now, warn):
+    notice = fetch.text(RAWLINS_WY_SALE)
+    if not re.search(r"\bStatus:\s*Open\s+Description:", clean(notice), re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    link = re.search(r'\bhref=["\']?(/DocumentCenter/View/\d+)["\']?\s*>\s*2026 Invitation to Bid - Surplus Property', notice, re.I)
+    if not link:
+        raise StructureError("Rawlins' open surplus sale has no bid package")
+    url = urllib.parse.urljoin(RAWLINS_WY_SALE, link[1])
+    report = pdf_text(fetch, url, extraction_mode="plain", checked_sha256=RAWLINS_WY_VERIFIED_PACKET)
+    row = parse_rawlins_spruce_sale(report, url, now)
+    return ([row] if row else []), {"complete": True, "upstream_total": int(row is not None)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -5951,8 +6136,28 @@ SOURCES = [
      "agency": "City of Rochester Finance Department", "url": ROCHESTER_NY_SALE, "state": "NY",
      "run": rochester_ny_environmental, "requires_sale_match": True, "timezone": "America/New_York",
      "about": "Vacant land in the city's environmental auction with known or suspected contamination. The city's estimated minimum bids are shown in the parcel facts."},
+    {"id": "venango-pa-repository", "name": "Venango County, Pennsylvania vacant tax repository land",
+     "agency": "Venango County Tax Claim Bureau", "url": VENANGO_PA_TAX, "state": "PA",
+     "run": venango_pa_repository, "requires_sale_match": True,
+     "about": "Current vacant land in the tax repository, with the published minimum for each offer group."},
+    {"id": "maricopa-az-excess", "name": "Maricopa County, Arizona vacant excess land for sale",
+     "agency": "Maricopa County Real Estate Department", "url": MARICOPA_AZ_SALE, "state": "AZ",
+     "run": maricopa_az_excess, "requires_sale_match": True,
+     "about": "Explicitly vacant parcels on the county's excess land sale page. Review flood and deed restrictions with the county."},
+    {"id": "san-diego-ca-surplus", "name": "San Diego County, California vacant surplus land auctions",
+     "agency": "San Diego County Department of General Services", "url": SAN_DIEGO_CA_SALE, "state": "CA",
+     "run": san_diego_ca_surplus, "requires_sale_match": True,
+     "about": "Vacant county parcels with official bid packages, minimum bids and sealed-submission deadlines."},
+    {"id": "rawlins-wy-surplus", "name": "Rawlins, Wyoming Spruce Street surplus property sale",
+     "agency": "City of Rawlins, Wyoming", "url": RAWLINS_WY_SALE, "state": "WY",
+     "run": rawlins_wy_surplus, "requires_sale_match": True,
+     "about": "One vacant paved city parcel posted for sealed bids. The official package provides the reserve and deed terms."},
 ]
 NOT_CARRIED = [
+    ("West Des Moines sealed-bid real estate", "https://www.wdm.iowa.gov/home/showpublisheddocument/46357",
+     "The city's robots.txt endpoint returned HTTP 403 and its linked sourcing portal disallows the listing path."),
+    ("Delaware County, Pennsylvania tax repository", "https://delcopa.gov/treasurer/repositorysale",
+     "The county robots.txt endpoint could not be read over verified HTTPS."),
     ("City of Durham surplus property listings", "https://www.durhamnc.gov/810/Surplus-Properties",
      "The city robots.txt endpoint returned HTTP 403."),
     ("Florida RealTaxDeed auction catalogs", "https://volusia.realtaxdeed.com/",

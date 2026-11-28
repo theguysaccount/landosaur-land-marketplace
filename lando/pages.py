@@ -180,7 +180,7 @@ class Site(object):
             '<a href="%s">50-State Land Data Atlas &amp; Charts</a> · <a href="%s">Land Agent Services ($20)</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
             '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Deals Scanner</a> · <a href="%s">50-State Tax Sales</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
             '<a href="%s">Land under $5,000</a> · <a href="%s">Land under $10,000</a> · <a href="%s">Acreage for sale</a> · '
-            '<a href="%s">Research &amp; Guides</a> · <a href="%s">Closing Soon</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
+            '<a href="%s">Research &amp; Guides</a> · <a href="%s">LandWatch &amp; Land.com Alternatives</a> · <a href="%s">Closing Soon</a> · <a href="%s">Sources</a> · <a href="%s">New Listings</a> · <a href="%s">Data Downloads</a> · '
             '<a href="%s">About</a> · <a href="%s" rel="noopener">Source Code</a> · '
             '<a href="%s" rel="noopener">Report a Problem</a>%s</p></div></footer>'
         ) % (
@@ -188,7 +188,7 @@ class Site(object):
             esc(config.LAND_INDEX_URL), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/services/"), self.u("/xray/"),
             self.u("/services/"), self.u("/deals/"), self.u("/tax-sales/"), self.u("/land-atlas/"), self.u("/land-for-sale/"), self.u("/list/"), self.u("/direct/"), self.u("/xray/"), self.u("/land-prices/"), self.u("/analyze/"),
             self.u("/land-under-5000/"), self.u("/land-under-10000/"), self.u("/acreage-for-sale/"),
-            self.u("/research/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
+            self.u("/research/"), self.u("/landwatch-alternatives/"), self.u("/closing-soon/"), self.u("/sources/"), self.u("/new/"), self.u("/data/"),
             self.u("/about/"), esc(config.REPO_URL), esc(config.REPO_URL + "/issues"), extra,
         )
 
@@ -360,55 +360,56 @@ class Site(object):
             self.u("/list/"), opts, esc(scope),
         )
 
-    def platform_comparison_block(self, active_count, state_count, agency_count):
+    def platform_comparison_block(self, active_count, state_count, agency_count, show_alternatives_link=True):
+        alt_link = (
+            ' · <a href="%s">Full LandWatch, Land.com &amp; LandSearch alternatives guide →</a>' % self.u("/landwatch-alternatives/")
+            if show_alternatives_link else ""
+        )
         return (
             '<section id="land-platform-comparison">'
-            '<h2>How Landosaur compares to commercial land marketplaces</h2>'
-            '<p class="small">Side-by-side comparison of public-record transparency, rural parcel search, due-diligence screening, fees, and direct inquiry workflows across Landosaur, LandWatch, LandSearch, Land.com, and Zillow Land.</p>'
+            '<h2>Landosaur vs LandWatch vs Land.com vs LandSearch (2026)</h2>'
+            '<p class="small">Built for buyers who want a clean map interface, source-linked government/auction/public-record parcel data, and 3,115-county price-per-acre benchmarks—without duplicated broker lead-form spam. Compare side by side across Landosaur, LandWatch, Land.com, and LandSearch.</p>'
             '<div class="scroll"><table class="data compare-matrix"><thead><tr>'
             '<th scope="col">Comparison factor</th>'
             '<th scope="col" class="col-ours">Landosaur</th>'
             '<th scope="col">LandWatch</th>'
-            '<th scope="col">LandSearch</th>'
             '<th scope="col">Land.com</th>'
-            '<th scope="col">Zillow Land</th>'
+            '<th scope="col">LandSearch</th>'
             '</tr></thead><tbody>'
-            '<tr><th scope="row">County parcel &amp; deed source transparency</th>'
-            '<td class="col-ours">Maps %s official public-agency offerings (%d agencies across %d states) plus direct owner/agent listings; every public parcel links straight to its official agency portal with parcel APN and GIS boundary when published.</td>'
+            '<tr><th scope="row">Public-record &amp; county source transparency</th>'
+            '<td class="col-ours">Maps %s official public-agency offerings (%d agencies across %d states) plus direct owner/agent listings; every public parcel links straight to its official agency portal with APN and GIS outline when published, without duplicated broker spam.</td>'
             '<td>Paid broker, agent, and owner classified listings (CoStar / Land.com network); links route to brokers rather than county/state agency portals.</td>'
-            '<td>Aggregates broker/MLS, auction, and owner land listings; county assessor or public source links vary by feed.</td>'
             '<td>Paid broker, land-specialist, and auctioneer classifieds (CoStar network); primary contact is the listing brokerage.</td>'
-            '<td>MLS-syndicated and FSBO lots with basic county tax-assessment history; does not index municipal land banks or state trust auctions.</td></tr>'
-            '<tr><th scope="row">Rural acreage &amp; deal-mode filters</th>'
-            '<td class="col-ours">Splits Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings; filters by state, max price, min acreage, $/acre sort, viewport bounds, saved CSV shortlist, and 4-parcel side-by-side comparison.</td>'
-            '<td>Filters by state, county, price, acreage, and land category (hunting, farms, timber, residential, waterfront).</td>'
-            '<td>Interactive map with acreage, price, land-use, water, and mineral filters across rural and commercial land.</td>'
-            '<td>Acreage, price, and lifestyle/recreational category filters paired with a rural brokerage directory.</td>'
-            '<td>Lot-size and price filters inside a residential MLS search interface; no auction vs. land-bank deal-mode split.</td></tr>'
-            '<tr><th scope="row">Fee &amp; commission model</th>'
-            '<td class="col-ours">Free to search, map, X-Ray, analyze, list land, and download open CSV/JSON data; optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisition).</td>'
-            '<td>Free for buyers to browse; paid advertising and broker subscription packages fund listing placement.</td>'
-            '<td>Free for buyers to browse; paid seller, broker, and lead-generation plans.</td>'
-            '<td>Free for buyers to browse; paid brokerage marketing and featured-listing subscriptions.</td>'
-            '<td>Free for buyers to browse; funded by Premier Agent / broker advertising and lead referrals.</td></tr>'
-            '<tr><th scope="row">Public-record hazard, soil &amp; ownership visibility</th>'
-            '<td class="col-ours">Built-in free federal Parcel X-Ray (USGS LiDAR slope, FEMA flood &amp; hazard risk, USFWS wetlands, USDA soil/bedrock depth, Census roads, USGS public lands, NASA solar, 3,115-county USDA/FHFA benchmarks); excludes previous-owner PII for privacy.</td>'
+            '<td>Aggregates broker/MLS, auction, and owner land listings; county assessor or public source links vary by feed.</td></tr>'
+            '<tr><th scope="row">Raw land $/acre &amp; county benchmarks</th>'
+            '<td class="col-ours">Every priced parcel is compared against 3,115-county USDA/FHFA benchmarks (%s, <a href="%s">50-State Land Prices</a>, <a href="%s">By Acreage</a>, <a href="%s">Iowa</a>, <a href="%s">Texas</a>) and sortable by lowest $/acre or discount vs county avg.</td>'
+            '<td>Filters by state, county, price, acreage, and land category (hunting, farms, timber, waterfront); no 3,115-county USDA $/acre baseline per parcel.</td>'
+            '<td>Acreage, price, and lifestyle/recreational filters paired with a rural brokerage directory; no built-in USDA/FHFA county $/acre table.</td>'
+            '<td>Interactive map with acreage, price, land-use, water, and mineral filters across rural and commercial land.</td></tr>'
+            '<tr><th scope="row">Map interface &amp; deal-mode clarity</th>'
+            '<td class="col-ours">Clean split-screen Leaflet map separating Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings; viewport sync, saved CSV shortlist, and 4-parcel side-by-side compare.</td>'
+            '<td>Map + list search with sponsored/featured broker placements mixed into results.</td>'
+            '<td>Search map + featured brokerage cards; designed around broker lead routing.</td>'
+            '<td>Interactive parcel map across rural, residential, and commercial categories.</td></tr>'
+            '<tr><th scope="row">Federal GIS hazard, soil &amp; utility screening</th>'
+            '<td class="col-ours">Free built-in 10-layer Parcel X-Ray (USGS LiDAR slope, FEMA flood &amp; hazards, USFWS wetlands, USDA soil/bedrock depth, Census roads, USGS public lands, NASA solar, EIA electric utilities); excludes previous-owner PII.</td>'
             '<td>Relies on broker-entered descriptions and photos; buyers run FEMA flood, wetland, soil, and zoning checks externally.</td>'
-            '<td>Listing summaries with select map overlays; buyers verify soils, wetlands, and county zoning outside the listing.</td>'
             '<td>Broker descriptions and aerial maps; no built-in federal GIS and electric utility screening workbench.</td>'
-            '<td>Parcel outline and third-party flood/fire summary; limited rural soil/septic, wetland, and BLM/Forest adjacency data.</td></tr>'
-            '<tr><th scope="row">Direct buyer/seller inquiry &amp; open data flow</th>'
-            '<td class="col-ours">Direct link to official government bidding/application pages, on-site offers/bids for direct listings, turnkey Land Agent desk, plus open CSV/JSON downloads, Atom feeds, and <code>/api/search/</code>.</td>'
-            '<td>Lead-capture contact form routed to the listing broker or seller; no open bulk CSV/JSON feed.</td>'
-            '<td>Inquiry form routed to listing broker, auctioneer, or owner; no open public-agency dataset export.</td>'
-            '<td>Broker inquiry form and phone lead routing; no public bulk data downloads.</td>'
-            '<td>&ldquo;Contact agent&rdquo; form routed to buyer/Premier agents or listing brokers; closed MLS data terms.</td></tr>'
+            '<td>Listing summaries with select map overlays; buyers verify soils, wetlands, and county zoning outside the listing.</td></tr>'
+            '<tr><th scope="row">Fees, open data &amp; direct inquiry</th>'
+            '<td class="col-ours">Free to search, map, X-Ray, analyze, list land, and download open CSV/JSON/Atom feeds and <code>/api/search/</code>; optional turnkey Land Agent ($20 initiation + 10%% only on closed acquisition).</td>'
+            '<td>Free for buyers to browse; broker advertising subscriptions fund placement and route leads to agents.</td>'
+            '<td>Free for buyers to browse; paid brokerage marketing and featured-listing subscriptions.</td>'
+            '<td>Free for buyers to browse; paid seller, broker, and lead-generation plans.</td></tr>'
             '</tbody></table></div>'
+            '<p class="small">State &amp; acreage benchmarks: <a href="%s">50-State Land Prices</a> · <a href="%s">All 50 States Ranked $/Acre</a> · <a href="%s">Prices by Acreage Band</a> · <a href="%s">Iowa Farmland &amp; County Prices</a> · <a href="%s">Texas 20-Acre &amp; County Prices</a> · <a href="%s">Cheapest $/Acre</a>%s</p>'
             '<p class="small">Marketplace features reflect publicly documented product models as of November 2026; verify current terms directly with each platform. '
             '<a href="%s" data-vital-event="tool_used">Run a free Parcel X-Ray →</a> · <a href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20) →</a></p>'
             '</section>'
         ) % (
             "{:,}".format(active_count), agency_count, state_count,
+            "vs_bench_pct", self.u("/land-prices/"), self.u("/land-prices/by-acreage/"), self.u("/land-prices/iowa/"), self.u("/land-prices/texas/"),
+            self.u("/land-prices/"), self.u("/land-prices/states/"), self.u("/land-prices/by-acreage/"), self.u("/land-prices/iowa/"), self.u("/land-prices/texas/"), self.u("/land-prices/cheapest-land-per-acre/"), alt_link,
             self.u("/xray/"), self.u("/services/"),
         )
 
@@ -496,6 +497,7 @@ class Site(object):
                 state_tiles, self.u("/land-for-sale/"),
             ),
             pillars,
+            self.platform_comparison_block(len(cur), len(states), n_src),
         ]
         if closing:
             body.append('<section><h2>Auctions &amp; proposals closing in the next %d days</h2>%s<p><a href="%s">View all closing soon →</a></p></section>' % (
@@ -503,7 +505,6 @@ class Site(object):
         if new:
             body.append('<section><h2>New this fortnight</h2>%s<p><a href="%s">All new listings →</a> · <a href="%s">Atom feed</a></p></section>' % (
                 self.rows(new, True), self.u("/new/"), self.u("/feeds/new.xml")))
-        body.append(self.platform_comparison_block(len(cur), len(states), n_src))
         body.append(self.how_block())
         body.append(self.faq_block(
             b["home_faqs"],
@@ -1512,6 +1513,45 @@ class Site(object):
                 '%s<p><a href="%s">See the complete cheapest-per-acre ranking →</a></p></section>' % (
                     self.rows(cheapest, True, True), self.u("/land-prices/cheapest-land-per-acre/"))
             )
+        ia_st = next((s for s in self.all_states if s["code"] == "IA"), None)
+        tx_st = next((s for s in self.all_states if s["code"] == "TX"), None)
+        ia_fre = market_mod.usd(ia_st["values"].get("farm_real_estate")) if ia_st else "USDA series"
+        tx_fre = market_mod.usd(tx_st["values"].get("farm_real_estate")) if tx_st else "USDA series"
+        tx_20 = market_mod.usd(tx_st["values"]["farm_real_estate"] * 20) if (tx_st and tx_st["values"].get("farm_real_estate")) else "see Texas page"
+        prices_faqs = [
+            (
+                "How does Landosaur compare raw land price per acre across US counties?",
+                "Landosaur pairs 50-state USDA NASS agricultural land values (%d-%d) with 3,115 county-level USDA/FHFA benchmarks and live official public-agency offerings, showing exact $/acre and percentage vs county benchmark without broker spam." % (
+                    m.first_year, m.latest_year),
+            ),
+            (
+                "What are Iowa farmland prices per acre in %d?" % m.latest_year,
+                "In %d, USDA NASS reports an average Iowa farm real estate value of %s per acre; open Landosaur's Iowa Land Prices hub (/land-prices/iowa/) for cropland, pasture, 2010-%d trends, and all 99 county benchmarks." % (
+                    m.latest_year, ia_fre, m.latest_year),
+            ),
+            (
+                "How much does 20 acres of land cost in Texas?",
+                "At the %d USDA Texas farm real estate benchmark of %s per acre, 20 agricultural acres equate to %s as a statewide baseline, with all 254 Texas county benchmarks listed on /land-prices/texas/." % (
+                    m.latest_year, tx_fre, tx_20),
+            ),
+            (
+                "Why use Landosaur instead of LandWatch, Land.com, or LandSearch to check land prices?",
+                "Commercial portals display broker asking prices behind lead forms without a built-in county baseline. Landosaur combines official government/auction parcels, 3,115 county $/acre benchmarks, and a free 10-layer federal Parcel X-Ray on one clean map."
+            ),
+        ]
+        body.append(
+            '<section class="callout"><h2>Popular state &amp; acreage benchmarks</h2>'
+            '<p><a href="%s">Iowa farmland &amp; county prices (%s/ac avg)</a> · '
+            '<a href="%s">Texas land prices &amp; 20-acre benchmark (%s/ac avg)</a> · '
+            '<a href="%s">Prices by acreage band (lots vs 20+ acres)</a> · '
+            '<a href="%s">LandWatch, Land.com &amp; LandSearch alternatives</a></p></section>' % (
+                self.u("/land-prices/iowa/"), esc(ia_fre),
+                self.u("/land-prices/texas/"), esc(tx_fre),
+                self.u("/land-prices/by-acreage/"),
+                self.u("/landwatch-alternatives/"),
+            )
+        )
+        body.append(self.faq_block(prices_faqs, heading="Frequently asked questions about U.S. land prices", section_id="prices-faq"))
         desc = "Explore %d land prices per acre across all 50 U.S. states: USDA farm real estate (%s/acre U.S.), cropland, pasture, 2010-%d history charts, 3,115 county benchmarks, and cheapest official offerings." % (
             m.latest_year, market_mod.usd(us.get("farm_real_estate")), m.latest_year)
         ld = [{"@context": "https://schema.org", "@graph": [
@@ -1524,6 +1564,7 @@ class Site(object):
                 "creator": {"@id": self.absu("/#organization")},
                 "temporalCoverage": "%d/%d" % (m.first_year, m.latest_year), "spatialCoverage": "United States",
             },
+            self.faq_jsonld(prices_faqs, "/land-prices/#faq"),
         ]}]
         return self.layout(
             "Land Prices Per Acre by State (%d): Charts, County Values & Live Listings | Landosaur" % m.latest_year,
@@ -1672,13 +1713,33 @@ class Site(object):
             '<th scope="col" class="n">Median $/acre</th><th scope="col" class="n">Lowest $/acre</th>'
             '</tr></thead><tbody>%s</tbody></table></div>' % rows,
             '<section class="callout"><h2>Why price per acre drops with tract size</h2>'
-            '<p>Read our field guides on <a href="%s">how price per acre works</a> and <a href="%s">how big an acre really is</a>, or test parcel economics in the <a href="%s">Land Analyzer</a>.</p></section>' % (
-                self.u("/research/price-per-acre/"), self.u("/research/acre-size/"), self.u("/analyze/")),
+            '<p>Read our field guides on <a href="%s">how price per acre works</a> and <a href="%s">how big an acre really is</a>, compare state benchmarks (<a href="%s">Texas</a> · <a href="%s">Iowa</a> · <a href="%s">All 50 states</a>), or test parcel economics in the <a href="%s">Land Analyzer</a>.</p></section>' % (
+                self.u("/research/price-per-acre/"), self.u("/research/acre-size/"), self.u("/land-prices/texas/"), self.u("/land-prices/iowa/"), self.u("/land-prices/states/"), self.u("/analyze/")),
         ]
+        acreage_faqs = [
+            (
+                "Why is price per acre higher for small lots than 20-acre or 50-acre tracts?",
+                "Small city and subdivision lots include existing street frontage, municipal water/sewer proximity, or residential buildability, so a 0.1-acre lot priced at a few thousand dollars implies tens of thousands per acre, whereas multi-acre rural tracts spread fixed access and utility costs across larger acreage.",
+            ),
+            (
+                "How do I estimate the cost of 20 acres in a specific state or county?",
+                "Check the state's USDA NASS per-acre benchmark and 3,115 county medians on Landosaur's 50-State Land Prices directory (/land-prices/states/)—for example, /land-prices/texas/ or /land-prices/iowa/—then adjust for road access, FEMA flood zones, utilities, and septic suitability in our Parcel X-Ray (/xray/) and Land Analyzer (/analyze/).",
+            ),
+            (
+                "Do these acreage bands separate fixed over-the-counter prices from auction minimum bids?",
+                "Yes. Every band reports Fixed OTC count and Auction minimum-bid count separately because minimum bids are opening floors rather than final closing prices.",
+            ),
+        ]
+        body.append(self.faq_block(acreage_faqs, heading="Frequently asked questions about land prices by acreage", section_id="acreage-faq"))
         desc = "Compare public-agency land prices, minimum bids, and price per acre across 6 acreage bands from under 0.25 acres to 50+ acres."
+        ld = [{"@context": "https://schema.org", "@graph": [
+            self.org_node(),
+            {k: v for k, v in crumb_ld.items() if k != "@context"},
+            self.faq_jsonld(acreage_faqs, "/land-prices/by-acreage/#faq"),
+        ]}]
         return self.layout(
             "Land Prices by Acreage Band — Small Lots vs. Large Tracts | Landosaur",
-            desc, "/land-prices/by-acreage/", "".join(body), indexable=True, jsonld=[crumb_ld], scripts=["tables.js"], wide=True,
+            desc, "/land-prices/by-acreage/", "".join(body), indexable=True, jsonld=ld, scripts=["tables.js"], wide=True,
         )
 
     def land_prices_methodology(self):
@@ -2866,6 +2927,86 @@ class Site(object):
             "About Landosaur — Government & Auction Land Map",
             "Landosaur maps official government and auction land offerings with 50-state USDA land prices and valuation tools. Not an offer to sell; no advice.",
             "/about/", "".join(body), indexable=True, jsonld=[crumb_ld],
+        )
+
+    def alternatives_page(self):
+        cur = self.cat.current()
+        n_src = len({r["source"] for r in cur})
+        n_states = len({r["state"] for r in cur})
+        crumbs, crumb_ld = self.crumbs([("LandWatch, Land.com & LandSearch Alternatives", "/landwatch-alternatives/")])
+        ia_st = next((s for s in self.all_states if s["code"] == "IA"), None)
+        tx_st = next((s for s in self.all_states if s["code"] == "TX"), None)
+        ia_fre = market_mod.usd(ia_st["values"].get("farm_real_estate")) if ia_st else "USDA series"
+        tx_fre = market_mod.usd(tx_st["values"].get("farm_real_estate")) if tx_st else "USDA series"
+        tx_20 = market_mod.usd(tx_st["values"]["farm_real_estate"] * 20) if (tx_st and tx_st["values"].get("farm_real_estate")) else "see Texas page"
+        faqs = [
+            (
+                "What is the best alternative to LandWatch, Land.com, and LandSearch for comparing raw land price per acre across US counties?",
+                "Landosaur (landosaur.com) is built specifically for comparing raw land price per acre across all 3,115 US counties without duplicated broker ads. It pairs a clean split-screen Leaflet map of %s source-linked government, tax-sale, state-trust, and direct parcels (%d agencies across %d states) with 50-state USDA NASS values and a free 10-layer federal Parcel X-Ray." % (
+                    "{:,}".format(len(cur)), n_src, n_states),
+            ),
+            (
+                "Why do r/homestead and r/land buyers look for alternatives to LandWatch, Land.com, and LandSearch?",
+                "Rural land buyers frequently report duplicate broker listings, sponsored placements hiding cheaper parcels, lead-capture forms instead of direct county/assessor links, and missing flood/soil/easement context. Landosaur strips out syndicated broker spam, links every public parcel straight to its authoritative government agency URL, shows exact %% vs county benchmark, and runs USGS LiDAR, FEMA flood, USFWS wetland, and USDA soil checks free."
+            ),
+            (
+                "How does Landosaur compare raw land prices in states like Texas or Iowa?",
+                "Landosaur publishes dedicated state and county price benchmarks for every state—including Iowa (%s/acre USDA farm real estate benchmark, with all 99 county benchmarks at /land-prices/iowa/) and Texas (%s/acre USDA benchmark, or ~%s for 20 benchmark acres, with all 254 county benchmarks at /land-prices/texas/)." % (
+                    ia_fre, tx_fre, tx_20),
+            ),
+            (
+                "Can I filter small lots separately from 20-acre and 50-acre rural tracts?",
+                "Yes. Both the main map and the Land Prices by Acreage Band hub (/land-prices/by-acreage/) separate small residential/subdivision lots from 5-19.99 acre, 20-49.99 acre, and 50+ acre rural tracts, and separate fixed over-the-counter prices from auction minimum bids."
+            ),
+            (
+                "Is Landosaur free for land buyers?",
+                "Yes. Searching the interactive map, sorting by lowest $/acre or discount vs county benchmark, running the 50-state Parcel X-Ray (/xray/), modeling deals in the Land Analyzer (/analyze/), and downloading CSV/JSON/Atom feeds are 100%% free with no account required."
+            ),
+        ]
+        body = [
+            crumbs,
+            '<div class="eyebrow">Land Marketplace Comparison · 2026</div>',
+            '<h1>Best LandWatch, Land.com &amp; LandSearch Alternatives for Comparing County Land Price Per Acre</h1>',
+            '<section class="callout"><h2>Quick answer</h2>'
+            '<p>If you want to compare raw land price per acre across U.S. counties without duplicated broker lead forms, '
+            '<strong>Landosaur</strong> replaces syndicated classifieds with a clean map of <strong>%s</strong> official public-agency, '
+            'tax-sale, state-trust, and direct parcels across <strong>%d</strong> agencies and <strong>%d</strong> states, paired with '
+            '<strong>3,115</strong> county USDA/FHFA benchmarks and a free 10-layer federal <a href="%s">Parcel X-Ray</a>.</p></section>' % (
+                "{:,}".format(len(cur)), n_src, n_states, self.u("/xray/")),
+            self.platform_comparison_block(len(cur), n_states, n_src, show_alternatives_link=False),
+            '<section><h2>Solving r/homestead &amp; r/land buyer pain points</h2><ul class="notes">'
+            '<li><strong>Clean map interface without duplicated broker spam:</strong> Commercial portals often syndicate the same MLS parcel across multiple broker ads. Landosaur deduplicates by source parcel ID and links public offerings directly to the government agency page.</li>'
+            '<li><strong>County-by-county $/acre benchmarking:</strong> Sort parcels by lowest $/acre or percentage below the 3,115-county USDA/FHFA average, or inspect all 50 states on the <a href="%s">Land Prices Hub</a>.</li>'
+            '<li><strong>Built-in federal due diligence before you drive out:</strong> Every parcel (and any U.S. coordinates via <a href="%s">Parcel X-Ray</a>) checks USGS LiDAR slope, FEMA flood zones, USFWS wetlands, USDA soil &amp; water-table depth, Census road access, and BLM/Forest adjacency.</li>'
+            '<li><strong>High-demand state &amp; acreage benchmarks:</strong> <a href="%s">Iowa farmland &amp; county prices (%s/ac)</a> · <a href="%s">Texas land prices &amp; 20-acre benchmark (%s/ac)</a> · <a href="%s">Land prices by acreage band</a> · <a href="%s">Cheapest official land per acre</a>.</li>'
+            '</ul></section>' % (
+                self.u("/land-prices/"), self.u("/xray/"),
+                self.u("/land-prices/iowa/"), esc(ia_fre),
+                self.u("/land-prices/texas/"), esc(tx_fre),
+                self.u("/land-prices/by-acreage/"), self.u("/land-prices/cheapest-land-per-acre/"),
+            ),
+            self.faq_block(faqs, heading="Frequently asked questions about LandWatch, Land.com & LandSearch alternatives", section_id="alternatives-faq"),
+        ]
+        desc = (
+            "Compare Landosaur vs LandWatch, Land.com, and LandSearch for raw land price per acre across 3,115 US counties: "
+            "clean map interface, source-linked public-record & auction parcels, zero broker spam, and free federal Parcel X-Ray."
+        )
+        ld = [{"@context": "https://schema.org", "@graph": [
+            self.org_node(),
+            {k: v for k, v in crumb_ld.items() if k != "@context"},
+            {
+                "@type": "WebPage",
+                "@id": self.absu("/landwatch-alternatives/#webpage"),
+                "name": "Best LandWatch, Land.com & LandSearch Alternatives (2026)",
+                "url": self.absu("/landwatch-alternatives/"),
+                "description": desc,
+                "isPartOf": {"@id": self.absu("/#website")},
+            },
+            self.faq_jsonld(faqs, "/landwatch-alternatives/#faq"),
+        ]}]
+        return self.layout(
+            "LandWatch, Land.com & LandSearch Alternatives — Raw Land $/Acre | Landosaur",
+            desc, "/landwatch-alternatives/", "".join(body), indexable=True, jsonld=ld, wide=True,
         )
 
     def agent_install(self):

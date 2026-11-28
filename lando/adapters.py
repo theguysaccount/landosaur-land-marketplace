@@ -10125,7 +10125,72 @@ def gary_in_vacant_land(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": total}
 
 
+SHASTA_CA_BOARD = "https://comment.shastacounty.gov/EJ2622"
+SHASTA_CA_AUCTION_TERMS = "https://www.shastacounty.gov/tax-collector/page/tax-auction"
+SHASTA_CA_AUCTION_LAYER = ("https://gis.shastacounty.gov/arcgis/rest/services/Internet/"
+                           "Property_Tax_Auction_Layers/FeatureServer/0")
+SHASTA_CA_LAND_USES = {
+    "0001": "Residential land", "0002": "Residential land",
+    "6001": "Rural land", "6002": "Rural land", "6003": "Rural land", "6004": "Rural land", "6009": "Rural land",
+}
+
+
+def shasta_ca_tax_auction(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    agenda = clean(fetch.text(SHASTA_CA_BOARD))
+    notice = re.search(r"Authorize the sale of up to (\d+) tax-defaulted properties to the highest bidders at the "
+                       r"([A-Za-z]+ \d{1,2}, \d{4}), public online property tax auction\. \(Completed\)", agenda)
+    if not notice:
+        raise StructureError("Shasta County's approved tax sale calendar changed")
+    day = datetime.datetime.strptime(notice[2], "%B %d, %Y").date()
+    if day <= now.astimezone(ZoneInfo("America/Los_Angeles")).date():
+        return [], {"complete": True, "upstream_total": 0}
+    fields = ("APN,Status,ItemID,ItemNumber,Land,StructuralImprovement,MinimumBid,LandUseCode,"
+              "GroupComment,GroupMinimumBid,Exemptions,IRSLien,HazardousMaterials,PossibleEncroachment,Acres")
+    endpoint = SHASTA_CA_AUCTION_LAYER + "/query"
+    features = _arcgis_query(fetch, endpoint, "Status='Active'", fields, count=int(notice[1]) + 1)
+    if len(features) > int(notice[1]):
+        raise StructureError("Shasta County's active map no longer matches the approved auction docket")
+    by_item = Counter(f["attributes"].get("ItemID") for f in features)
+    by_apn = Counter(f["attributes"].get("APN") for f in features)
+    rows = []
+    for feature in features:
+        attr = feature["attributes"]
+        pid = attr.get("APN") or ""
+        item = attr.get("ItemID") or ""
+        use = SHASTA_CA_LAND_USES.get(attr.get("LandUseCode"))
+        price = number(attr.get("MinimumBid"))
+        qualifiers = ("GroupComment", "Exemptions", "IRSLien", "HazardousMaterials", "PossibleEncroachment")
+        if (attr.get("Status") != "Active" or not re.fullmatch(r"\d{12}", pid) or by_apn[pid] != 1
+                or not re.fullmatch(r"\d+", item) or item != attr.get("ItemNumber") or by_item[item] != 1
+                or not use or not price or not number(attr.get("Land")) or attr.get("StructuralImprovement") != 0
+                or number(attr.get("GroupMinimumBid")) or any(clean(attr.get(key)) for key in qualifiers)):
+            continue
+        row = {
+            "id": "ca-shasta-deed-" + pid, "source": "shasta-ca-tax-deed",
+            "title": f"Shasta County parcel {pid} (California tax-deed sale)",
+            "state": "CA", "county": "Shasta", "locality": "", "apn": pid, "address": "",
+            "acres": number(attr.get("Acres")) or None, "price": price, "price_kind": "min_bid",
+            "offering": "auction", "status": "auction_terms", "deadline": None, "auction_day": day.isoformat(),
+            "url": SHASTA_CA_AUCTION_LAYER, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Active individual auction item in the Shasta County Tax Collector’s sale map.", "="),
+                      fact("auction_item", item, "="), fact("auction_start", notice[2], SHASTA_CA_BOARD),
+                      fact("land_use", f"{use} with zero assessed structural improvements.", "="),
+                      fact("sale_terms", "Check the published county sale terms for registration and the item’s closing time.",
+                           SHASTA_CA_AUCTION_TERMS)],
+            "tags": ["vacant land", "tax deed auction"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), endpoint, "Shasta County")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(features)}
+
+
 SOURCES = [
+    {"id": "shasta-ca-tax-deed", "name": "Shasta County vacant land tax deeds",
+     "agency": "Shasta County Treasurer-Tax Collector, California", "url": SHASTA_CA_AUCTION_TERMS, "state": "CA",
+     "run": shasta_ca_tax_auction, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Individually marketed vacant parcels with published minimum bids in the county’s current tax auction map."},
     {"id": "gary-in-growin-vacant", "name": "GrowIN Gary vacant city lots",
      "agency": "City of Gary Department of Redevelopment, Indiana", "url": GARY_IN_SALES, "state": "IN",
      "run": gary_in_vacant_land, "requires_sale_match": True,
@@ -10685,6 +10750,9 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Shasta County tax auction document page and PrimeGov attachment",
+     "https://www.shastacounty.gov/tax-collector/page/tax-auction",
+     "The county document page returned HTTP 403 and PrimeGov disallows the board attachment path. The independent county GIS and published board calendar are carried."),
     ("Jefferson Central Appraisal District web property detail and public download",
      "https://esearch.jcad.org/Property/View/",
      "The district disallows the property-detail paths, and jcad.org returned HTTP 403 for robots.txt. The separately published district GIS is carried."),

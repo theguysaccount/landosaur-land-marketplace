@@ -45,6 +45,24 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_shasta_carries_only_active_individual_land_auction_items(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = (
+            "Authorize the sale of up to 78 tax-defaulted properties to the highest bidders at the "
+            "February 26, 2027, public online property tax auction. (Completed)"
+        )
+        item = {"APN": "016520039000", "ItemID": "4", "ItemNumber": "4", "Status": "Active",
+                "LandUseCode": "6002", "Land": 8749, "StructuralImprovement": 0, "MinimumBid": 1400, "Acres": 10}
+        bundled = dict(item, APN="019410024000", ItemID="8", ItemNumber="8A", GroupMinimumBid=8000)
+        improved = dict(item, APN="019410025000", ItemID="9", ItemNumber="9", StructuralImprovement=980)
+        withdrawn = dict(item, APN="019410026000", ItemID="10", ItemNumber="10", Status="Withdrawn")
+        features = [{"attributes": attrs} for attrs in (item, bundled, improved, withdrawn)]
+        with patch.object(adapters, "_arcgis_query", return_value=features):
+            rows, _ = adapters.shasta_ca_tax_auction(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((row["price"], row["acres"], row["auction_day"]), (1400, 10, "2027-02-26"))
+        self.assertEqual(row["apn"], "016520039000")
+
     def test_gary_requires_vacancy_and_keeps_city_price_estimate_separate(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = f'<a href="{adapters.GARY_IN_PUBLIC_MAP}page/Map">Property Map</a> Apply Now'

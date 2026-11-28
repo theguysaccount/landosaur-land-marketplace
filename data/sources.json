@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T06:51:42Z",
+ "checked": "2026-11-28T06:58:15Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -110,23 +110,23 @@
    "url": "https://www.ralbaltoonapa.com/"
   },
   "arkansas-cosl": {
-   "about": "Tax-forfeited parcels offered after the county tax-sale auctions. Prices are minimum bids; terms and redemption rules apply.",
+   "about": "Tax-forfeited parcels with published minimum bids. Matched residential vacant parcels in Van Buren County include county GIS acreage and assessment evidence.",
    "agency": "Arkansas Commissioner of State Lands",
    "complete": true,
-   "count": 2650,
+   "count": 2612,
    "failures": 0,
-   "last_attempt": "2026-11-26T19:15:42Z",
-   "last_success": "2026-11-26T19:15:42Z",
+   "last_attempt": "2026-11-28T06:58:15Z",
+   "last_success": "2026-11-28T06:58:15Z",
    "message": "",
    "name": "Arkansas Commissioner of State Lands",
    "notes": [
-    "6 listings left the inventory after two complete reads without them"
+    "10 listings left the inventory after two complete reads without them"
    ],
    "ok": true,
-   "read": 2650,
-   "seconds": 96,
+   "read": 2612,
+   "seconds": 27,
    "state": "AR",
-   "upstream_total": 2650,
+   "upstream_total": 2612,
    "url": "https://auction.cosl.org/Auctions/ListingsView"
   },
   "athens-oh-landbank": {

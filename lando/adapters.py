@@ -398,6 +398,7 @@ def st_louis(fetch, now, warn):
 
 AR = "https://auction.cosl.org"
 AR_GIS = "https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/MapServer/6/query"
+AR_VAN_BUREN_GIS = "https://services7.arcgis.com/ta35z1MOnwcwJe4b/arcgis/rest/services/Van_Buren_Parcels/FeatureServer/0/query"
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{10,150}$")
 
 
@@ -475,6 +476,59 @@ def arkansas_listing(r, now):
     }
 
 
+def enrich_arkansas_van_buren(fetch, listings):
+    candidates = {row["apn"]: row for row in listings if row["county"] == "Van Buren" and row["apn"]}
+    pins = sorted(candidates)
+    for i in range(0, len(pins), 60):
+        where = "ParcelId IN (" + quote_list(pins[i:i + 60]) + ")"
+        _, features = arcgis_query(
+            fetch, AR_VAN_BUREN_GIS, where,
+            "ParcelId,County,CountyFips,ParcelType,ImpValue,LandValue,TotalValue,CAMADate,AdrLabel,AdrCity",
+        )
+        matches = {}
+        for feature in features:
+            pin = (feature.get("attributes") or {}).get("ParcelId")
+            if pin in candidates:
+                matches.setdefault(pin, []).append(feature)
+        for pin, matched in matches.items():
+            if len(matched) != 1:
+                continue
+            feature = matched[0]
+            attrs = feature["attributes"]
+            land_value = number(attrs.get("LandValue"))
+            improvement_value = attrs.get("ImpValue")
+            cama_date = attrs.get("CAMADate")
+            if (attrs.get("County") != "Van Buren" or str(attrs.get("CountyFips")).zfill(5) != "05141"
+                    or attrs.get("ParcelType") != "RV" or type(improvement_value) not in (int, float) or improvement_value != 0
+                    or land_value is None or land_value <= 0 or number(attrs.get("TotalValue")) != land_value
+                    or isinstance(cama_date, bool) or not isinstance(cama_date, (int, float)) or cama_date <= 0):
+                continue
+            rings = (feature.get("geometry") or {}).get("rings", [])
+            acres = rings_acres(rings) if len(rings) == 1 else None
+            if not acres:
+                continue
+            row = candidates[pin]
+            attribution = AR_VAN_BUREN_GIS + "?" + urllib.parse.urlencode({
+                "f": "json", "where": "ParcelId IN (" + quote_list([pin]) + ")",
+                "outFields": "ParcelId,County,ParcelType,ImpValue,CAMADate", "outSR": "4326", "returnGeometry": "true",
+            })
+            apply_geometry(row, rings, attribution, "Van Buren County")
+            if not row.get("geometry"):
+                continue
+            row["facts"][-1]["url"] = attribution
+            assessment_date = datetime.datetime.fromtimestamp(cama_date / 1000, datetime.timezone.utc).date()
+            row["facts"].append(fact(
+                "assessment", f"Residential vacant classification with no assessed improvements as of {assessment_date}.", attribution,
+            ))
+            if not row["acres"]:
+                row["acres"] = acres
+                row["facts"] = [f for f in row["facts"] if f["topic"] != "acreage"]
+                row["facts"].append(fact("acreage", f"{acres:g} acres (county GIS estimate)", attribution, "gis_area"))
+            row["address"] = clean(attrs.get("AdrLabel")).title() or row["address"]
+            row["locality"] = clean(attrs.get("AdrCity")).title() or row["locality"]
+            row["tags"] = [tag for tag in row["tags"] if tag != "improvements unverified"] + ["assessed as vacant land"]
+
+
 def arkansas(fetch, now, warn):
     rows, total, page = {}, None, 1
     while True:
@@ -496,9 +550,19 @@ def arkansas(fetch, now, warn):
     if not complete:
         warn("read %d of %d Arkansas parcels" % (len(rows), total))
     listings = [arkansas_listing(r, now) for r in rows.values()]
+    try:
+        enrich_arkansas_van_buren(fetch, listings)
+    except (FetchError, StructureError) as exc:
+        warn("Van Buren County assessment enrichment stopped (%s)" % exc)
+    try:
+        statewide_outlines_allowed = fetch.allowed(AR_GIS)
+    except FetchError:
+        statewide_outlines_allowed = False   # optional outline layer documented in NOT_CARRIED
+    if not statewide_outlines_allowed:
+        return listings, {"complete": complete, "upstream_total": total}
     by_county = {}
     for l in listings:
-        if l["apn"] and l["county"]:
+        if l["apn"] and l["county"] and l["lat"] is None:
             by_county.setdefault(l["county"].upper(), []).append(l)
     failed = 0
     for county, ls in sorted(by_county.items()):
@@ -9394,7 +9458,7 @@ SOURCES = [
      "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context."},
     {"id": "arkansas-cosl", "name": "Arkansas Commissioner of State Lands", "agency": "Arkansas Commissioner of State Lands",
      "url": "https://auction.cosl.org/Auctions/ListingsView", "state": "AR", "run": arkansas,
-     "about": "Tax-forfeited parcels offered after the county tax-sale auctions. Prices are minimum bids; terms and redemption rules apply."},
+     "about": "Tax-forfeited parcels with published minimum bids. Matched residential vacant parcels in Van Buren County include county GIS acreage and assessment evidence."},
     {"id": "pittsburgh-vacant", "name": "City of Pittsburgh available vacant land", "agency": "City of Pittsburgh / Pittsburgh Land Bank",
      "url": PGH_URL, "state": "PA", "run": pittsburgh_vacant,
      "about": "Vacant city-owned parcels marked Available for Sale (Public Sale) in Pittsburgh's daily open-data inventory, with zoning, square footage, and coordinates."},
@@ -9963,6 +10027,10 @@ NOT_CARRIED = [
      "The state procurement portal returned HTML in place of robots.txt."),
     ("Town of Suffield tax-sale news article and assessor map", "https://www.suffieldct.gov/our-town/news/town-news-default/~board/town-news/post/town-of-suffield-tax-sale-1790963357528",
      "The town disallows the article path, and its linked assessor map did not serve robots.txt over verified TLS."),
+    ("Suffield linked assessor property cards", "https://www.propertyrecordcards.com/SearchMaster.aspx?towncode=139",
+     "The assessor vendor disallows its property search path in robots.txt."),
+    ("Arkansas GeoStor statewide assessor portal", "https://geostor.arkansas.gov/",
+     "The state’s historical GIS host returned HTML in place of robots.txt."),
     ("Prince George’s County available surplus land", "https://www.princegeorgescountymd.gov/departments-offices/redevelopment-authority/surplus-real-property-program/available-county-surplus-real-property-disposition",
      "The county host returned HTTP 403 for robots.txt."),
     ("Northumberland County, Pennsylvania assessment parcel boundaries", "https://gis.norrycopa.net/arcgis/rest/services/Assessment/NC_Tax_Parcels/MapServer",

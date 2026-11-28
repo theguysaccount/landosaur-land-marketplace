@@ -462,6 +462,31 @@ class ArkansasTest(unittest.TestCase):
         rows, total = adapters.parse_arkansas_rows({"Data": [self.ROW], "Total": 1})
         self.assertEqual(total, 1)
 
+    def test_van_buren_uses_only_exact_positive_vacant_assessments_for_area(self):
+        sale = dict(self.ROW, CoSLCountyName="VAN BUREN", CoSLParcelNumber="4050-05055-0000")
+        land = adapters.arkansas_listing(sale, NOW)
+        improved = adapters.arkansas_listing(dict(sale, CoSLParcelNumber="4050-05053-0000"), NOW)
+        uncertain = adapters.arkansas_listing(dict(sale, CoSLParcelNumber="4050-05054-0000"), NOW)
+        attrs = {"County": "Van Buren", "CountyFips": 5141, "ParcelType": "RV", "LandValue": 2000,
+                 "TotalValue": 2000, "ImpValue": 0, "CAMADate": 1756339200000, "AdrCity": "FAIRFIELD BAY",
+                 "OwnerName": "TEST PRIVATE"}
+        rings = [[[-92.3, 35.6], [-92.299, 35.6], [-92.299, 35.601], [-92.3, 35.601], [-92.3, 35.6]]]
+        features = [
+            {"attributes": {**attrs, "ParcelId": land["apn"]}, "geometry": {"rings": rings}},
+            {"attributes": {**attrs, "ParcelId": improved["apn"], "ImpValue": 50}, "geometry": {"rings": rings}},
+            {"attributes": {**attrs, "ParcelId": uncertain["apn"], "ImpValue": None}, "geometry": {"rings": rings}},
+        ]
+        with patch.object(adapters, "arcgis_query", return_value=("https://example.test", features)) as query:
+            adapters.enrich_arkansas_van_buren(unittest.mock.Mock(), [land, improved, uncertain])
+        self.assertNotIn("OwnerName", query.call_args.args[3])
+        self.assertNotIn("PRIVATE", repr(land))
+        self.assertEqual(land["acres"], adapters.rings_acres(rings))
+        self.assertEqual(land["price"], float(self.ROW["StartingBid"]))
+        self.assertEqual(land["locality"], "Fairfield Bay")
+        for row in (improved, uncertain):
+            self.assertIsNone(row["acres"])
+            self.assertIn("improvements unverified", row["tags"])
+
 
 WI_PAGE = """<h2>Latest Sealed Bid Auction</h2><p>auction closing of December 1, 2026</p>
 <div class="surplus-land-container"><div class="surplus-land-header1">Forest County</div><div class="surplus-land-header2">Double Bend</div>

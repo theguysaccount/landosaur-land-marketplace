@@ -49,7 +49,7 @@ OFFICIAL = {
     "albanycountywy.gov", "oklahoma.gov", "sos.ms.gov", "horrycountysc.gov", "colletoncounty.org",
     "portland.gov", "mauicounty.gov", "lasvegasnevada.gov", "peterboroughnh.gov",
     "cityofyankton.org", "burleigh.gov", "vcgi.vermont.gov", "dnrc.mt.gov",
-    "cityofboise.org", "auburnmaine.gov", "portlandmaine.gov",
+    "cityofboise.org", "auburnmaine.gov", "bangormaine.gov", "portlandmaine.gov",
     "phdcphila.org", "atlas.phila.gov", "clevelandohio.gov", "dallascityhall.com",
     "southsuburbanlandbank.org", "newburghcommunitylandbank.org", "saltlakecounty.gov", "muncielandbank.org",
     "hctax.net", "gblba.org", "dot.ca.gov", "mass.gov", "lakota-nd.com", "broward.org", "princetonmn.org",

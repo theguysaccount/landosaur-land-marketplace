@@ -11086,6 +11086,113 @@ def hampden_me_business_park(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(entries)}
 
 
+BANGOR_ME_PARK = "https://www.bangormaine.gov/275/Maine-Business-Enterprise-Park"
+BANGOR_ME_BROKER = "https://www.newenglandcommercialproperty.com/commercial-real-estate/me/bangor/land"
+BANGOR_ME_ASSESSOR = ("https://mapping.bangormaine.gov/server/rest/services/ParcelViewer/"
+                      "Parcels/FeatureServer/2/query")
+BANGOR_ME_DETAIL = "https://www.newenglandcommercialproperty.com/listings/me/bangor/"
+# The city identifies four separate park parcels in council order 24-111.
+# The broker's lot numbers match the city street frontages and assessor areas.
+BANGOR_ME_LOTS = {
+    "7": ("001-011", 11877, "90 Corporate Dr"),
+    "9": ("001-013", 11889, "120 Corporate Dr"),
+    "11": ("R25-031", 14502, "146 Corporate Dr"),
+    "12": ("R25-032", 14501, "Venture Way"),
+}
+
+
+def parse_bangor_me_offers(page):
+    # The public directory emits the active listing rows in its server-rendered data.
+    heading = re.search(r"<h1[^>]*>\s*(\d+) Land Commercial Real Estate Listings in Bangor, ME\s*</h1>", page)
+    records = re.findall(r"\{addressConfidential:[^{}]+\}", page.replace(r'\"', '"'))
+    if not heading or len(records) != int(heading[1]):
+        raise StructureError("The Bangor brokerage directory no longer exposes a complete listing roster")
+    offers = {}
+    for record in records:
+        if 'propertyPublicId:"prop_mQL7XSx5VMqD"' not in record:
+            continue
+        lot = re.search(r'title:"Lot #(\d+) - Maine Business Enterprise Park"', record)
+        if not lot or lot[1] not in BANGOR_ME_LOTS:
+            raise StructureError("A marketed Bangor park lot needs a current assessor crosswalk")
+        if lot[1] in offers:
+            raise StructureError("The Bangor brokerage directory repeats a park lot")
+        if not all(value in record for value in ('brokerage:"Epstein Commercial Real Estate"', 'status:"active"',
+                                                 'listingType:"sale"', 'propertyType:"land"', 'addressConfidential:!1')):
+            continue
+        price = re.search(r"\baskingPrice:([1-9]\d*),", record)
+        sqft = re.search(r"\bspaceAvailableSF:([1-9]\d*),", record)
+        public_id = re.search(r'\bid:"(lst_[A-Za-z0-9]+)"', record)
+        if not (price and sqft and public_id):
+            raise StructureError("A marketed Bangor park lot is missing its published size, price, or listing ID")
+        zoning = re.search(r'\bzoning:"([^"]+)"', record)
+        offers[lot[1]] = (int(sqft[1]), int(price[1]), public_id[1], zoning[1] if zoning else "")
+    return offers, len(records)
+
+
+def bangor_me_business_park(fetch, now, warn):
+    offers, record_count = parse_bangor_me_offers(fetch.text(BANGOR_ME_BROKER))
+    if not offers:
+        return [], {"complete": True, "upstream_total": record_count}
+
+    accounts = ",".join(str(BANGOR_ME_LOTS[lot][1]) for lot in offers)
+    assessor = _arcgis_query(fetch, BANGOR_ME_ASSESSOR, f"RE_ACCT IN ({accounts}) AND OWNER='BANGOR CITY OF'",
+                            "MAP_LOT,RE_ACCT,PROP_LOC,ACRES,VALUE_LAND,VALUE_BLDG,RES_YR_BLT,COM_YR_BLT",
+                            count=len(offers) + 1, extra={"returnGeometry": "false"})
+    by_account = {f["attributes"]["RE_ACCT"]: f["attributes"] for f in assessor}
+    if len(by_account) != len(assessor):
+        raise StructureError("Bangor’s assessor returned more than one record for a marketed lot account")
+
+    parcels = quote_list([BANGOR_ME_LOTS[lot][0] for lot in offers])
+    where = f"TOWN='Bangor' AND COUNTY='Penobscot' AND MAP_BK_LOT IN ({parcels})"
+    shapes = _arcgis_query(fetch, SKOWHEGAN_ME_GIS, where, "MAP_BK_LOT", count=len(offers) + 1)
+    by_apn = {f["attributes"]["MAP_BK_LOT"]: f["geometry"]["rings"] for f in shapes if f.get("geometry")}
+    if len(by_apn) != len(shapes):
+        raise StructureError("Maine GeoLibrary did not return unique parcel shapes for Bangor")
+
+    rows = []
+    for lot, (sqft, price, public_id, zoning) in sorted(offers.items(), key=lambda offer: int(offer[0])):
+        apn, account, address = BANGOR_ME_LOTS[lot]
+        assessment = by_account.get(account)
+        if assessment is None or assessment.get("MAP_LOT") != apn:
+            continue
+        assessed_street = re.sub(r"^0\s+", "", clean(assessment.get("PROP_LOC")))
+        assessed_acres = number(assessment.get("ACRES"))
+        if (assessed_street.casefold() != address.casefold() or not assessed_acres
+                or not number(assessment.get("VALUE_LAND")) or assessment.get("VALUE_BLDG") != 0
+                or any(assessment.get(key) not in (None, 0) for key in ("RES_YR_BLT", "COM_YR_BLT"))):
+            continue
+        src = f"{BANGOR_ME_DETAIL}maine-business-enterprise-park-lot-{lot}-sale-{sqft}sf/{public_id}"
+        acres = round(sqft / 43560, 2)
+        assessment_link = one_parcel_url(BANGOR_ME_ASSESSOR, f"RE_ACCT={account}",
+                                         "MAP_LOT,PROP_LOC,ACRES,VALUE_LAND,VALUE_BLDG")
+        facts = [
+            fact("availability", "Active sale listing from the city’s contracted commercial broker.", BANGOR_ME_BROKER),
+            fact("broker_listing", "View this lot’s listing and asking price.", src),
+            fact("land_use", "Bangor’s assessor records a municipal parcel with zero building value.", assessment_link),
+        ]
+        if zoning:
+            facts.append(fact("zoning", zoning, src))
+        if assessed_acres != acres:
+            facts.append(fact("assessment_acreage", f"{assessed_acres:g} acres in the city’s assessment record",
+                              assessment_link, "The broker’s published offering acreage differs. Confirm with the city."))
+        row = {
+            "id": f"me-bangor-enterprise-park-{lot}", "source": "bangor-me-business-park",
+            "title": f"Maine Business Enterprise Park lot {lot}", "state": "ME", "county": "Penobscot",
+            "locality": "Bangor", "apn": apn, "address": address, "acres": acres, "price": price,
+            "price_kind": "asking", "offering": "sale", "status": "listed", "deadline": None,
+            "url": BANGOR_ME_PARK, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["vacant land", "business park"],
+        }
+        rings = [ring for ring in by_apn.get(apn, ()) if len(ring) >= 4 and ring_area(ring) > 0]
+        if rings:
+            lon, lat = ring_centroid(max(rings, key=ring_area))
+            row["lat"], row["lon"] = round(lat, 6), round(lon, 6)
+            pin_url = one_parcel_url(SKOWHEGAN_ME_GIS, f"TOWN='Bangor' AND MAP_BK_LOT='{apn}'", "MAP_BK_LOT")
+            facts.append(fact("approximate_location", "Parcel center from Maine GeoLibrary.", pin_url))
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
+
+
 RIVERTON_WY_DOCS = {
     "terms": (
         "https://cms2.revize.com/revize/rivertonwy25/document_center/City%20Council/2026%20Packets/05-05-26%20Regular%20Council%20Meeting.pdf?t=202605011909480",
@@ -13637,6 +13744,10 @@ SOURCES = [
      "agency": "Town of Hampden, Maine", "url": HAMPDEN_ME_PARK, "state": "ME",
      "run": hampden_me_business_park, "requires_sale_match": True,
      "about": "Town-listed development lots with asking prices, checked against the current assessment book and town parcel map."},
+    {"id": "bangor-me-business-park", "name": "Bangor municipal business park lots",
+     "agency": "City of Bangor, Maine", "url": BANGOR_ME_PARK, "state": "ME",
+     "run": bangor_me_business_park, "requires_sale_match": True,
+     "about": "Current offers from Bangor’s contracted broker, matched to vacant commercial parcels in the city’s assessor table."},
     {"id": "alamosa-co-tax-deed", "name": "Alamosa County vacant land treasurer’s deed auctions",
      "agency": "Alamosa County Treasurer, Colorado", "url": ALAMOSA_CO_SCHEDULE, "state": "CO", "timezone": "America/Denver",
      "run": alamosa_co_tax_deed, "requires_sale_match": True,
@@ -13691,6 +13802,14 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("LoopNet copy of the Bangor business park sale", "https://www.loopnet.com/",
+     "The site returned HTTP 403 for robots.txt. The broker's live New England Commercial Property Exchange roster was verified independently."),
+    ("Bangor business park marketing brochure download", BANGOR_ME_BROKER,
+     "The broker's document host returned HTTP 403 for robots.txt. Active individual offers came from the broker’s published roster."),
+    ("Bangor fiscal 2027 assessment report on the city's external web platform", "https://bangormaine.gov/178/Commitment-Books",
+     "The external platform disallows the document path in robots.txt. The city's separate public assessor table verified the four parcels."),
+    ("Howland former tannery property planning report", "https://howlandmaine.com/economic-development/",
+     "The state planning report host returned HTTP 403 for robots.txt. The town’s preliminary sale map did not establish current availability for the exact lot."),
     ("Park County’s Pike/San Isabel broker catalog", "https://parkcountyco.gov/m/newsflash/home/detail/1278",
      "The county’s designated brokerage catalog path is disallowed by robots.txt. The county’s older sale sheet does not establish current status for individual packages."),
     ("Ludlow, Vermont newspaper tax-sale notice", "https://vermontjournal.com/",

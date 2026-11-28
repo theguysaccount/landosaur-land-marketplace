@@ -152,6 +152,36 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertEqual(info["upstream_total"], 2)
         self.assertTrue(row["geometry"])
 
+    def test_active_offer_keeps_broker_price_and_acres_after_vacancy_check(self):
+        fetch = unittest.mock.Mock()
+        rows = [
+            ('{addressConfidential:!1,askingPrice:191700,brokerage:"Epstein Commercial Real Estate",'
+             'id:"lst_j3BjJc0ruwFs",listingType:"sale",propertyPublicId:"prop_mQL7XSx5VMqD",'
+             'propertyType:"land",spaceAvailableSF:92783,status:"active",'
+             'title:"Lot #9 - Maine Business Enterprise Park",zoning:"Technology & Service (T&S)"}'),
+            ('{addressConfidential:!1,askingPrice:320150,brokerage:"Epstein Commercial Real Estate",'
+             'id:"lst_TXnKk0WqMIVW",listingType:"sale",propertyPublicId:"prop_mQL7XSx5VMqD",'
+             'propertyType:"land",spaceAvailableSF:146797,status:"active",'
+             'title:"Lot #12 - Maine Business Enterprise Park"}'),
+        ]
+        fetch.text.return_value = '<h1>2 Land Commercial Real Estate Listings in Bangor, ME</h1>' + ",".join(rows)
+        assessor = [
+            {"attributes": {"RE_ACCT": 11889, "MAP_LOT": "001-013", "PROP_LOC": "120 CORPORATE DR",
+                            "ACRES": 2.10, "VALUE_LAND": 162700, "VALUE_BLDG": 0}},
+            {"attributes": {"RE_ACCT": 14501, "MAP_LOT": "R25-032", "PROP_LOC": "0 VENTURE WAY",
+                            "ACRES": 3.37, "VALUE_LAND": 321300, "VALUE_BLDG": 1}},
+        ]
+        with patch.object(adapters, "_arcgis_query", side_effect=[assessor, []]):
+            listings, info = adapters.bangor_me_business_park(fetch, NOW, self.fail)
+        lot, = listings
+        self.assertEqual((lot["apn"], lot["acres"], lot["price"], lot["price_kind"]),
+                         ("001-013", 2.13, 191700, "asking"))
+        self.assertTrue(any("2.1 acres in the city" in f["value"] for f in lot["facts"]))
+        self.assertEqual(info, {"complete": True, "upstream_total": 2})
+        self.assertIsNone(lot["geometry"])
+        with self.assertRaises(adapters.StructureError):
+            adapters.parse_bangor_me_offers(fetch.text.return_value.replace("2 Land", "3 Land"))
+
     def test_underwood_requires_city_count_and_excludes_residual_or_improved_lots(self):
         fetch = unittest.mock.Mock()
         fetch.text.return_value = ("Lots for Sale The City of Underwood currently owns 3 lots east of "

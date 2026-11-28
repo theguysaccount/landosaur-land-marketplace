@@ -1174,7 +1174,7 @@ class Site(object):
 
         priced_all = []
         below_bench = []
-        rural_deals = []
+        priced_acreage = []
         under10k_cash = []
         auctions_priced = []
 
@@ -1193,18 +1193,18 @@ class Site(object):
             if ac and ac >= 0.2 and vs_pct is not None and vs_pct <= -15:
                 below_bench.append(rec)
             if ac and ac >= 1.0 and ppa is not None:
-                rural_deals.append(rec)
+                priced_acreage.append(rec)
             if r["price_kind"] == "cash" and p <= 10000:
                 under10k_cash.append(rec)
             if r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms"):
                 auctions_priced.append(rec)
 
         below_bench.sort(key=lambda x: (x[4], x[1] or 1e12, x[0]["id"]))
-        rural_deals.sort(key=lambda x: (x[1] or 1e12, -(x[0]["acres"] or 0), x[0]["id"]))
+        priced_acreage.sort(key=lambda x: (x[1] or 1e12, -(x[0]["acres"] or 0), x[0]["id"]))
         under10k_cash.sort(key=lambda x: (x[0]["price"], x[1] or 1e12, x[0]["id"]))
         auctions_priced.sort(key=lambda x: (x[0].get("deadline") or "9999", x[0]["price"], x[0]["id"]))
 
-        lowest_ppa = min([x[1] for x in rural_deals if x[1] and x[1] > 0] or [None])
+        lowest_ppa = priced_acreage[0][1] if priced_acreage else None
 
         def agent_href(r):
             is_auc = r["price_kind"] == "min_bid" or r["status"] in ("auction_open", "auction_terms")
@@ -1264,17 +1264,17 @@ class Site(object):
         body = [
             crumbs,
             '<div class="eyebrow">Official Agency Prices vs. USDA/FHFA County Benchmarks</div>',
-            '<h1>Below-Market Land Deals &amp; Rural Bargain Scanner</h1>',
+            '<h1>Below-Market Land Deals &amp; Priced Acreage</h1>',
             '<p class="lede">Compare qualifying priced parcels from the <strong>%s active public-agency listings</strong> against USDA/FHFA county benchmarks. Hire Land Agent for $20 to check title and liens and coordinate transfer, with a 10%% fee due only at closing.</p>' % "{:,}".format(len(cur)),
 
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>Below County Benchmark</span><strong>%s</strong><small>Active parcels ≥0.2 ac priced ≥15%% under avg</small></div>'
-            '<div class="kpi-card"><span>Rural Acreage Deals (1+ ac)</span><strong>%s</strong><small>Priced active tracts of 1+ acres</small></div>'
+            '<div class="kpi-card"><span>Priced Acreage (1+ ac)</span><strong>%s</strong><small>Active tracts with a published price or bid</small></div>'
             '<div class="kpi-card"><span>Buy It Now Under $10k</span><strong>%s</strong><small>Fixed-price official tracts ready now</small></div>'
-            '<div class="kpi-card"><span>Lowest Rural $/Acre Live</span><strong>%s</strong><small>Among active priced 1+ acre tracts</small></div>'
+            '<div class="kpi-card"><span>Lowest Price per Acre</span><strong>%s</strong><small>Among active priced 1+ acre tracts</small></div>'
             '</div>' % (
                 "{:,}".format(len(below_bench)),
-                "{:,}".format(len(rural_deals)),
+                "{:,}".format(len(priced_acreage)),
                 "{:,}".format(len(under10k_cash)),
                 (esc(money(lowest_ppa)) + "/ac") if lowest_ppa else "–",
             ),
@@ -1285,8 +1285,8 @@ class Site(object):
             '<p class="small">Active parcels of at least 0.2 acres with official prices, program prices, or minimum bids at least 15%% below the county (or state) USDA/FHFA benchmark per acre. The benchmark measures agricultural land. Check each program’s eligibility and terms before applying. <a href="%s">Browse below-benchmark parcels on the map →</a></p>%s</section>' % (
                 min(60, len(below_bench)), self.u("/#deals=1&acres=0.2&sort=discount_desc"), deal_table(below_bench, 60)),
 
-            '<section id="rural-acreage" style="margin-top:28px"><h2>Cheapest Rural Acreage Deals (1+ Acres, Sorted by $/Acre)</h2>'
-            '<p class="small">Active priced tracts of 1 acre or larger across official state trust, tax-forfeited, and county auctions.</p>%s</section>' % deal_table(rural_deals, 50),
+            '<section id="rural-acreage" style="margin-top:28px"><h2>Lowest Price per Acre for Tracts of 1 Acre or More</h2>'
+            '<p class="small">Compare active public-agency listings with published prices or minimum bids.</p>%s</section>' % deal_table(priced_acreage, 50),
 
             '<section id="buy-now-under-10k" style="margin-top:28px"><h2>Fixed-Price Buy It Now Land Under $10,000</h2>'
             '<p class="small">Over-the-counter and fixed-price official offerings—no competitive auction required.</p>%s</section>' % deal_table(under10k_cash, 50),
@@ -1295,9 +1295,9 @@ class Site(object):
             '<p class="small">Sorted by soonest closing deadline and lowest opening bid. Review <a href="%s">all 50 states\' tax-sale &amp; redemption laws →</a></p>%s</section>' % (
                 self.u("/tax-sales/"), deal_table(auctions_priced, 50)),
         ]
-        desc = "Live U.S. below-market land deals scanner: %s active official parcels priced below county USDA/FHFA benchmarks, rural 1+ acre bargains, Buy It Now lots under $10k, and tax-sale auctions." % "{:,}".format(len(below_bench))
+        desc = "Compare %s active public-agency parcels priced below USDA/FHFA benchmarks, priced tracts of at least one acre, Buy It Now lots under $10,000, and tax-sale auctions." % "{:,}".format(len(below_bench))
         return self.layout(
-            "Below-Market Land Deals & Rural Bargain Scanner (50 States) | Landosaur",
+            "Below-Market Land Deals & Priced Acreage | Landosaur",
             desc, "/deals/", "".join(body), indexable=True, jsonld=[crumb_ld],
             scripts=["tables.js"], wide=True,
         )

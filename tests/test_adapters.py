@@ -436,6 +436,61 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
             attr["Appraised_Outbuilding"] = 600
             self.assertEqual(adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)[0], [])
 
+    def test_bethlehem_groups_vacant_parcels_in_one_current_auction(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = (
+            '<h1>Upcoming Tax Sales</h1><p>MUNICIPALITY: Town of Bethlehem<br>'
+            'AUCTION DATE: 1:00 p.m. on January 21, 2027<br>LOCATION: Memorial Hall</p>'
+            '<a href="/wp-content/uploads/2026/11/Munger.pdf">0 and 0 Munger Lane, Bethlehem CT</a>'
+        )
+        notice = (
+            "slated it for public auction LEVYING MUNICIPALITY: Town of Bethlehem "
+            "ADDRESS OF REAL ESTATE: 0 and 0 Munger Lane, Bethlehem CT "
+            "See Bethlehem Assessor Map 10-9 Lots 17 and 19 1:00 p.m. on January 21, 2027 "
+            "TOTAL AMOUNT DUE: $10,470 PRIVATE NAME"
+        )
+        features = [{"attributes": {"Town_Name": "Bethlehem", "Parcel_ID": f"10-9 {lot}", "Parcel_Collection_Year": "2026",
+                                   "Location_1": "0 MUNGER LN", "State_Use_Description": "Vacant Res.",
+                                   "Appraised_Land": 75400, "Appraised_Building": 0, "Appraised_Outbuilding": 0,
+                                   "Living_Area": None}} for lot in ("017", "019")]
+        with patch.object(adapters, "pdf_text", return_value=notice), \
+                patch.object(adapters, "_arcgis_query", return_value=features):
+            rows, source = adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual(source["upstream_total"], 1)
+            self.assertEqual((row["apn"], row["price"], row["deadline"]), ("10-9 017 / 10-9 019", None, "2027-01-21T18:00:00Z"))
+            self.assertEqual(len([part for part in row["facts"] if part["topic"] == "parcel_map"]), 2)
+            self.assertNotIn("PRIVATE NAME", json.dumps(row))
+            features[1]["attributes"]["Appraised_Building"] = 600
+            self.assertEqual(adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)[0], [])
+
+    def test_windham_requires_matching_current_bid_and_uses_state_outline(self):
+        directory = adapters.WINDHAM_CT_BIDS
+        detail = "https://www.windhamct.gov/bids.aspx?bidID=55"
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = {
+            directory: ('<div class="listItemsRow bid"><a href="bids.aspx?bidID=55">'
+                        'RFP, Sale and Reuse of Town-Owned Property</a><span class="BidDetail">'
+                        'Open</span><br><span>12/17/2026 12:00 PM</span></div>'),
+            detail: '<span>Status:</span> <span>Open</span><a href=/DocumentCenter/View/6596>Bridge_Street_RFP_Sale</a>',
+        }.__getitem__
+        terms = (
+            "85 Bridge Street | Willimantic, Connecticut. The parcel is approximately 0.13 acres. The property is vacant. "
+            "Proposals due Thursday, December 17, 2026, at 12:00 p.m. (noon) Eastern Time."
+        )
+        feature = {"attributes": {"Parcel_ID": "12-5-141-29", "Location_1": "85 BRIDGE ST"},
+                   "geometry": {"rings": [[[-72.2, 41.7], [-72.201, 41.7], [-72.201, 41.701], [-72.2, 41.7]]]}}
+        with patch.object(adapters, "pdf_text", return_value=terms) as pdf, \
+                patch.object(adapters, "_arcgis_query", return_value=[feature]):
+            rows, _ = adapters.windham_ct_surplus(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["acres"], row["deadline"], row["url"]),
+                             ("12-5-141-29", None, 0.13, "2026-12-17T17:00:00Z", detail))
+            self.assertTrue(row["geometry"])
+            pdf.return_value = terms.replace("12:00 p.m. (noon)", "1:00 p.m.")
+            with self.assertRaisesRegex(adapters.StructureError, "different cutoffs"):
+                adapters.windham_ct_surplus(fetch, NOW, self.fail)
+
     def test_san_joaquin_uses_current_ungrouped_sale_and_vacant_assessment(self):
         report = (
             "San Joaquin County\nMarch 17-18, 2027 Tax Sale List\nAssessee  Minimum Bid  Comments\n"

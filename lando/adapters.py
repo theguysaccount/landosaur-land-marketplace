@@ -220,6 +220,8 @@ def outline_url(listing):
         return one_parcel_url(JEFFERSON_CO_PARCELS, f"PIN='{listing['apn']}'", JEFFERSON_CO_FIELDS)
     if listing["source"] == "park-co-tax-deed" and listing["apn"] == PARK_CO_ACCOUNT:
         return one_parcel_url(PARK_CO_STATE_PARCELS, PARK_CO_STATE_MATCH, PARK_CO_STATE_FIELDS)
+    if listing["source"] == "windham-ct-surplus" and re.fullmatch(r"\d+(?:-\d+)+", listing["apn"]):
+        return one_parcel_url(CT_CAMA_PARCELS, f"Town_Name='Windham' AND Parcel_ID='{listing['apn']}'", "Parcel_ID,Location_1")
     if listing["source"] == "grays-harbor-wa-tax-title":
         return one_parcel_url(GRAYS_HARBOR_WA_PARCELS, "ORIG_PARCE='%s'" % listing["apn"].replace("'", "''"))
     if listing["source"] == "rio-grande-co-treasurer-sale" and listing["apn"] == RIO_GRANDE_CO_APN:
@@ -9159,6 +9161,8 @@ def windham_ct_surplus(fetch, now, warn):
             continue
         url = urllib.parse.urljoin(WINDHAM_CT_BIDS, link[1])
         notice = fetch.text(url)
+        if "Status: Open" not in clean(notice):
+            continue
         attachment = re.search(r'href=["\']?(/DocumentCenter/View/\d+)["\']?\s*>Bridge_Street_RFP_Sale</a>', notice)
         if not attachment:
             continue
@@ -9166,10 +9170,17 @@ def windham_ct_surplus(fetch, now, warn):
         terms = clean(pdf_text(fetch, document, extraction_mode="plain"))
         place = re.search(r"(\d+ Bridge Street)\s*\|\s*(Willimantic), Connecticut", terms)
         area = re.search(r"The parcel is approximately ([\d.]+) acres", terms)
-        if not place or not area or "The property is vacant." not in terms:
-            raise StructureError("Windham’s sale packet no longer confirms the vacant tract and acreage")
+        due = re.search(r"Proposals due \w+, ([A-Za-z]+ \d{1,2}, \d{4}), at (\d{1,2}:\d{2}) ([ap])\.m\."
+                        r"(?: \(noon\))? Eastern Time\b", terms)
+        if not place or not area or not due or "The property is vacant." not in terms:
+            raise StructureError("Windham’s sale packet no longer confirms the vacant tract, acreage and cutoff")
+        if datetime.datetime.strptime(f"{due[1]} {due[2]} {due[3]}m", "%B %d, %Y %I:%M %p") != close.replace(tzinfo=None):
+            raise StructureError("Windham’s sale packet and bid posting give different cutoffs")
         address, locality = place.groups()
-        rows.append({
+        situs = address.upper().replace(" STREET", " ST")
+        parcel = _arcgis_query(fetch, CT_CAMA_PARCELS, f"Town_Name='Windham' AND Location_1 IN ({quote_list([situs])})",
+                               "Parcel_ID,Location_1", count=3, post=True)
+        row = {
             "id": "ct-windham-" + slug(address), "source": "windham-ct-surplus",
             "title": "%s, %s (Windham vacant town land)" % (address, locality),
             "state": "CT", "county": "Windham", "locality": locality, "apn": "", "address": address,
@@ -9179,7 +9190,13 @@ def windham_ct_surplus(fetch, now, warn):
             "facts": [fact("availability", "The town is seeking purchase and reuse proposals for the vacant tract.", document),
                       fact("site_constraints", "Small waterfront site with physical constraints. The town has not determined buildability.", document)],
             "tags": ["town surplus", "purchase proposal"],
-        })
+        }
+        if len(parcel) == 1 and parcel[0]["attributes"].get("Location_1") == situs:
+            row["apn"] = clean(parcel[0]["attributes"].get("Parcel_ID"))
+            if row["apn"]:
+                apply_geometry(row, (parcel[0].get("geometry") or {}).get("rings", []), CT_CAMA_PARCELS,
+                               "Connecticut GIS Office")
+        rows.append(row)
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
@@ -10896,6 +10913,8 @@ def jefferson_tx_sheriff_sale(fetch, now, warn):
 CT_MUNICIPAL_TAX_SALE = "https://cttaxsales.com/upcoming-tax-sales/"
 CT_CAMA_PARCELS = ("https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/services/"
                    "Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0/query")
+CT_CAMA_FIELDS = ("Town_Name,Parcel_ID,Parcel_Collection_Year,Location_1,State_Use_Description,Appraised_Land,"
+                  "Appraised_Building,Appraised_Outbuilding,Living_Area,Land_Acres")
 
 
 def parse_ct_municipal_tax_sales(page):
@@ -10922,12 +10941,50 @@ def parse_ct_municipal_tax_sales(page):
         yield town, time, date, notices
 
 
+def bethlehem_ct_munger_auction(fetch, url, time, date, start, year):
+    notice = clean(pdf_text(fetch, url, extraction_mode="plain"))
+    if ("LEVYING MUNICIPALITY: Town of Bethlehem" not in notice
+            or "ADDRESS OF REAL ESTATE: 0 and 0 Munger Lane, Bethlehem CT" not in notice
+            or "See Bethlehem Assessor Map 10-9 Lots 17 and 19" not in notice
+            or f"{time} on {date}" not in notice or "slated it for public auction" not in notice):
+        return None
+    pins = ("10-9 017", "10-9 019")
+    town = "Town_Name='Bethlehem'"
+    features = _arcgis_query(fetch, CT_CAMA_PARCELS, f"{town} AND Parcel_ID IN ({quote_list(pins)})",
+                             CT_CAMA_FIELDS, count=3, post=True)
+    by_pin = {feature["attributes"].get("Parcel_ID"): feature["attributes"] for feature in features}
+    if len(features) != len(pins) or set(by_pin) != set(pins):
+        return None
+    parcel_facts = []
+    for pin in pins:
+        attr = by_pin[pin]
+        if (attr.get("Town_Name") != "Bethlehem" or attr.get("Location_1") != "0 MUNGER LN"
+                or clean(attr.get("Parcel_Collection_Year")) not in {str(year), str(year - 1)}
+                or attr.get("State_Use_Description") != "Vacant Res." or not number(attr.get("Appraised_Land"))
+                or attr.get("Appraised_Building") != 0 or attr.get("Appraised_Outbuilding") != 0
+                or number(attr.get("Living_Area"))):
+            return None
+        outline = one_parcel_url(CT_CAMA_PARCELS, f"{town} AND Parcel_ID='{pin}'", "Parcel_ID,Location_1")
+        parcel_facts.append(fact("parcel_map", f"State assessment parcel {pin} (vacant land)", outline))
+    return {
+        "id": "ct-bethlehem-tax-deed-10-9-017-and-019", "source": "ct-municipal-vacant-tax-deed",
+        "title": "Munger Lane parcels 10-9 017 and 10-9 019 (Bethlehem municipal tax deed)",
+        "state": "CT", "county": "Litchfield", "locality": "Bethlehem", "apn": " / ".join(pins), "address": "Munger Lane",
+        "acres": None, "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+        "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "url": url, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The notice offers two separately mapped parcels together.", "="),
+                  fact("auction_start", f"{date} at {time} Eastern", "="),
+                  fact("sale_terms", "Read the current auction notice for the deposit, registration and redemption terms.", "="),
+                  *parcel_facts],
+        "tags": ["vacant land", "tax deed auction", "two-parcel auction"],
+    }
+
+
 def ct_municipal_tax_sales(fetch, now, warn):
     from zoneinfo import ZoneInfo
 
     zone = ZoneInfo("America/New_York")
-    fields = ("Town_Name,Parcel_ID,Parcel_Collection_Year,Location_1,State_Use_Description,Appraised_Land,"
-              "Appraised_Building,Appraised_Outbuilding,Living_Area,Land_Acres")
     rows = []
     upstream_total = 0
     for town, time, date, notices in parse_ct_municipal_tax_sales(fetch.text(CT_MUNICIPAL_TAX_SALE)):
@@ -10935,8 +10992,13 @@ def ct_municipal_tax_sales(fetch, now, warn):
         if start <= now or not notices:
             continue
         upstream_total += len(notices)
+        if town == "Bethlehem" and (group_url := notices.pop("0 AND 0 MUNGER LANE", None)):
+            if group := bethlehem_ct_munger_auction(fetch, group_url, time, date, start, now.year):
+                rows.append(group)
+        if not notices:
+            continue
         where = f"Town_Name IN ({quote_list([town])}) AND UPPER(Location_1) IN ({quote_list(notices)})"
-        features = _arcgis_query(fetch, CT_CAMA_PARCELS, where, fields, post=True)
+        features = _arcgis_query(fetch, CT_CAMA_PARCELS, where, CT_CAMA_FIELDS, post=True)
         seen = Counter(clean((f["attributes"].get("Location_1") or "")).upper() for f in features)
         for feature in features:
             attr = feature["attributes"]
@@ -12702,7 +12764,7 @@ NOT_CARRIED = [
     ("Kenai Peninsula Borough land sale catalog", "https://www.kpb.us/local-governance-and-permitting/land-use/borough-public-lands/borough-public-lands-resources/kpb-land-sales",
      "The municipal host returned HTML in place of robots.txt."),
     ("USDA Farm Service Agency property catalog", "https://www.resales.usda.gov/resales/public/searchFSA",
-     "The listing host returned HTML in place of robots.txt."),
+     "The listing host and the USDA alternative at properties.sc.egov.usda.gov returned HTML in place of robots.txt."),
     ("City of Providence municipal parcel server", "https://webgis.providenceri.gov/server/rest/services",
      "The municipal parcel server timed out on robots.txt. The Rhode Island DEM independently publishes the Providence parcel outline."),
     ("Kauaʻi County real property tax site", "https://www.kauaipropertytax.com/",
@@ -12747,6 +12809,8 @@ NOT_CARRIED = [
      "The town disallows the article path, and the linked assessor map service disallows parcel queries in robots.txt."),
     ("Suffield linked assessor property cards", "https://www.propertyrecordcards.com/SearchMaster.aspx?towncode=139",
      "The assessor vendor disallows its property search path in robots.txt."),
+    ("Connecticut CTsource Bid Board", "https://webprocure.proactiscloud.com/wp-web-public/en/",
+     "The state procurement vendor returned HTML in place of robots.txt. Windham’s separate town bid notice is carried."),
     ("Arkansas GeoStor statewide assessor portal", "https://geostor.arkansas.gov/",
      "The state’s historical GIS host returned HTML in place of robots.txt."),
     ("Prince George’s County available surplus land", "https://www.princegeorgescountymd.gov/departments-offices/redevelopment-authority/surplus-real-property-program/available-county-surplus-real-property-disposition",

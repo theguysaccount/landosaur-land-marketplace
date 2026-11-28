@@ -6,7 +6,7 @@ Validates every page (title, description, canonical, 1 h1, not-an-offer notice, 
 working internal links, unique titles), official https agency links and zero previous-owner leaks
 on listing pages/CSV, and exact parity between indexable pages and the sitemap index + child sitemaps.
 """
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import base64
 import gzip
 import hashlib
@@ -74,6 +74,8 @@ JSON_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S
 OWNER = re.compile(r"\bOwner\b")
 # Only these numeric references can conceal letters in the forbidden field name.
 OWNER_ENTITY = re.compile(r"&#(?:0*(?:79|119|110|101|114)(?![0-9])|[xX]0*(?:4[fF]|77|6[eE]|65|72)(?![0-9a-fA-F]))")
+PARCEL_KEY_PART = re.compile(r"[^a-z0-9]")
+COUNTY_SUFFIX = re.compile(r" county$")
 OFFICIAL_LINK = re.compile(r'<a[^>]*data-official-source="1"[^>]*href="([^"]+)"')
 
 
@@ -103,6 +105,11 @@ def official_source(link):
     except ValueError:
         return False
     return url.scheme == "https" and official_host(host)
+
+
+@lru_cache(maxsize=4096)
+def normalized_county(county):
+    return PARCEL_KEY_PART.sub("", COUNTY_SUFFIX.sub("", county.lower()))
 
 
 def document_links(doc):
@@ -201,25 +208,53 @@ def validate_archive(bucket):
     return results
 
 
-def dist_files(dist):
-    pending = [(dist, "")]
+def dist_files(dist, prefix="", *, exclude=None):
+    pending = [(dist, prefix)]
     while pending:
         directory, prefix = pending.pop()
         with os.scandir(directory) as entries:
             for entry in entries:
                 relative = prefix + entry.name
                 if entry.is_dir():
-                    if not entry.is_symlink():
+                    if relative != exclude and not entry.is_symlink():
                         pending.append((entry.path, relative + "/"))
                 else:
                     yield relative
+
+
+def inventory_files(dist):
+    land = os.path.join(dist, "land")
+    if not os.path.isdir(land) or os.path.islink(land):
+        return set(dist_files(dist))
+
+    # Scan the tens of thousands of dossier directories in four batches.
+    folders = []
+    files = set()
+    with os.scandir(land) as entries:
+        for entry in entries:
+            relative = "land/" + entry.name
+            if entry.is_dir():
+                if not entry.is_symlink():
+                    folders.append((entry.path, relative + "/"))
+            else:
+                files.add(relative)
+
+    def scan_batch(batch):
+        return {rel for directory, prefix in batch for rel in dist_files(directory, prefix)}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        batches = pool.map(scan_batch, (folders[i::4] for i in range(4)))
+        files.update(dist_files(dist, exclude="land"))
+        for batch in batches:
+            files.update(batch)
+    return files
 
 
 def main(dist, data_dir=None):
     dist = os.path.abspath(dist)
     base = config.base_path()
     problems, titles, indexable = [], {}, set()
-    files = set(dist_files(dist))
+    files = inventory_files(dist)
     pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
     buckets = archive_files(dist)
     archive_paths = archive_listing_paths(buckets)
@@ -289,8 +324,8 @@ def main(dist, data_dir=None):
 
     active_parcels = {}
     for row in cat.current():
-        county = re.sub(r"[^a-z0-9]", "", re.sub(r" county$", "", row["county"].lower()))
-        apn = re.sub(r"[^a-z0-9]", "", row.get("apn", "").lower())
+        county = normalized_county(row["county"])
+        apn = PARCEL_KEY_PART.sub("", row.get("apn", "").lower())
         if not county or not apn:
             continue
         key = (row["state"], county, apn)
@@ -298,15 +333,18 @@ def main(dist, data_dir=None):
         if first["source"] != row["source"]:
             problems.append("same active parcel offered by more than one feed: %s and %s" % (first["id"], row["id"]))
     for r in cat.listings:
-        rel = os.path.join("land", r["slug"], "index.html")
+        rel = "land/%s/index.html" % r["slug"]
         if rel not in files:
             problems.append("listing %s has no page" % r["id"])
         elif config.INDEXABLE and listing_is_indexable(r) and cat.listing_path(r) not in indexable:
             problems.append("priced/deadline listing %s should be indexable" % r["id"])
         elif r["available"] and (r.get("acres") or 0) >= 1 and rel in archive_paths:
             problems.append("current rural listing %s should have a static page" % r["id"])
-    csv_text = open(os.path.join(dist, "data", "listings.csv"), encoding="utf-8").read()
-    if "Owner" in csv_text.splitlines()[0]:
+    with open(os.path.join(dist, "data", "listings.csv"), encoding="utf-8") as csv_file:
+        header = csv_file.readline()
+    if not header.strip():
+        problems.append("listings.csv has no header")
+    elif "Owner" in header:
         problems.append("listings.csv has an owner column")
     print("checked %d static HTML files and %d on-demand dossiers, %d listings, %d indexable pages: %d problems" % (
         len(pages), len(archive_paths), len(cat.listings), len(indexable), len(problems)))

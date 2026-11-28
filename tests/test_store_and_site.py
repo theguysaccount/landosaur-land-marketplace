@@ -2,6 +2,7 @@ import datetime
 import html as htmllib
 import json
 import os
+from pathlib import Path
 import re
 import shutil
 import tempfile
@@ -76,6 +77,17 @@ class RefreshAndBuildTest(unittest.TestCase):
             self.assertTrue(check_dist.mentions_owner(content), content)
         for content in ("&#9744; Parcel card", "HomeOwnership", "landowner", "&#112;arcel"):
             self.assertFalse(check_dist.mentions_owner(content), content)
+
+    def test_validator_scans_dossiers_and_the_rest_of_dist(self):
+        dist = Path(self.tmp) / "verification"
+        names = {"index.html", "land/index.html", "land/apn-01/index.html",
+                 "land/apn-01/attachments/survey.txt", "land/apn-02/index.html",
+                 "data/example.json", "_og/example.png"}
+        for name in names:
+            path = dist / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        self.assertEqual(check_dist.inventory_files(dist), names)
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

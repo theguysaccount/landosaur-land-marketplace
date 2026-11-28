@@ -13691,6 +13691,12 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("Park County’s Pike/San Isabel broker catalog", "https://parkcountyco.gov/m/newsflash/home/detail/1278",
+     "The county’s designated brokerage catalog path is disallowed by robots.txt. The county’s older sale sheet does not establish current status for individual packages."),
+    ("Ludlow, Vermont newspaper tax-sale notice", "https://vermontjournal.com/",
+     "The newspaper returned HTTP 403 for robots.txt. Both parcels on Ludlow’s separately published December 18 list have assessed improvements."),
+    ("Lowell, Oregon vacant municipal lot notice", "https://www.lowelloregon.gov/administration/page/vacant-city-lot-sale",
+     "The city notice path is disallowed by robots.txt."),
     ("Hermiston industrial property directory", "https://www.hermiston.gov/economic-development/page/access-property",
      "The city's robots.txt connection closed without returning a policy."),
     ("Pendleton Westgate industrial area nomination", "https://www.oregon.gov/biz/programs/rsis/pages/default.aspx",

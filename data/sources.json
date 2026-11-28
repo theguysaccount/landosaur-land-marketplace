@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T07:58:31Z",
+ "checked": "2026-11-28T08:05:06Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -705,6 +705,24 @@
    "upstream_total": 75,
    "url": "https://gis.cravencountync.gov/County_Property_Available_For_Purchase.aspx"
   },
+  "ct-municipal-vacant-tax-deed": {
+   "about": "Current municipal auction notices from the towns\u2019 appointed administrator, matched against state assessment records.",
+   "agency": "Participating Connecticut Municipal Tax Collectors",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T08:05:06Z",
+   "last_success": "2026-11-28T08:05:06Z",
+   "message": "",
+   "name": "Connecticut municipal vacant land tax deeds",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 15,
+   "state": "CT",
+   "upstream_total": 42,
+   "url": "https://cttaxsales.com/upcoming-tax-sales/"
+  },
   "cuyahoga-oh-landbank": {
    "about": "Parcels expressly labeled Vacant Land - Available in the county land bank's sale catalog.",
    "agency": "Cuyahoga Land Bank",
@@ -1244,6 +1262,24 @@
    "state": "OH",
    "upstream_total": 2,
    "url": "https://www.jacksoncountyohlandbank.org/available-properties"
+  },
+  "jefferson-tx-sheriff-deed": {
+   "about": "Current sheriff tax-deed offerings and their published minimum bids, limited to vacant lots verified by the appraisal district.",
+   "agency": "Jefferson County Sheriff, Texas",
+   "complete": true,
+   "count": 49,
+   "failures": 0,
+   "last_attempt": "2026-11-28T08:05:06Z",
+   "last_success": "2026-11-28T08:05:06Z",
+   "message": "",
+   "name": "Jefferson County Sheriff vacant land tax deeds",
+   "notes": [],
+   "ok": true,
+   "read": 49,
+   "seconds": 8,
+   "state": "TX",
+   "upstream_total": 132,
+   "url": "https://jeffcotax.com/property-tax/delinquent-tax-sale/"
   },
   "kansas-city-landbank": {
    "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context.",

@@ -9892,7 +9892,191 @@ def san_joaquin_ca_auction(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": parsed}
 
 
+JEFFERSON_TX_SALE = "https://jeffcotax.com/property-tax/delinquent-tax-sale/"
+JEFFERSON_TX_PARCELS = ("https://services.arcgis.com/ZXAF35aJr7XcgDMv/arcgis/rest/services/"
+                        "Parcel_JeffersonCAD/FeatureServer/0/query")
+
+
+def parse_jefferson_sheriff_notice(report, sale_day):
+    heading = " ".join(report.split())
+    if not all(text in heading for text in ("PUBLIC NOTICE OF SALE", "Jefferson County", "Adjudged Value", "Minimum Bid")):
+        raise StructureError("Jefferson County's sheriff sale notice changed")
+    month_year = sale_day.strftime("%B, %Y")
+    if not re.search(rf"\bin {month_year},\s+the same being the {sale_day.day}(?:st|nd|rd|th) day\b", heading):
+        raise StructureError("Jefferson County's published sale date and notice do not agree")
+    start = re.search(r"beginning at (\d{1,2}:\d{2} [AP]M)\b", heading)
+    if not start:
+        raise StructureError("Jefferson County's sheriff sale notice lacks a start time")
+    minimums = {}
+    listing = re.compile(r"^.{0,30}?(\d{6}-\d{3})[^\n]*?\$[\d,]+\.\d{2}[ \t]+\$([\d,]+\.\d{2})"
+                         r"[^\n]*\n[^\n]{0,33}?(\d{6}-\d{5})\b", re.M)
+    for head, amount, tail in listing.findall(report):
+        pid = head + "-" + tail
+        if pid in minimums:
+            raise StructureError("Jefferson County's sheriff sale notice repeats an assessment account")
+        if price := number(amount):
+            minimums[pid] = price
+    if not minimums:
+        raise StructureError("Jefferson County's sheriff sale notice has no readable auction minimums")
+    return minimums, datetime.datetime.strptime(start[1], "%I:%M %p").time()
+
+
+def jefferson_tx_sheriff_sale(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/Chicago")
+    page = fetch.text(JEFFERSON_TX_SALE)
+    if "DELINQUENT TAX SALE" not in clean(page).upper():
+        raise StructureError("Jefferson County's sheriff sale directory changed")
+    notices = {}
+    for href, _ in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
+        url = urllib.parse.urljoin(JEFFERSON_TX_SALE, html.unescape(href))
+        parts = urllib.parse.urlsplit(url)
+        match = re.fullmatch(r"([A-Za-z]+)-(\d{1,2})-(\d{4})-Notice-of-Sale(?:-Rvs-(\d+))?\.pdf",
+                             urllib.parse.unquote(parts.path).rpartition("/")[2], re.I)
+        if parts.hostname != "jeffcotax.com" or not match:
+            continue
+        month, day, year, revision = match.groups()
+        date = datetime.datetime.strptime(f"{month} {day} {year}", "%B %d %Y").date()
+        if date >= now.astimezone(zone).date():
+            notices[date] = max(notices.get(date, (-1, "")), (int(revision or 0), url))
+    rows = []
+    upstream_total = 0
+    fields = ("geo_id,prop_val_yr,situs_city,state_code,property_u,imprv_val,land_val,market,main_class,"
+              "PACS_Bldg_,YrBlt,effective_yr_blt")
+    for date, (_, url) in sorted(notices.items()):
+        bids, time = parse_jefferson_sheriff_notice(pdf_text(fetch, url), date)
+        start = datetime.datetime.combine(date, time, tzinfo=zone)
+        if start <= now:
+            continue
+        upstream_total += len(bids)
+        features = []
+        ids = list(bids)
+        for index in range(0, len(ids), 45):
+            where = f"geo_id IN ({quote_list(ids[index:index + 45])})"
+            features.extend(_arcgis_query(fetch, JEFFERSON_TX_PARCELS, where, fields, post=True))
+        seen = Counter(feature["attributes"].get("geo_id") for feature in features)
+        for feature in features:
+            attr = feature["attributes"]
+            pid = attr.get("geo_id")
+            if (pid not in bids or seen[pid] != 1 or attr.get("state_code") != "C1" or attr.get("property_u") != "C1"
+                    or attr.get("prop_val_yr") not in {date.year, date.year + 1} or attr.get("main_class") != "LAND"
+                    or attr.get("imprv_val") != 0 or attr.get("PACS_Bldg_") != 0 or not number(attr.get("land_val"))
+                    or attr.get("market") != attr.get("land_val")
+                    or any(clean(str(attr.get(key) or "")) for key in ("YrBlt", "effective_yr_blt"))):
+                continue
+            rings = (feature.get("geometry") or {}).get("rings") or []
+            row = {
+                "id": "tx-jefferson-deed-" + slug(pid), "source": "jefferson-tx-sheriff-deed",
+                "title": f"Jefferson County parcel {pid} (Texas sheriff tax-deed sale)",
+                "state": "TX", "county": "Jefferson", "locality": clean(attr.get("situs_city") or "").title(),
+                "apn": pid, "address": "", "acres": rings_acres(rings) if len(rings) == 1 else None, "price": bids[pid],
+                "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+                "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "url": url, "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("auction_start", start.strftime("%B %d, %Y at %-I:%M %p Central"), "="),
+                          fact("land_use", "Vacant lot or land tract classified C1 by Jefferson Central Appraisal District.",
+                               JEFFERSON_TX_SALE),
+                          fact("sale_terms", "The county publishes bidder requirements, payment terms and redemption information.",
+                               JEFFERSON_TX_SALE)],
+                "tags": ["vacant land", "tax deed auction"],
+            }
+            apply_geometry(row, rings, JEFFERSON_TX_PARCELS, "Jefferson Central Appraisal District")
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": upstream_total}
+
+
+CT_MUNICIPAL_TAX_SALE = "https://cttaxsales.com/upcoming-tax-sales/"
+CT_CAMA_PARCELS = ("https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/services/"
+                   "Connecticut_CAMA_and_Parcel_Layer/FeatureServer/0/query")
+
+
+def parse_ct_municipal_tax_sales(page):
+    if "Upcoming Tax Sales" not in clean(page):
+        raise StructureError("Connecticut municipal tax sale directory changed")
+    for section in re.split(r"\bMUNICIPALITY:", page, flags=re.I)[1:]:
+        description = clean(section)
+        calendar = re.match(r"Town of ([A-Za-z][A-Za-z .'-]+?)\s+AUCTION DATE:\s*"
+                            r"(\d{1,2}:\d{2} [ap]\.m\.) on ([A-Za-z]+ \d{1,2}, \d{4})\b", description)
+        if not calendar:
+            continue
+        town, time, date = calendar.groups()
+        notices = {}
+        for href, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', section, re.I | re.S):
+            addr = re.fullmatch(r"(\d+[A-Za-z]? [A-Za-z0-9 .'-]+), " + re.escape(town) + r" CT", clean(label), re.I)
+            url = urllib.parse.urljoin(CT_MUNICIPAL_TAX_SALE, html.unescape(href))
+            destination = urllib.parse.urlsplit(url)
+            if not addr or destination.hostname != "cttaxsales.com" or not destination.path.lower().endswith(".pdf"):
+                continue
+            address = addr[1].upper()
+            if address in notices:
+                raise StructureError("Connecticut's current tax sale list repeats a town property")
+            notices[address] = url
+        yield town, time, date, notices
+
+
+def ct_municipal_tax_sales(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/New_York")
+    fields = ("Town_Name,Parcel_ID,Parcel_Collection_Year,Location_1,State_Use_Description,Appraised_Land,"
+              "Appraised_Building,Appraised_Outbuilding,Living_Area,Land_Acres")
+    rows = []
+    upstream_total = 0
+    for town, time, date, notices in parse_ct_municipal_tax_sales(fetch.text(CT_MUNICIPAL_TAX_SALE)):
+        start = datetime.datetime.strptime(f"{date} {time.replace('.', '')}", "%B %d, %Y %I:%M %p").replace(tzinfo=zone)
+        if start <= now or not notices:
+            continue
+        upstream_total += len(notices)
+        where = f"Town_Name IN ({quote_list([town])}) AND UPPER(Location_1) IN ({quote_list(notices)})"
+        features = _arcgis_query(fetch, CT_CAMA_PARCELS, where, fields, post=True)
+        seen = Counter(clean((f["attributes"].get("Location_1") or "")).upper() for f in features)
+        for feature in features:
+            attr = feature["attributes"]
+            address = clean(attr.get("Location_1")).upper()
+            pid = clean(attr.get("Parcel_ID"))
+            use = clean(attr.get("State_Use_Description"))
+            if (address not in notices or seen[address] != 1 or attr.get("Town_Name") != town or not pid
+                    or clean(attr.get("Parcel_Collection_Year")) not in {str(now.year), str(now.year - 1)}
+                    or not re.fullmatch(r"Vacant(?: Land| Lot)?", use, re.I)
+                    or attr.get("Appraised_Building") != 0 or attr.get("Appraised_Outbuilding") != 0
+                    or not number(attr.get("Appraised_Land")) or number(attr.get("Living_Area"))):
+                continue
+            url = notices[address]
+            notice = " ".join(pdf_text(fetch, url, extraction_mode="plain").split())
+            if (f"LEVYING MUNICIPALITY: Town of {town}" not in notice
+                    or f"ADDRESS OF REAL ESTATE: {address}, {town} CT".upper() not in notice.upper()
+                    or f"{time} on {date}" not in notice or "slated it for public auction" not in notice):
+                continue
+            row = {
+                "id": f"ct-{slug(town)}-tax-deed-{slug(pid)}", "source": "ct-municipal-vacant-tax-deed",
+                "title": f"{address.title()}, {town} (vacant municipal tax-deed parcel)",
+                "state": "CT", "county": "", "locality": town, "apn": pid, "address": address.title(),
+                "acres": number(attr.get("Land_Acres")), "price": None, "price_kind": "none",
+                "offering": "auction", "status": "auction_terms",
+                "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "url": url, "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("auction_start", f"{date} at {time} Eastern", "="),
+                          fact("land_use", "Vacant land with zero appraised building and outbuilding value in the state parcel data.",
+                               "https://portal.ct.gov/datapolicy/gis-office/parcel-and-cama"),
+                          fact("sale_terms", "Read the current auction notice for the deposit, registration and redemption terms.", "=")],
+                "tags": ["vacant land", "tax deed auction"],
+            }
+            apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), CT_CAMA_PARCELS,
+                           "Connecticut GIS Office")
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": upstream_total}
+
+
 SOURCES = [
+    {"id": "ct-municipal-vacant-tax-deed", "name": "Connecticut municipal vacant land tax deeds",
+     "agency": "Participating Connecticut Municipal Tax Collectors", "url": CT_MUNICIPAL_TAX_SALE, "state": "CT",
+     "run": ct_municipal_tax_sales, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Current municipal auction notices from the towns’ appointed administrator, matched against state assessment records."},
+    {"id": "jefferson-tx-sheriff-deed", "name": "Jefferson County Sheriff vacant land tax deeds",
+     "agency": "Jefferson County Sheriff, Texas", "url": JEFFERSON_TX_SALE, "state": "TX",
+     "run": jefferson_tx_sheriff_sale, "requires_sale_match": True, "timezone": "America/Chicago",
+     "about": "Current sheriff tax-deed offerings and their published minimum bids, limited to vacant lots verified by the appraisal district."},
     {"id": "san-joaquin-ca-tax-deed", "name": "San Joaquin County vacant land tax deeds",
      "agency": "San Joaquin County Treasurer-Tax Collector, California", "url": SAN_JOAQUIN_CA_SALE, "state": "CA",
      "run": san_joaquin_ca_auction, "requires_sale_match": True, "timezone": "America/Los_Angeles",
@@ -10440,6 +10624,11 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Jefferson Central Appraisal District web property detail and public download",
+     "https://esearch.jcad.org/Property/View/",
+     "The district disallows the property-detail paths, and jcad.org returned HTTP 403 for robots.txt. The separately published district GIS is carried."),
+    ("Texas Geographic Information Office DataHub", "https://data.geographic.texas.gov/",
+     "The DataHub returned HTTP 403 for robots.txt."),
     ("Bristol Bay Native Association land offers", "https://bbna.com/our-communities/land-sales-permits-and-leases/",
      "The association’s host returned HTTP 403 for robots.txt."),
     ("John Day municipal industrial land catalog", "https://www.cityofjohnday.com/building/page/industrial-park",

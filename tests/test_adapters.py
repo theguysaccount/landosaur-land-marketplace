@@ -45,6 +45,59 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_jefferson_matches_latest_notice_to_current_vacancy_and_minimum(self):
+        fetch = unittest.mock.Mock()
+        prefix = "https://jeffcotax.com/uploads/December-1-2026-Notice-of-Sale"
+        fetch.text.return_value = (
+            f'Delinquent Tax Sale <a href="{prefix}.pdf">Notice</a>'
+            f'<a href="{prefix}-Rvs-2.pdf">Revised notice</a>'
+        )
+        report = (
+            "PUBLIC NOTICE OF SALE Jefferson County\n"
+            "on the first Tuesday in December, 2026, the same being the 1st day\n"
+            "of said month, beginning at 10:00 AM, and will proceed.\n"
+            "Acct #   Adjudged Value    Minimum Bid\n"
+            "              052800-000     PRIVATE NAME    $2,207.00     $2,236.00\n"
+            "              058200-00000\n"
+        )
+        attr = {"geo_id": "052800-000-058200-00000", "prop_val_yr": 2027, "state_code": "C1", "property_u": "C1",
+                "main_class": "LAND", "imprv_val": 0, "PACS_Bldg_": 0, "land_val": 2207, "market": 2207,
+                "YrBlt": " ", "effective_yr_blt": ""}
+        with patch.object(adapters, "pdf_text", return_value=report) as pdf, patch.object(
+            adapters, "_arcgis_query", return_value=[{"attributes": attr}]
+        ) as query:
+            rows, _ = adapters.jefferson_tx_sheriff_sale(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["price"], row["deadline"]), (2236, "2026-12-01T16:00:00Z"))
+            self.assertEqual(pdf.call_args.args[1], prefix + "-Rvs-2.pdf")
+            self.assertNotIn("PRIVATE NAME", json.dumps(row))
+            self.assertNotIn("owner", query.call_args.args[3].lower())
+            attr["YrBlt"] = "2026"
+            self.assertEqual(adapters.jefferson_tx_sheriff_sale(fetch, NOW, self.fail)[0], [])
+
+    def test_connecticut_uses_current_notice_and_excludes_debt_from_price(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = (
+            '<h1>Upcoming Tax Sales</h1><p>MUNICIPALITY: Town of Tolland<br>'
+            'AUCTION DATE: 10:00 a.m. on December 1, 2026<br>LOCATION: Town Hall</p>'
+            '<a href="/wp-content/uploads/2026/Sugar-Hill.pdf">636 Sugar Hill Road, Tolland CT</a>'
+        )
+        notice = ("The municipality has levied on the real estate and slated it for public auction. "
+                  "LEVYING MUNICIPALITY: Town of Tolland ADDRESS OF REAL ESTATE: 636 Sugar Hill Road, Tolland CT "
+                  "10:00 a.m. on December 1, 2026 TOTAL AMOUNT DUE: $7,399.46 PRIVATE NAME")
+        attr = {"Town_Name": "Tolland", "Parcel_ID": "03-C-001", "Parcel_Collection_Year": "2026",
+                "Location_1": "636 SUGAR HILL ROAD", "State_Use_Description": "Vacant", "Land_Acres": 2.48,
+                "Appraised_Land": 7400, "Appraised_Building": 0, "Appraised_Outbuilding": 0, "Living_Area": None}
+        with patch.object(adapters, "pdf_text", return_value=notice), patch.object(
+            adapters, "_arcgis_query", return_value=[{"attributes": attr}]
+        ):
+            rows, _ = adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["deadline"]), ("03-C-001", None, "2026-12-01T15:00:00Z"))
+            self.assertNotIn("PRIVATE NAME", json.dumps(row))
+            attr["Appraised_Outbuilding"] = 600
+            self.assertEqual(adapters.ct_municipal_tax_sales(fetch, NOW, self.fail)[0], [])
+
     def test_san_joaquin_uses_current_ungrouped_sale_and_vacant_assessment(self):
         report = (
             "San Joaquin County\nMarch 17-18, 2027 Tax Sale List\nAssessee  Minimum Bid  Comments\n"

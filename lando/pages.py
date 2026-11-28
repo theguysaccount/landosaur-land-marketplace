@@ -584,7 +584,7 @@ class Site(object):
         return self.layout(
             "Land for Sale Map, 50-State Land Prices & Parcel Analyzer | Landosaur",
             desc, "/", "".join(body), indexable=True, jsonld=ld,
-            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "geo.js", "watchlist.js", "map.js", "tables.js"], wide=True,
+            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "geo.js", "availability.js", "watchlist.js", "map.js", "tables.js"], wide=True,
         )
 
     # ------------------------------------------------------------------ /xray/ Universal 50-State Parcel X-Ray
@@ -2533,16 +2533,16 @@ class Site(object):
             eligibility = ('<p class="small"><strong>Program eligibility applies.</strong> '
                            'Confirm the listed terms with the agency before starting an acquisition.</p>')
         agent_box = (
-            '<div class="agent-checkout-card">'
+            '<div class="agent-checkout-card" data-offer-closes-at="%s">'
             '<div class="eyebrow">Landosaur Land Agent · Full Acquisition &amp; Deed Transfer</div>'
             '<h3>%s</h3>%s%s'
-            '<div class="btn-row" style="margin:12px 0 8px">'
+            '<div class="btn-row" data-acquisition-action style="margin:12px 0 8px">'
             '<a class="button" href="%s?%s">%s</a>'
             '</div>'
-            '<p class="small" style="margin:0">Includes county tax/lien &amp; redemption verification, agency paperwork or bid prep, and licensed title/deed closing coordination. '
+            '<p class="small" style="margin:0"><span data-acquisition-copy>Includes county tax/lien &amp; redemption verification, agency paperwork or bid prep, and licensed title/deed closing coordination. </span>'
             '<a data-official-source="1" href="%s" rel="noopener">%s</a></p>'
             '</div>'
-        ) % (agent_head, eligibility, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
+        ) % (r.get("closes_at_ms") or "", agent_head, eligibility, ledger_html, self.u("/services/"), esc(svc_q), agent_cta, esc(r["url"]), official_cta)
         if not r["available"]:
             agent_box = (
                 '<section class="callout"><h2>%s</h2><p>%s</p>'
@@ -2709,7 +2709,7 @@ class Site(object):
         return self.layout(
             "Government and Auction Land for Sale in %s | Landosaur" % st["name"], desc, cat.state_path(st), "".join(body),
             indexable=True, jsonld=[crumb_ld], og="state-%s" % st["code"].lower(),
-            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "geo.js", "watchlist.js", "map.js", "tables.js"], wide=True,
+            scripts=["vendor/leaflet.js", "vendor/leaflet.markercluster.js", "geo.js", "availability.js", "watchlist.js", "map.js", "tables.js"], wide=True,
         )
 
     def county(self, st, c, group=None):

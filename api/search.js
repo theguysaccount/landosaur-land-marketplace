@@ -4,7 +4,9 @@
 
 import { list } from "@vercel/blob";
 import "../site/geo.js";
+import "../site/availability.js";
 const { decode, matcher, measure } = globalThis.LandosaurGeo;
+const { closeExpired } = globalThis.LandosaurAvailability;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -92,6 +94,8 @@ async function loadDirectRows() {
       it.apn || "",
       (it.deadline || "").slice(0, 10),
       1,
+      null,
+      it.sale_mode === "auction" ? Date.parse(it.deadline) : null,
     ]);
   } catch {
     return [];
@@ -139,8 +143,9 @@ export async function GET(request) {
     const counts = { all: 0, buy_now: 0, auction: 0, offer: 0, direct: 0 };
     const statesSet = new Set();
 
+    const now = Date.now();
     for (let i = 0; i < all.length; i++) {
-      const r = all[i];
+      const r = closeExpired(all[i], now);
       if ((!includeClosed && !r[8]) || (area && !area(r[2],r[1]))) continue;
       if (state && r[3] !== state) continue;
       if (Number.isFinite(minPrice) && (r[4] == null || r[4] < minPrice)) continue;

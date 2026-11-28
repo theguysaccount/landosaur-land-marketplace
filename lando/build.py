@@ -28,7 +28,7 @@ from . import adapters, config, research
 from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
-STATIC = ["style.css", "theme.js", "geo.js", "watchlist.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+STATIC = ["style.css", "theme.js", "geo.js", "availability.js", "watchlist.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
 ARCHIVED_PARCELS = "data/archived-parcels"
 
 
@@ -554,9 +554,9 @@ def build(dist, data_dir=None, now=None, log=print):
                 vs_pct = int(round(((ppa - bench) / bench) * 100.0))
         rows.append([r["id"], r.get("lat"), r.get("lon"), r["state"], r["price"], r["price_kind"], r["acres"],
                      r["status"], 1 if r["available"] else 0, r["title"], r["county_label"], r.get("apn") or "",
-                     (r.get("deadline") or "")[:10], 0, vs_pct])
+                     (r.get("deadline") or "")[:10], 0, vs_pct, r["closes_at_ms"]])
     w.write("data/map.json", json.dumps({"fields": ["id", "lat", "lon", "state", "price", "kind", "acres", "status", "available",
-                                                    "title", "county", "apn", "deadline", "direct", "vs_bench_pct"], "rows": rows}, separators=(",", ":")))
+                                                    "title", "county", "apn", "deadline", "direct", "vs_bench_pct", "closes_at_ms"], "rows": rows}, separators=(",", ":")))
     out = io.StringIO()
     cw = csv.writer(out, lineterminator="\n")
     cw.writerow(["id", "source", "agency", "title", "state", "county", "locality", "address", "parcel", "acres", "price",

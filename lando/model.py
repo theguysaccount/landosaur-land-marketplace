@@ -66,20 +66,22 @@ class Catalog(object):
                 r["fresh"] = fresh
                 if src.get("historical_only"):
                     r["status"] = "availability_unverified"
+                if r["status"] == "availability_unverified":
                     r["price"], r["price_kind"], r["deadline"] = None, "none", None
                     r["facts"] = [f for f in r["facts"] if f["topic"] not in (
                         "availability", "price", "minimum_bid", "sale_program", "auction_item",
                         "deadline", "bid_deadline", "auction_start",
                     )]
                 label, available = adapters.STATUS.get(r["status"], (r["status"], False))
-                if r["status"] in ("auction_open", "auction_terms", "proposal_open") and r.get("deadline"):
-                    dl = parse_time(r["deadline"])
-                    if dl and dl < self.now:      # the deadline passed since the last read
-                        r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]
+                cutoff = parse_time(r.get("deadline")) if r["status"] in ("auction_open", "auction_terms", "proposal_open") else None
                 if available and sale_zone and r.get("offer_close_date"):
-                    if self.now.astimezone(sale_zone).date().isoformat() > r["offer_close_date"]:
-                        r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]
+                    day_after = datetime.date.fromisoformat(r["offer_close_date"]) + datetime.timedelta(days=1)
+                    day_cutoff = datetime.datetime.combine(day_after, datetime.time.min, tzinfo=sale_zone)
+                    cutoff = min(cutoff, day_cutoff) if cutoff else day_cutoff
+                if available and cutoff and cutoff <= self.now:
+                    r["status"], (label, available) = "auction_closed", adapters.STATUS["auction_closed"]
                 r["status_label"], r["available"] = label, available and fresh
+                r["closes_at_ms"] = int(cutoff.timestamp() * 1000) if cutoff and r["available"] else None
                 self.listings.append(r)
         seen = {}
         for r in self.listings:

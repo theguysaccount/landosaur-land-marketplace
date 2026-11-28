@@ -3487,59 +3487,138 @@ def ms_surplus(fetch, now, warn):
 
 
 # --- Horry County Delinquent Tax Sale Land (SC) ---
+HORRY_SC_URL = "https://www.horrycountysc.gov/departments/treasurer/delinquent-tax"
 HORRY_SC_GIS = "https://services1.arcgis.com/If0JkGr8ABreBTuS/arcgis/rest/services/DelinquentTaxParcels2025/FeatureServer/0/query"
-HORRY_SC_URL = "https://www.horrycountysc.gov/"
-SC_SKIP_WORDS = ("UNIT ", "CONDO", "HPR", "BLDG ", "APT ", "SUITE ", "VILLA ", "TIMESHAR", "INTERVAL", "WEEK ")
+HORRY_SC_ASSESSOR = "https://www.horrycounty.org/parcelapp/rest/services/HorryCountyGISApp/MapServer/24/query"
+HORRY_SC_NON_LAND = re.compile(r"\b(?:UNIT|CONDO|HPR|BLDG|APT|SUITE|VILLA|TIMESHARE|INTERVAL|WEEK|EASEMENT|RIGHT.OF.WAY|COMMON AREA)\b", re.I)
 
 
-def parse_horry_sc_features(features, warn):
-    out, seen = [], set()
-    for f in features:
-        a = f.get("attributes") or {}
-        desc = clean(str(a.get("Description") or ""))
-        u_desc = desc.upper()
-        if any(w in u_desc for w in SC_SKIP_WORDS):
+def horry_sale_schedule(docx):
+    from xml.etree import ElementTree
+    from zipfile import ZipFile
+    from zoneinfo import ZoneInfo
+
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    with ZipFile(io.BytesIO(docx)) as package:
+        document = ElementTree.fromstring(package.read("word/document.xml"))
+    for paragraph in document.findall(".//w:p", namespace):
+        text = " ".join(t.text or "" for t in paragraph.findall(".//w:t", namespace))
+        match = re.search(r"Day and Time:\s+\w+,\s+(\w+\s+\d{1,2},\s+\d{4}),\s*beginning\s+at\s+"
+                          r"(\d{1,2})\s*:\s*(\d{2})\s*([ap])\.?\s*m\.", text, re.I)
+        if match:
+            date, hour, minute, period = match.groups()
+            return datetime.datetime.strptime("%s %s:%s %sM" % (date, hour, minute, period.upper()),
+                                              "%B %d, %Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+    raise StructureError("Horry County 2026 tax sale date or time was not found in the current rules")
+
+
+def horry_offer_rows(rows, year):
+    items = iter(rows)
+    first = next(items, ())
+    if not first or not re.search(r"\b%d REAL ESTATE DELINQUENT TAX SALE LIST\b" % year, str(first[0]), re.I):
+        raise StructureError("Horry County workbook does not match the current auction year")
+    heading = next((row for row in items if row and row[0] == "Item"), ())
+    if not {"Item", "PIN", "Description", "FLC Bid Amount"}.issubset(heading):
+        raise StructureError("Horry County workbook columns changed")
+    item, pin, desc, price = (heading.index(key) for key in ("Item", "PIN", "Description", "FLC Bid Amount"))
+    result = {}
+    for row in items:
+        pid = str(row[pin] or "")
+        if not re.fullmatch(r"\d{11}", pid) or not str(row[item]).isdigit():
             continue
-        pin = clean(str(a.get("PIN_1") or a.get("Item_Number") or a.get("OBJECTID") or ""))
-        if not pin or pin in seen:
+        if HORRY_SC_NON_LAND.search(str(row[desc] or "")):
+            continue
+        bid = number(row[price])
+        if pid in result:
+            raise StructureError("duplicate Horry County tax sale parcel")
+        result[pid] = (str(row[item]), round(bid, 2) if bid else None)
+    return result
+
+
+def parse_horry_sc_features(features, offers, assessed, auction_start, roster_url, rules_url):
+    out, seen = [], set()
+    for feature in features:
+        a = feature.get("attributes") or {}
+        pin = str(a.get("PIN_1") or "")
+        offer, parcel = offers.get(pin), assessed.get(pin, {})
+        if not offer or offer[0] != str(a.get("Item_Number")) or pin in seen:
+            continue
+        if parcel.get("PARCELTYPE") != 2 or parcel.get("MarketImprv") != 0:
             continue
         seen.add(pin)
-        bid = number(a.get("FLC_Bid_Amount"))
-        rings = (f.get("geometry") or {}).get("rings") or []
-        acres = rings_acres(rings) if rings else None
+        bid = offer[1]
+        acres = number(parcel.get("Acreage"))
+        when = auction_start.strftime("%B %d, %Y at %I:%M %p ET")
         facts = [
-            fact("availability", "Horry County Delinquent Tax Sale Parcel", HORRY_SC_URL, "horry_sc"),
-            fact("parcel_number", pin, HORRY_SC_URL),
+            fact("availability", "Advertised in the county's current real-estate tax sale; the assessor shows zero improvement value", roster_url),
+            fact("auction_start", when, rules_url),
+            fact("redemption", "A 12-month right of redemption applies before a deed can transfer. Confirm fees and eligibility with the county.", rules_url),
         ]
-        if bid:
-            facts.append(fact("price", "Opening / FLC bid $%s" % "{:,.2f}".format(bid), HORRY_SC_URL, "horry_sc"))
-        if acres:
-            facts.append(fact("acreage", "%g acres (GIS polygon estimate)" % acres, HORRY_SC_URL, "gis_area"))
-        if desc:
-            facts.append(fact("legal_description", desc[:180], HORRY_SC_URL))
+        if bid is not None:
+            facts.append(fact("price", "$%s published Forfeited Land Commission opening bid; sale fees and later changes may apply" % "{:,.2f}".format(bid), roster_url))
+        if acres is not None:
+            facts.append(fact("acreage", "%g acres in the county appraisal record" % acres, one_parcel_url(HORRY_SC_ASSESSOR, "PIN=%s" % pin)))
         row = {
-            "id": "sc-hor-%s" % slug(pin), "source": "horry-sc",
+            "id": "sc-hor-" + pin, "source": "horry-sc",
             "title": "Horry County parcel %s (South Carolina tax-sale land)" % pin,
-            "state": "SC", "county": "Horry", "locality": "Conway", "apn": pin,
-            "acres": acres, "price": round(bid, 2) if bid else None,
-            "price_kind": "min_bid" if bid else "none", "offering": "auction",
-            "status": "auction_terms", "deadline": None, "url": HORRY_SC_URL,
-            "address": "", "lat": None, "lon": None, "geometry": None, "facts": facts,
-            "tags": ["tax sale auction", "south carolina"],
+            "state": "SC", "county": "Horry", "locality": "", "apn": pin,
+            "acres": acres, "price": bid, "price_kind": "min_bid" if bid is not None else "none",
+            "offering": "auction", "status": "auction_terms",
+            "deadline": auction_start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": HORRY_SC_URL, "address": "", "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax sale auction", "redemption applies"],
         }
-        if rings:
-            apply_geometry(row, rings, one_parcel_url(HORRY_SC_GIS, "PIN_1='%s'" % pin.replace("'", "''")), "Horry County SC GIS")
+        if rings := (feature.get("geometry") or {}).get("rings"):
+            apply_geometry(row, rings, one_parcel_url(HORRY_SC_GIS, "PIN_1='%s'" % pin), "Horry County SC GIS")
         out.append(row)
     return out
 
 
 def horry_sc(fetch, now, warn):
-    feats = _arcgis_query(fetch, HORRY_SC_GIS, "1=1",
-                          "OBJECTID,Item_Number,PIN_1,Description,FLC_Bid_Amount", 400)
-    rows = parse_horry_sc_features(feats, warn)[:220]
-    if len(rows) < 20:
-        raise StructureError("only %d Horry County SC tax-sale parcels" % len(rows))
-    return rows, {"complete": True, "upstream_total": len(rows)}
+    from openpyxl import load_workbook
+
+    page = fetch.text(HORRY_SC_URL)
+    links = {clean(label): urllib.parse.urljoin(HORRY_SC_URL, html.unescape(url))
+             for url, label in re.findall(r'<a\b[^>]*href="([^"]+)"[^>]*>(.{0,600}?)</a>', page, re.I | re.S)}
+    rules = links.get("Tax Sale Information")
+    roster = next((url for label, url in links.items()
+                   if re.match(r"\d{4} Real Estate Delinquent list\b", label, re.I)), None)
+    if not (rules and rules.endswith(".docx") and roster and roster.endswith(".xlsx")):
+        raise StructureError("Horry County's linked tax-sale rules or real estate workbook changed")
+    starts = horry_sale_schedule(fetch.bytes(rules))
+    if starts <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    workbook = load_workbook(io.BytesIO(fetch.bytes(roster)), read_only=True, data_only=True)
+    try:
+        offers = horry_offer_rows(workbook.active.values, starts.year)
+    finally:
+        workbook.close()
+    features, offset = [], 0
+    while True:
+        batch = _arcgis_query(fetch, HORRY_SC_GIS, "1=1", "PIN_1,Item_Number", count=500,
+                              extra={"orderByFields": "OBJECTID ASC", "resultOffset": offset})
+        features.extend(batch)
+        offset += len(batch)
+        if len(batch) < 500:
+            break
+    matched_ids = sorted({str(a.get("PIN_1")) for f in features if (a := f.get("attributes") or {})
+                          and str(a.get("PIN_1")) in offers and str(a.get("Item_Number")) == offers[str(a.get("PIN_1"))][0]})
+    if not offers or len(matched_ids) < 0.8 * len(offers):
+        raise StructureError("Horry County's tax-sale map and roster do not match the same current sale")
+    assessed = {}
+    for start in range(0, len(matched_ids), 250):
+        chunk = matched_ids[start:start + 250]
+        result = _arcgis_query(fetch, HORRY_SC_ASSESSOR, "PIN IN (%s)" % ",".join(chunk),
+                               "PIN,MarketImprv,PARCELTYPE,Acreage", count=1000,
+                               extra={"returnGeometry": "false"}, post=True)
+        for f in result:
+            a = f.get("attributes") or {}
+            if type(a.get("PIN")) in (int, float):
+                assessed[str(int(a["PIN"]))] = a
+    if len(assessed) < 0.8 * len(matched_ids):
+        raise StructureError("most current Horry County parcel assessments could not be matched")
+    rows = parse_horry_sc_features(features, offers, assessed, starts, roster, rules)
+    return rows, {"complete": True, "upstream_total": len(matched_ids)}
 
 
 # --- City of Portland Vacant City-Owned Land (OR) ---
@@ -6373,6 +6452,101 @@ def gresham_ne_lots(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(parcel_ids)}
 
 
+SCHENECTADY_NY_SALE = "https://cityofschenectady.gov/659/City-Owned-Vacant-Lots"
+MUSKEGON_MI_SALE = "https://co.muskegon.mi.us/1435/Residential-Properties"
+CUYAHOGA_OH_SALE = "https://cuyahogalandbank.org/all-available-properties/"
+
+
+def schenectady_ny_vacant(fetch, now, warn):
+    page = fetch.text(SCHENECTADY_NY_SALE)
+    link = re.search(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>\s*Available City Owned Vacant Lots\s*</a>', page, re.I)
+    if not link:
+        raise StructureError("Schenectady's available city lots report link changed")
+    url = urllib.parse.urljoin(SCHENECTADY_NY_SALE, html.unescape(link[1]))
+    report = pdf_text(fetch, url)
+    if not re.search(r"List of Available Lots\s*[-–]\s*\w+\s+\d{4}", report, re.I):
+        raise StructureError("Schenectady's current available lot report heading changed")
+    rows = []
+    for pid, location, cls, details in re.findall(
+            r"^[ \t]*(\d{1,3}(?:\.\d+)?-\d+(?:\.\d+)?-\d+(?:\.\d+)*)[ \t]{2,}(.+?)[ \t]{2,}(\d{3})[ \t]{2,}(.+)$",
+            report, re.M):
+        if cls not in {"311", "314", "322", "330", "340"}:
+            continue
+        address = clean(location)
+        facts = [fact("availability", "The city advertises this parcel as available for an offer", url)]
+        if re.search(r"\bnot\s*-?\s*buildable\b", details, re.I):
+            facts.append(fact("lot_size_review", "The city marks this lot below its buildable-size standard", url))
+        rows.append({
+            "id": "ny-schenectady-" + slug(pid), "source": "schenectady-ny-vacant",
+            "title": "%s, Schenectady (city vacant land)" % (address or pid),
+            "state": "NY", "county": "Schenectady", "locality": "Schenectady", "apn": pid,
+            "address": address, "acres": None, "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": SCHENECTADY_NY_SALE,
+            "lat": None, "lon": None, "geometry": None, "facts": facts, "tags": ["municipal land sale"],
+        })
+    if not rows:
+        raise StructureError("The Schenectady lot report yielded no verified vacant lots")
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+def muskegon_mi_residential(fetch, now, warn):
+    page = fetch.text(MUSKEGON_MI_SALE)
+    link = re.search(r'\bhref=["\']([^"\']*/rpt_Residential_Properties_for_Sale\.pdf)["\']', page, re.I)
+    if not link:
+        raise StructureError("Muskegon's sale page no longer links the residential sale report")
+    url = urllib.parse.urljoin(MUSKEGON_MI_SALE, html.unescape(link[1]))
+    report = pdf_text(fetch, url)
+    if not re.search(r"Residential Properties For Sale\s+\d{1,2}/\d{1,2}/\d{4}", report, re.I):
+        raise StructureError("Muskegon's residential sale report header changed")
+    rows = []
+    for address, pid in re.findall(r"^[ \t]*(.*?)[ \t]{2,}(61-\d{2}-\d{3}-\d{3}-\d{4}-\d{2})"
+                                    r"[ \t]+Residential\s*-\s*Vacant Lot[ \t]*$", report, re.I | re.M):
+        address = clean(address).title()
+        if address == "Vacant":
+            address = ""
+        rows.append({
+            "id": "mi-muskegon-" + pid, "source": "muskegon-mi-landbank",
+            "title": "%s, Muskegon County (land bank vacant lot)" % (address or "Parcel " + pid),
+            "state": "MI", "county": "Muskegon", "locality": "", "apn": pid,
+            "address": address, "acres": None, "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": MUSKEGON_MI_SALE,
+            "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Listed for sale as a vacant residential lot by the county land bank", url)],
+            "tags": ["land bank vacant lot"],
+        })
+    if not rows:
+        raise StructureError("The Muskegon sale report yielded no vacant residential lots")
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+def cuyahoga_oh_landbank(fetch, now, warn):
+    page = fetch.text(CUYAHOGA_OH_SALE)
+    if "All Available Cuyahoga Land Bank Properties" not in page:
+        raise StructureError("Cuyahoga's public land bank listing page changed")
+    rows, seen = [], set()
+    for block in re.findall(r"<tr\b[^>]*>(.*?)</tr>", page, re.I | re.S):
+        cells = [clean(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", block, re.I | re.S)]
+        if len(cells) != 7 or cells[-1] != "Vacant Land - Available":
+            continue
+        pid, street_no, street, city, _, posted, _ = cells
+        if not re.fullmatch(r"\d{3}-\d{2}-\d{3}", pid) or pid in seen:
+            continue
+        seen.add(pid)
+        address = clean(street_no + " " + street)
+        listed_on = datetime.datetime.strptime(posted, "%B %d, %Y").date().isoformat() if posted else None
+        rows.append({
+            "id": "oh-cuyahoga-lb-" + pid, "source": "cuyahoga-oh-landbank",
+            "title": "%s, %s (county land bank vacant lot)" % (address or "Parcel " + pid, city or "Cuyahoga County"),
+            "state": "OH", "county": "Cuyahoga", "locality": city, "apn": pid,
+            "address": address, "acres": None, "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": CUYAHOGA_OH_SALE,
+            "lat": None, "lon": None, "geometry": None, "listed_date": listed_on,
+            "facts": [fact("availability", "Marked Vacant Land - Available in the county Land Bank catalog", CUYAHOGA_OH_SALE)],
+            "tags": ["land bank vacant lot"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -6498,8 +6672,8 @@ SOURCES = [
      "url": MS_SURPLUS_URL, "state": "MS", "run": ms_surplus,
      "about": "Unimproved surplus parcels from the State of Mississippi GIS inventory with parcel outlines and acreage."},
     {"id": "horry-sc", "name": "Horry County Delinquent Tax Sale Land", "agency": "Horry County, South Carolina",
-     "url": HORRY_SC_URL, "state": "SC", "run": horry_sc, "historical_only": True,
-     "about": "The GIS feed comes from the county's 2025 delinquent tax sale. That event has ended."},
+     "url": HORRY_SC_URL, "state": "SC", "run": horry_sc, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Current county tax-sale roster and bid amounts matched to the sale map and to parcels with zero improvement value in county GIS."},
     {"id": "portland-or", "name": "City of Portland Vacant City-Owned Land", "agency": "City of Portland, Oregon",
      "url": PORTLAND_OR_URL, "state": "OR", "run": portland_or, "historical_only": True,
      "about": "The city ownership map requires a match to a council-approved active sale."},
@@ -6691,8 +6865,24 @@ SOURCES = [
      "agency": "Village of Gresham Community Development Agency", "url": GRESHAM_NE_SALE, "state": "NE",
      "run": gresham_ne_lots, "requires_sale_match": True,
      "about": "Current residential lot sale program parcels with no improvements in the state parcel data. The program sets prices individually."},
+    {"id": "schenectady-ny-vacant", "name": "Schenectady city-owned vacant lots",
+     "agency": "City of Schenectady Department of Development", "url": SCHENECTADY_NY_SALE, "state": "NY",
+     "run": schenectady_ny_vacant, "requires_sale_match": True,
+     "about": "City lots advertised in the current offer list. New York vacant-land classifications exclude lots with improvements."},
+    {"id": "muskegon-mi-landbank", "name": "Muskegon County Land Bank vacant residential lots",
+     "agency": "Muskegon County Land Bank Authority", "url": MUSKEGON_MI_SALE, "state": "MI",
+     "run": muskegon_mi_residential, "requires_sale_match": True,
+     "about": "Vacant residential lots in the county authority's currently advertised sale report."},
+    {"id": "cuyahoga-oh-landbank", "name": "Cuyahoga County Land Bank available vacant lots",
+     "agency": "Cuyahoga Land Bank", "url": CUYAHOGA_OH_SALE, "state": "OH",
+     "run": cuyahoga_oh_landbank, "requires_sale_match": True,
+     "about": "Parcels expressly labeled Vacant Land - Available in the county land bank's sale catalog."},
 ]
 NOT_CARRIED = [
+    ("Arkansas statewide parcel outline updates", "https://gis.arkansas.gov/",
+     "The parcel GIS host returned HTML in place of robots.txt. Current sale records are carried from the separate COSL auction catalog."),
+    ("Quad Cities Land Bank Authority", "https://www.qclba.org/",
+     "The catalog host's robots.txt disallows access to the public portal."),
     ("MnDOT individual sale packet documents", "https://www.mndot.net/row/propsales.html",
      "The linked document host did not complete a verified robots.txt read. The agency's current directories and sale GIS are carried separately."),
     ("City of Topeka current land bank map", "https://buildingtopeka.org/topeka-land-bank/",

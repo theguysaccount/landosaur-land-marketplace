@@ -758,7 +758,16 @@ class Phase2AdaptersTest(unittest.TestCase):
         wy = adapters.parse_albany_wy_features([{"attributes": {"pidn": "20760610002700", "grossacres": 31.69, "landval": 79550, "totalval": 79550, "accttype": "Res Vacant Land"}, "geometry": {"rings": self.RING}}], lambda w: None)
         ok = adapters.parse_odot_ok_features([{"attributes": {"OBJECTID_1": 1, "Name": "F-410", "Parcel": 27, "County": "MUSKOGEE", "Acres_Remaining": 4.74}, "geometry": {"rings": self.RING}}], lambda w: None)
         ms = adapters.parse_ms_surplus_features([{"attributes": {"DPIN": "006110000329", "acres_gis": 0.24, "tv_imp": " ", "loc_num": "193", "loc_alpha": "CRESTON AVE"}, "geometry": {"rings": self.RING}}], lambda w: None)
-        sc = adapters.parse_horry_sc_features([{"attributes": {"PIN_1": "44314040003", "Description": "SEAVIEW PLACE LT 4 BL 1", "FLC_Bid_Amount": "$14,691.11"}, "geometry": {"rings": self.RING}}], lambda w: None)
+        sc = adapters.parse_horry_sc_features([
+            {"attributes": {"PIN_1": "44314040003", "Item_Number": "321"}, "geometry": {"rings": self.RING}},
+            {"attributes": {"PIN_1": "44314040004", "Item_Number": "322"}},
+            {"attributes": {"PIN_1": "44314040005", "Item_Number": "323"}},
+        ], {"44314040003": ("321", 14691.11), "44314040004": ("322", 500), "44314040005": ("999", 100)}, {
+            "44314040003": {"PARCELTYPE": 2, "MarketImprv": 0, "Acreage": 0.25},
+            "44314040004": {"PARCELTYPE": 2, "MarketImprv": 200, "Acreage": 0.5},
+            "44314040005": {"PARCELTYPE": 2, "MarketImprv": 0, "Acreage": 1},
+        }, NOW + datetime.timedelta(days=4), adapters.HORRY_SC_URL, adapters.HORRY_SC_URL)
+        self.assertEqual([(row["apn"], row["price"], row["acres"]) for row in sc], [("44314040003", 14691.11, 0.25)])
         or_r = adapters.parse_portland_or_features([{"attributes": {"STATE_ID": "11E25BA23600", "SITEADDR": "123 MAIN ST", "BLDGSQFT": 0, "A_T_ACRES": 0.25}, "geometry": {"rings": self.RING}}], lambda w: None)
         hi = adapters.parse_maui_hi_features([{"attributes": {"TMK_txt": "246007003", "BldgValue": 0, "TaxAcres": 0.43, "Jurisdiction": "Maui County"}, "geometry": {"rings": self.RING}}], lambda w: None)
         nv = adapters.parse_lasvegas_nv_features([{"attributes": {"PARCEL": "13805501015", "LOCATION": "RED COACH & DURANGO", "IMPROVEMENTNAME": "VACANT SITE", "LAT": 36.245, "LONG": -115.279}, "geometry": {}}], lambda w: None)

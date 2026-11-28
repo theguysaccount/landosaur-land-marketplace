@@ -8,6 +8,8 @@ import crypto from "node:crypto";
 import { list, put } from "@vercel/blob";
 
 import "../site/geo.js";
+import "../site/availability.js";
+const { closeExpired } = globalThis.LandosaurAvailability;
 const { decode, matcher, measure } = globalThis.LandosaurGeo;
 
 const CORS = {
@@ -97,6 +99,7 @@ async function loadDirectRows() {
       (it.deadline || "").slice(0, 10),
       1,
       null,
+      it.sale_mode === "auction" ? Date.parse(it.deadline) : null,
     ]);
   } catch {
     return [];
@@ -113,7 +116,9 @@ function filterRows(rows, crit) {
   const area = crit.area ? matcher(decode(crit.area)) : null;
 
   const out = [];
-  for (const r of rows) {
+  const now = Date.now();
+  for (const row of rows) {
+    const r = closeExpired(row, now);
     if (!r[8] || area && !area(r[2], r[1])) continue;
     if (st && r[3] !== st) continue;
     if (maxP != null && (r[4] == null || r[4] > maxP)) continue;

@@ -359,8 +359,13 @@
     var mapBounds = (f.inview && !first) ? map.getBounds() : null;
     var shown = [], markers = [], bounds = [];
     var modeCounts = { "": 0, "cash": 0, "min_bid": 0, "none": 0, "direct": 0 };
+    var now = Date.now();
     for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
+      var r = LandosaurAvailability.closeExpired(rows[i], now);
+      if (rows[i] !== r) {
+        rows[i] = r;
+        byId[r[0]] = r;
+      }
       if (f.state && r[3] !== f.state) continue;
       if (!f.closed && !r[8]) continue;
       if (!isNaN(f.max) && (r[4] == null || r[4] > f.max)) continue;
@@ -691,7 +696,8 @@
           it.sale_mode === "auction" ? "min_bid" : "cash", it.acres,
           it.sale_mode === "auction" ? "auction_open" : "listed",
           it.status === "active" ? 1 : 0, it.title, it.county || "",
-          it.apn || "", (it.deadline || "").slice(0, 10), 1
+          it.apn || "", (it.deadline || "").slice(0, 10), 1, null,
+          it.sale_mode === "auction" ? Date.parse(it.deadline) : null
         ];
       });
       rows = directRows.concat(staticRows);

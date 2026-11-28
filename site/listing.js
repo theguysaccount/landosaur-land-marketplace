@@ -10,6 +10,22 @@
     printBtn.addEventListener("click", function () { window.print(); });
   }
 
+  var offer = document.querySelector("[data-offer-closes-at]");
+  var cutoff = Number(offer?.dataset.offerClosesAt);
+  if (cutoff > 0) {
+    function checkOffer() {
+      if (Date.now() < cutoff) return;
+      offer.querySelector("h3").textContent = "The advertised sale window has ended";
+      offer.querySelector(".fee-ledger")?.remove();
+      offer.querySelector("[data-acquisition-action]")?.remove();
+      offer.querySelector("[data-acquisition-copy]").textContent = "Check current status with the agency. ";
+      document.querySelector(".mobile-land-agent")?.remove();
+      window.removeEventListener("focus", checkOffer);
+    }
+    window.addEventListener("focus", checkOffer);
+    checkOffer();
+  }
+
   // Arkansas COSL rotates listing tokens every few hours; transparently route live clicks
   // through /api/cosl/?id=<CoSLPropertyId> so buyers always land on the active bidding page.
   var coslMatch = (location.pathname || "").match(/\/land\/ar-(\d+)\/?$/i);

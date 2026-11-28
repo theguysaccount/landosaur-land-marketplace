@@ -359,16 +359,18 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
 
     def test_mndot_requires_current_vacant_directory_and_matching_map_sale_type(self):
         otc = '<li><a href="https://example.test">Sale 139574</a> (PDF) - 17,005 Square Feet of Vacant Land located at E. Alabama Street, St. Paul, Ramsey County, MN.</li>'
-        bids = ('<p><a href="https://example.test">Sale 139625</a> (PDF) - 4.50 Acres of Vacant Land located at TH 10, '
+        bids = ('<p>All bids must be received by 1:45 PM. on the day of the bid opening.</p>'
+                '<p><a href="https://example.test">Sale 139625</a> (PDF) - 4.50 Acres of Vacant Land located at TH 10, '
                 'Sauk Rapids, Benton County, MN. <strong>*Bid Opening December 2, 2026</strong></p>')
         features = [{"attributes": {"SaleNumber": "Sale 139574", "SaleType": "Over-the-counter", "Price": "$68,000.00"}},
                     {"attributes": {"SaleNumber": "Sale 139625", "SaleType": "Sale by bid", "Price": "$31,500.00"}},
                     {"attributes": {"SaleNumber": "Sale 139699", "SaleType": "Sale by bid", "Price": "$10,000.00"}}]
         directories = {adapters.MNDOT_SALE: bids, adapters.MNDOT_OTC: otc}
-        rows = adapters.parse_mndot_offers(directories, features, datetime.date(2026, 11, 27))
-        self.assertEqual([(r["id"], r["price"], r["price_kind"], r.get("offer_close_date")) for r in rows],
-                         [("mn-mndot-139625", 31500, "asking", "2026-12-01"), ("mn-mndot-139574", 68000, "cash", None)])
-        self.assertEqual(len(adapters.parse_mndot_offers(directories, features, datetime.date(2026, 12, 2))), 1)
+        close = datetime.datetime(2026, 12, 2, 19, 45, tzinfo=datetime.timezone.utc)
+        rows = adapters.parse_mndot_offers(directories, features, close - datetime.timedelta(minutes=1))
+        self.assertEqual([(r["id"], r["price"], r["price_kind"], r["deadline"]) for r in rows],
+                         [("mn-mndot-139625", 31500, "asking", "2026-12-02T19:45:00Z"), ("mn-mndot-139574", 68000, "cash", None)])
+        self.assertEqual(len(adapters.parse_mndot_offers(directories, features, close)), 1)
 
 
 class ArkansasTest(unittest.TestCase):
@@ -1069,6 +1071,31 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_washington_county_joins_current_surplus_to_exact_vacant_records(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = ('<a href="/DocumentCenter/View/1/COUNTY-OWNED-PROPERTY">Roster</a>'
+                                   'Interested parties interested in acquiring one or more of these parcels.')
+        roster = ('MAP    GROUP   PARCEL    ADDRESS #     STREET       ACREAGE ACQUIRED\n'
+                  '022M     A      03000 000   TEST ROAD  0.40\n'
+                  '046K     C      02800 000   TEST ROAD  1.00\n'
+                  '38              03001 000   TEST ROAD  .58 ac\n'
+                  '013H     A      01502 000   TEST ROAD  SLIVER\n'
+                  '054D     E      03201 000   TEST ROAD  3.5 x 150\n')
+        rings = [[[-82.40, 36.35], [-82.40, 36.351], [-82.399, 36.35], [-82.40, 36.35]]]
+        def make_record(pin, improvements):
+            return {"attributes": {"GISLINK": pin, "BLDGS": 0, "NUM_MH": 0, "IMPVAL": improvements, "CALC_ACRE": .61},
+                    "geometry": {"rings": rings}}
+        features = [make_record("090038    03001", 0), make_record("090046K C 02800", 1000),
+                    make_record("090054D E 03201", 0)]
+        with patch.object(adapters, "pdf_text", return_value=roster), \
+                patch.object(adapters, "arcgis_query", return_value=("", features)) as gis:
+            rows, info = adapters.washington_tn_surplus(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["apn"], row["acres"], row["price"]), (3, "038 03001 000", .61, None))
+        self.assertIn("UPPER(OWNER) IN ('WASHINGTON COUNTY'", gis.call_args.args[2])
+        self.assertNotIn("OWNER", gis.call_args.args[3])
+        self.assertTrue(row["geometry"])
+
     def test_greybull_requires_current_town_assessment_and_keeps_industrial_price_per_acre(self):
         import hashlib
         import io

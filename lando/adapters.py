@@ -6353,7 +6353,13 @@ MNDOT_OTC = "https://www.mndot.net/row/propsales_over_the_counter.html"
 MNDOT_GIS = "https://services.arcgis.com/qWbGMYB49y8mLbRt/arcgis/rest/services/MnDOT_Land_for_Sale_Feature_2_view/FeatureServer/1/query"
 
 
-def parse_mndot_offers(directories, features, today):
+def parse_mndot_offers(directories, features, now):
+    from zoneinfo import ZoneInfo
+
+    central = ZoneInfo("America/Chicago")
+    schedule = clean(directories.get(MNDOT_SALE))
+    cutoff = re.search(r"by\s+(\d{1,2}:\d{2}\s+(?:AM|PM))\.?\s+on the day of the bid opening", schedule, re.I)
+    bid_time = datetime.datetime.strptime(cutoff[1].upper().strip(), "%I:%M %p").time() if cutoff else None
     indexed = {str((f.get("attributes") or {}).get("SaleNumber")): f for f in features}
     rows = []
     for url, page in directories.items():
@@ -6369,13 +6375,15 @@ def parse_mndot_offers(directories, features, today):
             meta = feature.get("attributes") or {}
             if meta.get("SaleType") != ("Over-the-counter" if otc else "Sale by bid"):
                 continue
-            close = None
+            close = deadline = None
             if not otc:
                 date = re.search(r"\bBid Opening ([A-Za-z]+ \d{1,2}, \d{4})", text)
                 if not date:
                     continue
                 close = datetime.datetime.strptime(date[1], "%B %d, %Y").date()
-                if close <= today:
+                if bid_time:
+                    deadline = datetime.datetime.combine(close, bid_time, tzinfo=central)
+                if (deadline and deadline <= now) or (not deadline and close <= now.astimezone(central).date()):
                     continue
             area = number(amount)
             if area and unit.lower() == "square feet":
@@ -6386,18 +6394,20 @@ def parse_mndot_offers(directories, features, today):
             if price is not None:
                 facts.append(fact("price", "Amount published for this sale on the department's land sale map", shape_url))
             if close:
-                facts.append(fact("auction_start", "Bid opening " + close.isoformat() + ". Confirm the submission cutoff with MnDOT.", url))
+                facts.append(fact("auction_start", "Bid opening " + close.isoformat(), url))
+            if deadline:
+                facts.append(fact("bid_deadline", deadline.strftime("%B %d, %Y at %I:%M %p Central"), url))
             row = {
                 "id": "mn-mndot-" + sid, "source": "mndot-surplus", "title": "%s, %s (MnDOT vacant land)" % (address, place),
                 "state": "MN", "county": county, "locality": place, "apn": "", "address": address,
                 "acres": area, "price": price, "price_kind": ("cash" if otc else "asking") if price is not None else "none",
                 "offering": "sale" if otc else "auction", "status": "listed" if otc else "auction_terms",
-                "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None, "facts": facts,
+                "deadline": deadline.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if deadline else None,
+                "url": url, "lat": None, "lon": None, "geometry": None, "facts": facts,
                 "tags": ["transportation surplus", "over the counter" if otc else "public bid"],
             }
-            if close:
-                # The directory gives the opening date, so cease advertising by its start.
-                row["offer_close_date"] = (close - datetime.timedelta(days=1)).isoformat()
+            if close and not deadline:
+                row["auction_day"] = close.isoformat()
             if rings := (feature.get("geometry") or {}).get("rings"):
                 apply_geometry(row, rings, shape_url, "Minnesota Department of Transportation")
             rows.append(row)
@@ -6405,14 +6415,12 @@ def parse_mndot_offers(directories, features, today):
 
 
 def mndot_surplus(fetch, now, warn):
-    from zoneinfo import ZoneInfo
-
     directories = {url: fetch.text(url) for url in (MNDOT_SALE, MNDOT_OTC)}
     if ("Current properties for sale by bid" not in directories[MNDOT_SALE] or
             "Over the counter sales" not in directories[MNDOT_OTC]):
         raise StructureError("MnDOT's current land sale directories changed")
     _, features = arcgis_query(fetch, MNDOT_GIS, "1=1", "SaleNumber,SaleType,Price")
-    rows = parse_mndot_offers(directories, features, now.astimezone(ZoneInfo("America/Chicago")).date())
+    rows = parse_mndot_offers(directories, features, now)
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
@@ -8767,6 +8775,76 @@ def greybull_wy_land(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+WASHINGTON_TN_SALE = "https://www.washingtoncountytn.org/281/Surplus-Properties-for-Sale"
+WASHINGTON_TN_GIS = "https://gis.johnsoncitytn.org/arcgis/rest/services/ParcelPublishing/TaxParcels/MapServer/0/query"
+WASHINGTON_TN_PUBLIC_AGENCIES = (
+    "WASHINGTON COUNTY", "WASHINGTON COUNTY TN", "WASHINGTON COUNTY, TN", "WASHINGTON COUNTY TRUSTEE",
+    "WASHINGTON COUNTY TENNESSEE", "WASHINGTON COUNTY, TENNESSEE", "WASHINGTON COUNTY TENN",
+    "WASHINGTON COUNTY OF", "WASHINGTON COUNTY SCHOOL",
+)
+
+
+def parse_washington_tn_surplus_roster(report):
+    if not re.search(r"MAP\s+GROUP\s+PARCEL\s+ADDRESS[^\n]*\bACREAGE\s+ACQUIRED\b", report, re.I):
+        raise StructureError("Washington County’s surplus property roster changed")
+    pins = set()
+    for line in report.splitlines():
+        parcel = re.match(r"^\s*(\d{2,3}[A-Z]?)\s+([A-Z]\s+)?(\d{5})\s+000\b", line)
+        if not parcel or re.search(r"\b(?:SLIVER|SOLD|WITHDRAWN)\b|3\.5\s*x\s*150\b", line, re.I):
+            continue
+        map_id, group, suffix = parcel.groups()
+        group = group.strip() if group else ""
+        pin = f"090{map_id} {group} {suffix}" if group else f"090{map_id.zfill(3)}    {suffix}"
+        pins.add(pin)
+    if not pins:
+        raise StructureError("Washington County’s roster has no recognizable sale parcels")
+    return pins
+
+
+def washington_tn_surplus(fetch, now, warn):
+    page = fetch.text(WASHINGTON_TN_SALE)
+    link = re.search(r'href="([^"]*DocumentCenter/View/\d+/COUNTY-OWNED-PROPERTY[^"]*)"', page, re.I)
+    if not link or "interested in acquiring one or more of these parcels" not in clean(page):
+        raise StructureError("Washington County is no longer publishing the reviewed surplus purchase program")
+    roster_url = urllib.parse.urljoin(WASHINGTON_TN_SALE, html.unescape(link[1]))
+    pins = parse_washington_tn_surplus_roster(pdf_text(fetch, roster_url))
+    _, features = arcgis_query(fetch, WASHINGTON_TN_GIS,
+                               "COUNTY_ID=90 AND TAXYR='C' AND UPPER(OWNER) IN (%s) AND GISLINK IN (%s)"
+                               % (quote_list(WASHINGTON_TN_PUBLIC_AGENCIES), quote_list(sorted(pins))),
+                               "GISLINK,ADDRESS,CITYNAME,BLDGS,NUM_MH,IMPVAL,CALC_ACRE")
+    counts = Counter((feature.get("attributes") or {}).get("GISLINK") for feature in features)
+    rows = []
+    for feature in features:
+        attrs = feature.get("attributes") or {}
+        pin = attrs.get("GISLINK")
+        rings = (feature.get("geometry") or {}).get("rings")
+        if pin not in pins or counts[pin] != 1 or not rings or any(attrs.get(k) != 0 for k in ("BLDGS", "NUM_MH", "IMPVAL")):
+            continue
+        acres = number(attrs.get("CALC_ACRE"))
+        apn = " ".join(pin[3:].split()) + " 000"
+        locality = clean(attrs.get("CITYNAME")) or "Washington County"
+        address = clean(attrs.get("ADDRESS")).title()
+        facts = [
+            fact("availability", "The county accepts purchase inquiries for parcels on its tax-deed surplus roster.", WASHINGTON_TN_SALE),
+            fact("condition", "The city’s current parcel layer records zero buildings, mobile homes and improvement value.", WASHINGTON_TN_GIS),
+            fact("parcel_number", apn, roster_url),
+        ]
+        if acres:
+            facts.append(fact("acreage", f"Approximately {acres:.4f} acres measured in the city GIS.", WASHINGTON_TN_GIS))
+        row = {
+            "id": "tn-washington-surplus-" + slug(apn), "source": "washington-tn-surplus",
+            "title": f"Parcel {apn} (Washington County tax-deed surplus land)",
+            "state": "TN", "county": "Washington", "locality": locality, "apn": apn, "address": address,
+            "acres": acres, "price": None, "price_kind": "none", "offering": "offer", "status": "listed",
+            "deadline": None, "url": WASHINGTON_TN_SALE, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["tax-deed surplus", "purchase inquiry"],
+        }
+        apply_geometry(row, rings, WASHINGTON_TN_GIS, "City of Johnson City")
+        if row["geometry"]:
+            rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(pins)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9253,8 +9331,14 @@ SOURCES = [
      "agency": "Town of Greybull, Wyoming", "url": GREYBULL_LAND, "state": "WY",
      "run": greybull_wy_land, "requires_sale_match": True,
      "about": "Municipal residential and industrial lots matched to county assessments and reviewed against council decisions. The town publishes per-acre starting bids and development terms."},
+    {"id": "washington-tn-surplus", "name": "Washington County vacant surplus land",
+     "agency": "Washington County Purchasing Department, Tennessee", "url": WASHINGTON_TN_SALE, "state": "TN",
+     "run": washington_tn_surplus, "requires_sale_match": True,
+     "about": "County purchase-inquiry parcels from the tax-deed surplus roster, joined to current City of Johnson City GIS and improvement records."},
 ]
 NOT_CARRIED = [
+    ("Tennessee property assessment website", "https://assessment.cot.tn.gov/tpad/",
+     "The host returned HTTP 403 for robots.txt. The independently published Johnson City parcel layer covers the Washington County surplus roster."),
     ("Go Goshen embedded industrial lot maps", "https://gogoshen.com/do-business/economic-development/industrial-real-estate/",
      "The third-party map host disallows crawling the published style paths. Lot-level availability needs a separate official source."),
     ("Snohomish County current foreclosure auction", "https://snohomishcountywa.gov/220/Tax-Foreclosures",

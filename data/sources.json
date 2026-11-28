@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T05:26:44Z",
+ "checked": "2026-11-28T05:38:17Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -1521,8 +1521,8 @@
    "complete": true,
    "count": 5,
    "failures": 0,
-   "last_attempt": "2026-11-28T00:36:03Z",
-   "last_success": "2026-11-28T00:36:03Z",
+   "last_attempt": "2026-11-28T05:36:47Z",
+   "last_success": "2026-11-28T05:36:47Z",
    "message": "",
    "name": "Minnesota DOT vacant land sales",
    "notes": [],
@@ -2398,6 +2398,24 @@
    "state": "RI",
    "upstream_total": 262,
    "url": "https://www.warwickri.gov/"
+  },
+  "washington-tn-surplus": {
+   "about": "County purchase-inquiry parcels from the tax-deed surplus roster, joined to current City of Johnson City GIS and improvement records.",
+   "agency": "Washington County Purchasing Department, Tennessee",
+   "complete": true,
+   "count": 23,
+   "failures": 0,
+   "last_attempt": "2026-11-28T05:38:17Z",
+   "last_success": "2026-11-28T05:38:17Z",
+   "message": "",
+   "name": "Washington County vacant surplus land",
+   "notes": [],
+   "ok": true,
+   "read": 23,
+   "seconds": 13,
+   "state": "TN",
+   "upstream_total": 25,
+   "url": "https://www.washingtoncountytn.org/281/Surplus-Properties-for-Sale"
   },
   "waterloo-ia": {
    "about": "Development and industrial park land for sale in Waterloo, Iowa with GIS outlines, zoning, and TIF districts.",

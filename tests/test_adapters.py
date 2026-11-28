@@ -1072,6 +1072,52 @@ Zoning R-1 Single Family Residential
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
 
+    def test_denali_uses_the_current_count_and_the_linked_purchase_prices(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = (
+            '<p>The Denali Borough has two (2) lots for sale in the Panguingue Creek, Alaska Subdivision. '
+            'Both lots are on Canopus Street.</p>'
+            '<a href="&#xA; /vertical/sites/test/uploads/Panguingue_Creek_Subdivision_Land_for_Sale.pdf">'
+            'Panguingue Creek Subdivision Land for Sale</a>'
+        )
+        table = ('All lots are available for sale at the listed, appraised value.\n'
+                 '2021 AVAILABLE PROPERTY LIST\nBLOCK  LOT  ACERAGE  Appraised Value\n'
+                 '16  2  5.00  $10,000\n16  3  5.00$10,000\nAppraised @\n')
+        with patch.object(adapters, "pdf_text", return_value=table) as pdf:
+            rows, result = adapters.denali_ak_land(fetch, NOW, self.fail)
+            fetch.text.return_value = fetch.text.return_value.replace("two (2)", "one (1)")
+            with self.assertRaises(adapters.StructureError):
+                adapters.denali_ak_land(fetch, NOW, self.fail)
+        self.assertEqual(result["upstream_total"], 2)
+        self.assertEqual([(r["id"], r["acres"], r["price"], r["price_kind"]) for r in rows],
+                         [("ak-denali-panguingue-16-2", 5, 10000, "cash"), ("ak-denali-panguingue-16-3", 5, 10000, "cash")])
+        self.assertEqual(pdf.call_args.args[1],
+                         "https://www.denaliborough.org/vertical/sites/test/uploads/Panguingue_Creek_Subdivision_Land_for_Sale.pdf")
+
+    def test_alamosa_matches_certificate_parcel_and_date_with_vacancy(self):
+        schedule = ('<h1>Upcoming Scheduled Public Auctions</h1><h3>December 2nd, 2026</h3><ul>'
+                    '<li>Certificate 1, Parcel 541718108044, Private prior holder</li>'
+                    '<li>Certificate 2, Parcel 541718108029</li>'
+                    '<li>Certificate 3, Parcel 541718108022</li><li>Certificate 4, Parcel 541718108021</li>'
+                    '</ul><h2>Archive</h2>')
+        index = ('<a href="/DocumentCenter/View/1">Certificate 1, Parcel 541718108044 (PDF)</a>'
+                 '<a href="/DocumentCenter/View/2">Certificate 2, Parcel 541718108031 (PDF)</a>'
+                 '<a href="/DocumentCenter/View/3">Certificate 3, Parcel 541718108022 (PDF)</a>'
+                 '<a href="/DocumentCenter/View/4">Certificate 4, Parcel 541718108021 (PDF)</a>')
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [schedule, index]
+        notice = ('PROPERTY ADDRESS: Vacant Land, Alamosa, CO. Private prior holder. '
+                  'The property will be sold at public auction to the highest bidder at 8 am on Wednesday, December 2, 2026.')
+        by_notice = {"1": notice, "3": notice.replace("Vacant Land", "Improved residence"),
+                     "4": notice.replace("December 2", "December 3")}
+        with patch.object(adapters, "pdf_text", side_effect=lambda fetch, url: by_notice[url.rsplit("/", 1)[-1]]) as pdf:
+            rows, info = adapters.alamosa_co_tax_deed(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual((info["upstream_total"], row["apn"], row["price"], row["deadline"]),
+                         (4, "541718108044", None, "2026-12-02T15:00:00+00:00"))
+        self.assertNotIn("Private prior holder", repr(row))
+        self.assertEqual(pdf.call_count, 3)
+
     def test_riverton_joins_only_signed_offer_lots_to_the_city_parcel_roll(self):
         import hashlib
 

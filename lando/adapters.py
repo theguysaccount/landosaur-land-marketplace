@@ -7572,6 +7572,84 @@ def conejos_co_treasurer_sale(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+ALAMOSA_CO_SCHEDULE = "https://www.alamosacounty.org/308/Upcoming-Scheduled-Auction-Information"
+ALAMOSA_CO_NOTICES = "https://www.alamosacounty.org/307/Known-Interested-Party-Notices"
+ALAMOSA_CO_ENTRY = r"Certificate\s+(\d+),\s*Parcel\s+(\d{12})\b"
+
+
+def alamosa_auction_date(text):
+    return datetime.datetime.strptime(re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", text, flags=re.I), "%B %d, %Y").date()
+
+
+def alamosa_co_tax_deed(fetch, now, warn):
+    from concurrent.futures import ThreadPoolExecutor
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/Denver")
+    current = fetch.text(ALAMOSA_CO_SCHEDULE)
+    schedule = re.search(r"Upcoming Scheduled Public Auctions(.*?)(?:<h2\b|</main>)", current, re.I | re.S)
+    if not schedule:
+        raise StructureError("Alamosa County’s current auction schedule is missing")
+    slots = {}
+    for label, items in re.findall(r"<h3\b[^>]*>(.*?)</h3>\s*<ul\b[^>]*>(.*?)</ul>", schedule[1], re.I | re.S):
+        day = alamosa_auction_date(clean(label))
+        for certificate, apn in re.findall(ALAMOSA_CO_ENTRY, clean(items), re.I):
+            key = certificate, apn
+            if key in slots:
+                raise StructureError("Alamosa County’s schedule repeats a parcel and certificate")
+            slots[key] = day
+    if not slots and re.search(ALAMOSA_CO_ENTRY, clean(schedule[1]), re.I):
+        raise StructureError("Alamosa County’s auction date sections changed")
+    if len({apn for _, apn in slots}) != len(slots):
+        raise StructureError("Alamosa County’s schedule contains competing certificates for the same parcel")
+
+    notice_index = fetch.text(ALAMOSA_CO_NOTICES)
+    notices = {}
+    for path, label in re.findall(r'<a\b[^>]*href="(/DocumentCenter/View/\d+)"[^>]*>(.*?)</a>', notice_index, re.I | re.S):
+        item = re.search(ALAMOSA_CO_ENTRY, clean(label), re.I)
+        if item:
+            if item.groups() in notices:
+                raise StructureError("Alamosa County’s notice index repeats a parcel and certificate")
+            notices[item.groups()] = urllib.parse.urljoin(ALAMOSA_CO_NOTICES, path)
+    if slots and not notices:
+        raise StructureError("Alamosa County’s notice index has no parcel links")
+
+    today = now.astimezone(zone).date()
+    scheduled = [(certificate, apn, day, notices[certificate, apn]) for (certificate, apn), day in slots.items()
+                 if day >= today and (certificate, apn) in notices]
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        documents = list(workers.map(lambda slot: pdf_text(fetch, slot[3]), scheduled))
+    rows = []
+    for (certificate, apn, day, url), document in zip(scheduled, documents):
+        text = clean(document)
+        if not re.search(r"PROPERTY ADDRESS:\s*VACANT LAND(?=[, .]|$)", text, re.I):
+            continue
+        start = re.search(r"will be sold at public auction to the highest bidder at (\d{1,2})(?::([0-5]\d))?\s*([ap])\.?m\.?\s+on\s+"
+                          r"(?:[A-Za-z]+,\s+)?([A-Za-z]+\s+\d{1,2},\s+\d{4})", text, re.I)
+        if not start or alamosa_auction_date(start[4]) != day:
+            continue
+        hour = int(start[1])
+        if not 1 <= hour <= 12:
+            continue
+        opens = datetime.datetime.combine(day, datetime.time(hour % 12 + (12 if start[3].lower() == "p" else 0),
+                                                            int(start[2] or 0)), zone)
+        if opens <= now:
+            continue
+        rows.append({
+            "id": "co-alamosa-treasurer-" + apn, "source": "alamosa-co-tax-deed",
+            "title": f"Parcel {apn} (Alamosa County treasurer’s deed auction)", "state": "CO", "county": "Alamosa",
+            "locality": "", "address": "", "apn": apn, "acres": None, "price": None, "price_kind": "none",
+            "offering": "auction", "status": "auction_terms", "deadline": opens.astimezone(datetime.timezone.utc).isoformat(),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("certificate_number", certificate, ALAMOSA_CO_SCHEDULE),
+                      fact("availability", "Vacant land in the treasurer’s scheduled public auction, subject to redemption.", "="),
+                      fact("auction_start", opens.strftime("%B %d, %Y at %I:%M %p Mountain"), "="),
+                      fact("sale_terms", "Confirm auction participation and current redemption status with the county.", ALAMOSA_CO_SCHEDULE)],
+            "tags": ["treasurer’s deed auction"],
+        })
+    return rows, {"complete": True, "upstream_total": len(slots)}
+
+
 ELK_PA_REPOSITORY = "https://countyofelkpa.gov/elk-county-offices/tax-claim-bureau/repository-properties/"
 ELK_PA_ROSTER = "https://countyofelkpa.gov/repository-sale-properties/"
 
@@ -9041,6 +9119,52 @@ def riverton_wy_industrial(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(RIVERTON_WY_OFFERS)}
 
 
+DENALI_AK_LAND = "https://www.denaliborough.org/landmanagement"
+
+
+def denali_ak_land(fetch, now, warn):
+    page = fetch.text(DENALI_AK_LAND)
+    description = clean(page)
+    available = re.search(r"The Denali Borough has \w+ \((\d+)\) lots? for sale in the Panguingue Creek, Alaska Subdivision", description)
+    if not available or "Both lots are on Canopus Street" not in description:
+        raise StructureError("Denali Borough’s current land sale description changed")
+    brochures = [html.unescape(path).strip() for path, label in re.findall(
+        r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S)
+        if clean(label) == "Panguingue Creek Subdivision Land for Sale"]
+    if len(brochures) != 1 or not re.fullmatch(r"/vertical/sites/[^/]+/uploads/Panguingue_Creek_Subdivision_Land_for_Sale\.pdf", brochures[0]):
+        raise StructureError("Denali Borough’s land sale brochure link changed")
+    url = urllib.parse.urljoin(DENALI_AK_LAND, brochures[0])
+    document = pdf_text(fetch, url)
+    if "All lots are available for sale at the listed, appraised value" not in clean(document):
+        raise StructureError("Denali Borough’s fixed-price terms changed")
+    roster = re.search(r"AVAILABLE PROPERTY LIST\s+BLOCK\s+LOT\s+AC[ER]+AGE\s+Appraised Value\s+([^\f]+?)Appraised @", document, re.I | re.S)
+    if not roster:
+        raise StructureError("Denali Borough’s priced lot table changed")
+    records = re.findall(r"^\s*(\d+)\s+(\d+)\s+(\d+\.\d+)[ \t]*\$([\d,]+)\s*$", roster[1], re.M)
+    total = int(available[1])
+    if len(records) != total or len({(block, lot) for block, lot, _, _ in records}) != total:
+        raise StructureError("Denali Borough’s current lot count and brochure disagree")
+    rows = []
+    for block, lot, area, value in records:
+        price = number(value)
+        acres = number(area)
+        if price is None or acres is None:
+            raise StructureError("Denali Borough’s sale price or acreage is invalid")
+        rows.append({
+            "id": f"ak-denali-panguingue-{block}-{lot}", "source": "denali-ak-land",
+            "title": f"Panguingue Creek block {block}, lot {lot} (Denali Borough)", "state": "AK", "county": "Denali",
+            "locality": "Healy", "address": "Canopus Street (platted)",
+            "acres": acres, "price": price, "price_kind": "cash", "offering": "sale", "status": "listed", "deadline": None,
+            "url": DENALI_AK_LAND, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("asking_price", f"${price:,.0f} published over-the-counter purchase price", url + "#page=5"),
+                      fact("acreage", f"{acres:g} acres in the borough’s sale brochure", url + "#page=5"),
+                      fact("road_access", "The platted approach on Canopus Street has no constructed road access.", DENALI_AK_LAND),
+                      fact("sale_terms", "The borough sells over the counter. Eligibility and recording costs apply.", url + "#page=2")],
+            "tags": ["over the counter", "no constructed road access"],
+        })
+    return rows, {"complete": True, "upstream_total": total}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9539,12 +9663,22 @@ SOURCES = [
      "agency": "Kennebec Regional Development Authority, Maine", "url": FIRSTPARK_ME, "state": "ME",
      "run": firstpark_me_lots, "requires_sale_match": True,
      "about": "Available development lots from the authority’s current lot map with published total and buildable acreage."},
+    {"id": "alamosa-co-tax-deed", "name": "Alamosa County vacant land treasurer’s deed auctions",
+     "agency": "Alamosa County Treasurer, Colorado", "url": ALAMOSA_CO_SCHEDULE, "state": "CO", "timezone": "America/Denver",
+     "run": alamosa_co_tax_deed, "requires_sale_match": True,
+     "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start."},
     {"id": "riverton-wy-industrial", "name": "Riverton vacant industrial lots on Piper Drive",
      "agency": "City of Riverton, Wyoming", "url": RIVERTON_WY_DOCS["terms"][0], "state": "WY",
      "run": riverton_wy_industrial, "requires_sale_match": True,
      "about": "Vacant city lots with asking prices in the approved broker agreement, matched to parcel numbers and boundaries in the Wyoming official parcel layer."},
+    {"id": "denali-ak-land", "name": "Denali Borough over-the-counter land",
+     "agency": "Denali Borough Land Office, Alaska", "url": DENALI_AK_LAND, "state": "AK",
+     "run": denali_ak_land, "requires_sale_match": True,
+     "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Arkansas county assessment vendor", "https://www.actdatascout.com/RealProperty/Arkansas/VanBuren",
+     "The assessment vendor returned HTTP 403 for robots.txt."),
     ("Wyoming Business Council industrial sites vendor", "https://www.wyomingsites.com/",
      "Robots rules disallow the linked catalog index and industrial property paths on the listing vendor’s host."),
     ("Guernsey Economic & Tourism Development industrial lot map", "https://www.guernseyeconomicdevelopment.com/lots-for-sale",
@@ -9557,8 +9691,8 @@ NOT_CARRIED = [
      "The current sale vendor returned HTTP 403 for robots.txt, and the county payment portal’s search script is disallowed."),
     ("Pierce County tax-title sale roster", "https://www.piercecountywa.gov/1005/Tax-Title-Properties",
      "The county host returned HTTP 403 for the public purchase page and parcel list."),
-    ("Hawaii state surplus auction portal", "https://auctions.ehawaii.gov/landing.html",
-     "The auction portal returned HTML in place of robots.txt."),
+    ("Hawaii state surplus and asset-forfeiture auctions", "https://auctions.ehawaii.gov/landing.html",
+     "The shared auction host returned HTML in place of robots.txt for both programs."),
     ("Yavapai County tax-deed sales", "https://www.yavapaiaz.gov/Mapping-and-Properties/Property-Taxes/Tax-Deed-Sales",
      "The county’s robots.txt response exceeded the crawler’s limit and could not be verified."),
     ("Clinton council agenda portal", "https://cityofclintoniowa.civicweb.net/document/470075/",
@@ -9609,8 +9743,8 @@ NOT_CARRIED = [
      "The open-bid GIS hosts timed out on robots.txt, and the linked DHCD site returned HTTP 403 for robots.txt."),
     ("Pondera Port Authority Conrad industrial park offers", "https://www.ponderaportauthority.com/opportunitites.htm",
      "The port authority's robots.txt endpoint did not serve a valid TLS certificate."),
-    ("Alamosa County, Colorado treasurer auctions", "https://alamosacounty.colorado.gov/departments/treasurer",
-     "The county's robots.txt endpoint did not complete a verified TLS connection."),
+    ("Alamosa County legacy treasurer host", "https://alamosacounty.colorado.gov/departments/treasurer",
+     "This hostname did not complete a verified TLS connection for robots.txt. The county’s current alamosacounty.org site publishes the auction calendar and notices."),
     ("Cambria County, Pennsylvania tax claim sales", "https://www.cambriacountypa.gov/tax-claim/",
      "The county website returned HTTP 403 for robots.txt."),
     ("Stevens County, Washington foreclosure sales", "https://www.stevenscountywa.gov/21023",

@@ -101,6 +101,17 @@ class RefreshAndBuildTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
+    def test_metadata_catalog_keeps_current_listing_fields_and_routes(self):
+        row = listing(1)
+        store.save_listings(row["source"], [row], self.data)
+        store.save_status({"sources": {row["source"]: {"last_success": NOW.isoformat()}}}, self.data)
+        full = Catalog(self.data, now=NOW)
+        metadata = Catalog(self.data, now=NOW, include_geometry=False)
+        full_row, = full.current()
+        metadata_row, = metadata.current()
+        self.assertEqual(metadata_row, {key: value for key, value in full_row.items() if key != "geometry"})
+        self.assertEqual(metadata.listing_path(metadata_row), full.listing_path(full_row))
+
     def test_unverified_offers_and_elapsed_local_close_dates_are_inactive(self):
         archived = listing(1, source="delaware-in", price=500, price_kind="min_bid",
                            status="auction_terms", deadline="2026-12-05T00:00:00Z")

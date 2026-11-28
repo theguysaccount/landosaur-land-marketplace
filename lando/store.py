@@ -40,11 +40,12 @@ def write_jsonl(path, rows, key="id"):
     return True
 
 
-def load_listings(source_id, data_dir=None):
+def load_listings(source_id, data_dir=None, *, include_geometry=True):
     rows = read_jsonl(_path(data_dir, "listings", source_id + ".jsonl"))
-    geo = {g["id"]: g["geometry"] for g in read_jsonl(_path(data_dir, "geometry", source_id + ".jsonl"))}
-    for r in rows:
-        r["geometry"] = geo.get(r["id"])
+    if include_geometry:
+        geo = {g["id"]: g["geometry"] for g in read_jsonl(_path(data_dir, "geometry", source_id + ".jsonl"))}
+        for r in rows:
+            r["geometry"] = geo.get(r["id"])
     return rows
 
 

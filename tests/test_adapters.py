@@ -2146,6 +2146,11 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
         )
         fetch = unittest.mock.Mock()
         fetch.text.return_value = page
+        ring = [[-69.6548, 44.726], [-69.65329, 44.726], [-69.65329, 44.727],
+                [-69.6548, 44.727], [-69.6548, 44.726]]
+        feature = {"attributes": {"TOWN": "Skowhegan", "COUNTY": "Somerset", "MAP_BK_LOT": "14-21-1-2",
+                                   "STATE_ID": "25280_14-21-1-2"}, "geometry": {"rings": [ring]}}
+        fetch.json.return_value = {"features": [feature]}
         docs = {
             adapters.SKOWHEGAN_ME_PLAT: b"Lot 2, recorded plat, brochure price $34,900.00 in 2006",
             adapters.SKOWHEGAN_ME_ASSESSMENT: b"Southgate Parkway 14-21-2, zero improvements in the 2026 assessment",
@@ -2157,8 +2162,13 @@ class OfficialInventoryExtensionTest(unittest.TestCase):
             rows, info = adapters.skowhegan_me_southgate(fetch, None, self.fail)
             row, = rows
             self.assertEqual((row["apn"], row["acres"], row["price"]), ("14-21-2", 3.29, None))
+            self.assertTrue(row["geometry"])
+            self.assertIn("25280_14-21-1-2", adapters.outline_url(row))
             self.assertEqual(info, {"complete": True, "upstream_total": 1})
             self.assertNotIn("34,900", repr(row))
+            feature["attributes"]["MAP_BK_LOT"] = "14-21-1-3"
+            with self.assertRaisesRegex(adapters.StructureError, "no longer matches the town"):
+                adapters.skowhegan_me_southgate(fetch, None, self.fail)
             fetch.text.return_value = page.replace("<tr><td>Lot 2</td><td>3.29 acres</td></tr>", "")
             self.assertEqual(adapters.skowhegan_me_southgate(fetch, None, self.fail)[0], [])
             fetch.text.return_value = page

@@ -98,6 +98,7 @@ def official_host(host):
     return any(".".join(labels[i:]) in OFFICIAL for i in range(len(labels) - 1))
 
 
+@lru_cache(maxsize=4096)
 def official_source(link):
     try:
         url = urlsplit(html.unescape(link))
@@ -254,19 +255,22 @@ def main(dist, data_dir=None):
     dist = os.path.abspath(dist)
     base = config.base_path()
     problems, titles, indexable = [], {}, set()
-    files = inventory_files(dist)
-    pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
     buckets = archive_files(dist)
-    archive_paths = archive_listing_paths(buckets)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        inventory = pool.submit(inventory_files, dist)
+        archive_paths = archive_listing_paths(buckets)
+        files = inventory.result()
+    pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
     for duplicate in sorted(archive_paths & files):
         problems.append("listing has both a static page and an archived page: %s" % duplicate)
     files.update(archive_paths)
     context = multiprocessing.get_context("fork") if os.name == "posix" else None
-    with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 6), mp_context=context, initializer=init_worker,
+    with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 8), mp_context=context, initializer=init_worker,
                              initargs=(dist, files, base)) as pool:
         static_results = pool.map(validate, pages, chunksize=128)
         archived_results = pool.map(validate_archive, buckets)
-        cat = Catalog(data_dir)
+        # Coverage checks need listing metadata. The workers independently validate the rendered pages.
+        cat = Catalog(data_dir, include_geometry=False)
         for rel, (title, index, issues) in zip(pages, static_results):
             problems.extend("%s: %s" % (rel, issue) for issue in issues)
             if title:

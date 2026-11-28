@@ -159,6 +159,8 @@ def expand_url(listing, url):
 
 
 def outline_url(listing):
+    if listing["source"] == "skowhegan-me-southgate" and listing["apn"] == "14-21-2":
+        return one_parcel_url(SKOWHEGAN_ME_GIS, SKOWHEGAN_ME_GIS_MATCH, SKOWHEGAN_ME_GIS_FIELDS)
     if (listing["source"] == "cleveland-landbank" and listing["status"] == "proposal_open"
             and re.fullmatch(r"\d{8}", listing["apn"])):
         return one_parcel_url(CLEVELAND_LB_GIS, f"parcelpin='{listing['apn']}'", "parcelpin,parcel_acreage")
@@ -10660,6 +10662,10 @@ def genesee_mi_featured_lots(fetch, now, warn):
 SKOWHEGAN_ME_SOUTHGATE = "https://www.skowhegan.org/141/Southgate-Industrial-Park"
 SKOWHEGAN_ME_ASSESSMENT = "https://www.skowhegan.org/DocumentCenter/View/6683/2026-VALUES-BY-LOCATION"
 SKOWHEGAN_ME_PLAT = "https://www.skowhegan.org/DocumentCenter/View/198"
+SKOWHEGAN_ME_GIS = ("https://services1.arcgis.com/RbMX0mRVOFNTdLzd/arcgis/rest/services/"
+                    "Maine_Parcels_Organized_Towns/FeatureServer/10/query")
+SKOWHEGAN_ME_GIS_FIELDS = "TOWN,COUNTY,MAP_BK_LOT,STATE_ID"
+SKOWHEGAN_ME_GIS_MATCH = "STATE_ID='25280_14-21-1-2' AND TOWN='Skowhegan' AND COUNTY='Somerset'"
 # The public brochure identifies the subdivision lot; the 2026 roll confirms its vacant assessment.
 SKOWHEGAN_ME_VERIFIED_DOCUMENTS = {
     SKOWHEGAN_ME_PLAT: "3c51730ae937a559d860550b23548a7e0a0e38e059f20ccd4df601af096a2b8f",
@@ -10682,7 +10688,7 @@ def skowhegan_me_southgate(fetch, now, warn):
     for url, digest in SKOWHEGAN_ME_VERIFIED_DOCUMENTS.items():
         if hashlib.sha256(fetch.bytes(url)).hexdigest() != digest:
             raise StructureError("Skowhegan’s Southgate plat or vacant assessment needs renewed verification")
-    return [{
+    row = {
         "id": "me-skowhegan-southgate-lot-2", "source": "skowhegan-me-southgate", "state": "ME",
         "county": "Somerset", "locality": "Skowhegan", "title": "Southgate Industrial Park Lot 2, Skowhegan",
         "address": "Southgate Parkway", "apn": "14-21-2", "acres": 3.29,
@@ -10693,7 +10699,22 @@ def skowhegan_me_southgate(fetch, now, warn):
                   fact("acreage", "3.29 acres on the recorded subdivision plat.", SKOWHEGAN_ME_PLAT),
                   fact("price", "The town’s current availability table gives no asking price.", "=")],
         "tags": ["vacant development land", "industrial park"],
-    }], {"complete": True, "upstream_total": len(lots)}
+    }
+    _, outline = arcgis_query(fetch, SKOWHEGAN_ME_GIS, SKOWHEGAN_ME_GIS_MATCH, SKOWHEGAN_ME_GIS_FIELDS)
+    if len(outline) != 1:
+        raise StructureError("Skowhegan’s Southgate Lot 2 boundary is missing or ambiguous")
+    feature = outline[0]
+    attrs = feature["attributes"]
+    rings = (feature.get("geometry") or {}).get("rings") or []
+    area = rings_acres(rings)
+    if (attrs != {"TOWN": "Skowhegan", "COUNTY": "Somerset", "MAP_BK_LOT": "14-21-1-2",
+                  "STATE_ID": "25280_14-21-1-2"} or area is None or abs(area - row["acres"]) > 0.02):
+        raise StructureError("Maine’s Southgate Lot 2 boundary no longer matches the town’s plat")
+    row["facts"].append(fact("state_parcel_id", "25280_14-21-1-2 in Maine GeoLibrary's parcel layer.", "@outline"))
+    apply_geometry(row, rings, outline_url(row), "Maine GeoLibrary")
+    if not row["geometry"]:
+        raise StructureError("Skowhegan’s Southgate Lot 2 geometry could not be published")
+    return [row], {"complete": True, "upstream_total": len(lots)}
 
 
 FIRSTPARK_ME = "https://firstpark.com/available-lots/"
@@ -13441,6 +13462,14 @@ SOURCES = [
      "about": "December 15 auction matched to vacant land in Park County’s assessment records."},
 ]
 NOT_CARRIED = [
+    ("Mill Creek Corporate Center boundary and sale documents",
+     "https://www.millcreeksalem.com/docs-and-maps-1",
+     "The linked plan and recorded plat CDN returned HTTP 403 for robots.txt. The listing broker’s document host also returned HTTP 403."),
+    ("City of Salem, Oregon commercial property directory",
+     "https://www.cityofsalem.net/business/business-resources/commercial-properties/find-city-owned-property-for-sale-or-lease",
+     "The city’s robots.txt returned HTTP 403."),
+    ("City of Canby, Oregon property directory", "https://www.canbyoregon.gov/properties",
+     "The city’s host closed the robots.txt request without a response."),
     ("Genesee County Land Records and GIS parcel outlines",
      "https://www.arcgis.com/home/item.html?id=696272b4cb35434aac565955af30e9e0",
      "The county’s parcel layer license does not permit digital redistribution. The separately published Land Bank sale notices are carried."),

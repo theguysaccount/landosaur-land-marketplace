@@ -47,7 +47,7 @@ def county_key(state, county):
 
 
 class Catalog(object):
-    def __init__(self, data_dir=None, now=None):
+    def __init__(self, data_dir=None, now=None, *, include_geometry=True):
         self.data_dir = data_dir or config.DATA
         self.now = now or datetime.datetime.now(datetime.timezone.utc)
         self.status = store.load_status(self.data_dir)
@@ -59,7 +59,7 @@ class Catalog(object):
             last = parse_time(st.get("last_success"))
             fresh = bool(last and (self.now - last).days < config.CURRENT_DAYS)
             checked = last.strftime("%Y-%m-%d") if last else ""
-            for r in store.load_listings(src["id"], self.data_dir):
+            for r in store.load_listings(src["id"], self.data_dir, include_geometry=include_geometry):
                 if r.get("missing"):
                     continue          # not seen by the latest complete read: waiting for a second confirmation
                 r["checked"] = checked

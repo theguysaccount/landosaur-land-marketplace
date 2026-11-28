@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T08:05:06Z",
+ "checked": "2026-11-28T08:12:06Z",
  "sources": {
   "alamosa-co-tax-deed": {
    "about": "Current public auction calendar matched to county notices that confirm vacant land and the exact auction start.",
@@ -1028,6 +1028,24 @@
    "state": "GA",
    "upstream_total": 3,
    "url": "https://www.fultoncountyga.gov/Inside-Fulton-County/Fulton-County-Departments/Sheriff/Tax-Sales"
+  },
+  "gary-in-growin-vacant": {
+   "about": "City parcels open to purchase applications, verified as vacant residential land with zero assessed improvements.",
+   "agency": "City of Gary Department of Redevelopment, Indiana",
+   "complete": true,
+   "count": 650,
+   "failures": 0,
+   "last_attempt": "2026-11-28T08:12:06Z",
+   "last_success": "2026-11-28T08:12:06Z",
+   "message": "",
+   "name": "GrowIN Gary vacant city lots",
+   "notes": [],
+   "ok": true,
+   "read": 650,
+   "seconds": 4,
+   "state": "IN",
+   "upstream_total": 651,
+   "url": "https://www.gary.gov/growin-gary"
   },
   "glynn-brunswick-landbank": {
    "about": "Priced vacant lots published as available. Properties under foreclosure or containing structures are excluded.",

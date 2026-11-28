@@ -45,6 +45,27 @@ class StLouisTest(unittest.TestCase):
 
 
 class ActiveSaleDirectoryTest(unittest.TestCase):
+    def test_gary_requires_vacancy_and_keeps_city_price_estimate_separate(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = f'<a href="{adapters.GARY_IN_PUBLIC_MAP}page/Map">Property Map</a> Apply Now'
+        fetch.json.return_value = {"count": 2}
+        vacant = {"PARCELID": "45-08-04-126-009.000-004", "Situs_Add": "249 PIERCE ST",
+                  "VACANT": "Yes", "ZONING_C_1": "R2", "macres": 0.258262,
+                  "LandAssessedValue": 11000, "ImprAssessedValue": 0, "TotalAssessedValue": 11000,
+                  "price": 8437.431224}
+        improved = dict(vacant, PARCELID="45-08-04-179-011.000-004", ImprAssessedValue=3000)
+        features = [{"attributes": item} for item in (vacant, improved)]
+        with patch.object(adapters, "_arcgis_paged", return_value=features) as query:
+            rows, meta = adapters.gary_in_vacant_land(fetch, NOW, self.fail)
+        row, = rows
+        self.assertEqual(meta["upstream_total"], 2)
+        self.assertIsNone(row["price"])
+        self.assertEqual(next(f["value"] for f in row["facts"] if f["topic"] == "city_price_estimate"), "$8,437.43")
+        self.assertNotIn("mdeededOwner", query.call_args.args[3])
+        with patch.object(adapters, "_arcgis_paged", return_value=features[:1]):
+            with self.assertRaises(adapters.StructureError):
+                adapters.gary_in_vacant_land(fetch, NOW, self.fail)
+
     def test_jefferson_matches_latest_notice_to_current_vacancy_and_minimum(self):
         fetch = unittest.mock.Mock()
         prefix = "https://jeffcotax.com/uploads/December-1-2026-Notice-of-Sale"

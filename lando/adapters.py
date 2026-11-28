@@ -10068,7 +10068,68 @@ def ct_municipal_tax_sales(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": upstream_total}
 
 
+GARY_IN_SALES = "https://www.gary.gov/growin-gary"
+GARY_IN_PUBLIC_MAP = "https://experience.arcgis.com/experience/6a1f794cb6cd4db4a51f11dafe65dbf4/"
+GARY_IN_AVAILABLE = ("https://services7.arcgis.com/ZEo2rzqxSTElUpNo/arcgis/rest/services/"
+                     "City-Owned_Parcels/FeatureServer/0/query")
+
+
+def gary_in_vacant_land(fetch, now, warn):
+    page = fetch.text(GARY_IN_SALES)
+    if GARY_IN_PUBLIC_MAP not in page or "Apply Now" not in clean(page):
+        raise StructureError("GrowIN Gary no longer links its public purchase map and application")
+    where = ("UPPER(mdeededOwner) LIKE 'CITY OF GARY%' AND VACANT='Yes' AND ImprAssessedValue=0 "
+             "AND ZONING_C_1 IN ('R1','R2')")
+    count_query = urllib.parse.urlencode({"f": "json", "where": where, "returnCountOnly": "true"})
+    result = fetch.json(GARY_IN_AVAILABLE + "?" + count_query)
+    total = result.get("count")
+    if not isinstance(total, int) or total < 0:
+        raise StructureError("GrowIN Gary’s active parcel count is unavailable")
+    fields = ("PARCELID,Situs_Add,LandAssessedValue,ImprAssessedValue,TotalAssessedValue,"
+              "VACANT,focus_area,macres,price,ZONING_C_1")
+    features = _arcgis_paged(fetch, GARY_IN_AVAILABLE, where, fields, max_total=total,
+                             extra={"orderByFields": "OBJECTID ASC"})
+    if len(features) != total:
+        raise StructureError("GrowIN Gary’s active parcel catalog is incomplete")
+    seen = Counter(f["attributes"].get("PARCELID") for f in features)
+    rows = []
+    for feature in features:
+        attr = feature["attributes"]
+        pin = attr.get("PARCELID", "")
+        zoning = attr.get("ZONING_C_1")
+        area = number(attr.get("macres"))
+        if (not re.fullmatch(r"45-\d{2}-\d{2}-\d{3}-\d{3}\.\d{3}-\d{3}", pin or "")
+                or seen[pin] != 1 or zoning not in {"R1", "R2"} or not area
+                or attr.get("VACANT") != "Yes" or attr.get("ImprAssessedValue") != 0
+                or not number(attr.get("LandAssessedValue")) or attr.get("TotalAssessedValue") != attr.get("LandAssessedValue")):
+            continue
+        address = clean(attr.get("Situs_Add")).title()
+        focus = clean(attr.get("focus_area"))
+        facts = [fact("availability", "Listed in the city’s active purchase program. City review and approval apply.", "="),
+                 fact("zoning", zoning, "=")]
+        if focus:
+            facts.append(fact("program_area", focus, "="))
+        if estimate := number(attr.get("price")):
+            facts.append(fact("city_price_estimate", f"${estimate:,.2f}", "=",
+                              "The city publishes an estimate. Confirm the purchase amount with the program."))
+        row = {
+            "id": "in-gary-growin-" + slug(pin), "source": "gary-in-growin-vacant",
+            "title": f"{address or 'Parcel ' + pin}, Gary (vacant city land)", "state": "IN",
+            "county": "Lake", "locality": "Gary", "apn": pin, "address": address,
+            "acres": round(area, 4), "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+            "deadline": None, "url": GARY_IN_SALES, "lat": None, "lon": None, "geometry": None, "facts": facts,
+            "tags": ["vacant land", "city redevelopment", "purchase application"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), GARY_IN_AVAILABLE, "City of Gary")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": total}
+
+
 SOURCES = [
+    {"id": "gary-in-growin-vacant", "name": "GrowIN Gary vacant city lots",
+     "agency": "City of Gary Department of Redevelopment, Indiana", "url": GARY_IN_SALES, "state": "IN",
+     "run": gary_in_vacant_land, "requires_sale_match": True,
+     "about": "City parcels open to purchase applications, verified as vacant residential land with zero assessed improvements."},
     {"id": "ct-municipal-vacant-tax-deed", "name": "Connecticut municipal vacant land tax deeds",
      "agency": "Participating Connecticut Municipal Tax Collectors", "url": CT_MUNICIPAL_TAX_SALE, "state": "CT",
      "run": ct_municipal_tax_sales, "requires_sale_match": True, "timezone": "America/New_York",

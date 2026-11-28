@@ -334,6 +334,41 @@ class ActiveSaleDirectoryTest(unittest.TestCase):
         self.assertEqual([(r["apn"], r["acres"], r["price"], r["locality"]) for r in rows],
                          [("80.01360.00", 0.08, 9460.02, "Bemidji")])
 
+    def test_altoona_requires_for_sale_vacant_land_with_no_recorded_building(self):
+        item = {"Status": "For Sale", "PropertyType": "Vacant Lot", "PAR_NUM": "01.11-11..-020.00-000",
+                "NEW_MV_BLD": 0, "SITUS_ADD": "1018 Test Avenue", "DEED_AC": 0.027, "SALE_PRICE": 1000,
+                "PREV_OWNER": "Private Test Name"}
+        offers = adapters.parse_altoona_land([{"attributes": item}, {"attributes": dict(item, Status="Pending")},
+                                              {"attributes": dict(item, NEW_MV_BLD=500)}])
+        self.assertEqual([(r["apn"], r["acres"], r["price"]) for r in offers], [(item["PAR_NUM"], 0.027, None)])
+        self.assertNotIn("Private Test Name", repr(offers))
+
+    def test_craven_requires_county_owned_vacancy_not_assessment_price(self):
+        rows = [
+            ("Craven County Property Available For Purchase 11/10/2026",),
+            ("County Parcel Id", "Owner Name", "Property Address", "Acres", "Description", "City", "Land Value", "Building Value"),
+            ("8-014   -184", "CRAVEN COUNTY & NEW BERN-CITY OF", "101 TEST STREET", .1, "Wooded landlocked lot", "NEW BERN", 5000, 0),
+            ("8-014   -270", "CRAVEN COUNTY", "102 TEST STREET", .1, "Lot with garage", "NEW BERN", 10000, 3000),
+            ("8-014   -299", "Private Test Name", "103 TEST STREET", .1, "Vacant lot", "NEW BERN", 5000, 0),
+        ]
+        offers = adapters.parse_craven_county_offers(rows, adapters.CRAVEN_NC_SALE)
+        self.assertEqual([(r["apn"], r["acres"], r["price"]) for r in offers], [("8-014-184", .1, None)])
+        self.assertEqual(offers[0]["facts"][-1]["topic"], "road_access")
+        self.assertNotIn("Private Test Name", repr(offers))
+
+    def test_mndot_requires_current_vacant_directory_and_matching_map_sale_type(self):
+        otc = '<li><a href="https://example.test">Sale 139574</a> (PDF) - 17,005 Square Feet of Vacant Land located at E. Alabama Street, St. Paul, Ramsey County, MN.</li>'
+        bids = ('<p><a href="https://example.test">Sale 139625</a> (PDF) - 4.50 Acres of Vacant Land located at TH 10, '
+                'Sauk Rapids, Benton County, MN. <strong>*Bid Opening December 2, 2026</strong></p>')
+        features = [{"attributes": {"SaleNumber": "Sale 139574", "SaleType": "Over-the-counter", "Price": "$68,000.00"}},
+                    {"attributes": {"SaleNumber": "Sale 139625", "SaleType": "Sale by bid", "Price": "$31,500.00"}},
+                    {"attributes": {"SaleNumber": "Sale 139699", "SaleType": "Sale by bid", "Price": "$10,000.00"}}]
+        directories = {adapters.MNDOT_SALE: bids, adapters.MNDOT_OTC: otc}
+        rows = adapters.parse_mndot_offers(directories, features, datetime.date(2026, 11, 27))
+        self.assertEqual([(r["id"], r["price"], r["price_kind"], r.get("offer_close_date")) for r in rows],
+                         [("mn-mndot-139625", 31500, "asking", "2026-12-01"), ("mn-mndot-139574", 68000, "cash", None)])
+        self.assertEqual(len(adapters.parse_mndot_offers(directories, features, datetime.date(2026, 12, 2))), 1)
+
 
 class ArkansasTest(unittest.TestCase):
     ROW = {"Owner": "SOMEONE PRIVATE", "CoSLCountyName": "FULTON", "CoSLParcelNumber": "627-31057-000", "Acreage": 0.0,

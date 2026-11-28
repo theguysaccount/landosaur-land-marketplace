@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T00:26:32Z",
+ "checked": "2026-11-28T00:36:03Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -72,6 +72,24 @@
    "state": "WY",
    "upstream_total": 15,
    "url": "https://www.albanycountywy.gov/"
+  },
+  "altoona-pa-landbank": {
+   "about": "The authoritative city GIS sale layer marks each included parcel For Sale and Vacant Lot. Assessor values are not advertised prices.",
+   "agency": "Redevelopment Authority of Altoona Land Bank",
+   "complete": true,
+   "count": 44,
+   "failures": 0,
+   "last_attempt": "2026-11-28T00:33:10Z",
+   "last_success": "2026-11-28T00:33:10Z",
+   "message": "",
+   "name": "Altoona, Pennsylvania land bank vacant lots for sale",
+   "notes": [],
+   "ok": true,
+   "read": 44,
+   "seconds": 2,
+   "state": "PA",
+   "upstream_total": 45,
+   "url": "https://www.ralbaltoonapa.com/"
   },
   "arkansas-cosl": {
    "about": "Tax-forfeited parcels offered after the county tax-sale auctions. Prices are minimum bids; terms and redemption rules apply.",
@@ -434,6 +452,24 @@
    "state": "CT",
    "upstream_total": 2,
    "url": "https://portal.ct.gov/dot/properties/active-public-bids"
+  },
+  "craven-nc-surplus": {
+   "about": "County-owned unimproved land in the available-to-purchase workbook. Assessed values are not sale prices.",
+   "agency": "Craven County, North Carolina",
+   "complete": true,
+   "count": 75,
+   "failures": 0,
+   "last_attempt": "2026-11-28T00:36:03Z",
+   "last_success": "2026-11-28T00:36:03Z",
+   "message": "",
+   "name": "Craven County, North Carolina vacant surplus land",
+   "notes": [],
+   "ok": true,
+   "read": 75,
+   "seconds": 2,
+   "state": "NC",
+   "upstream_total": 75,
+   "url": "https://gis.cravencountync.gov/County_Property_Available_For_Purchase.aspx"
   },
   "dallas-landbank": {
    "about": "Unimproved vacant residential land bank lots across Dallas County from City of Dallas Open Data GIS.",
@@ -956,6 +992,24 @@
    "state": "MN",
    "upstream_total": 8,
    "url": "https://www.millelacs.mn.gov/"
+  },
+  "mndot-surplus": {
+   "about": "Vacant land on MnDOT's current sale pages, with the agency's figures and outlines matched by sale number.",
+   "agency": "Minnesota Department of Transportation",
+   "complete": true,
+   "count": 5,
+   "failures": 0,
+   "last_attempt": "2026-11-28T00:36:03Z",
+   "last_success": "2026-11-28T00:36:03Z",
+   "message": "",
+   "name": "Minnesota DOT vacant land sales",
+   "notes": [],
+   "ok": true,
+   "read": 5,
+   "seconds": 4,
+   "state": "MN",
+   "upstream_total": 5,
+   "url": "https://www.mndot.net/row/propsales.html"
   },
   "montana-cad": {
    "about": "County- and city-owned vacant land tracts across Montana from the Montana Statewide Cadastral Framework with GIS outlines and acreage.",

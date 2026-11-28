@@ -6115,6 +6115,182 @@ def beltrami_mn_otc(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(rows)}
 
 
+ALTOONA_PA_SALE = "https://www.ralbaltoonapa.com/"
+ALTOONA_PA_MAP = "https://services9.arcgis.com/TVVKUhTNEViJGK4M/arcgis/rest/services/Redevelopment_Authority_Land_Bank_Properties/FeatureServer/0/query"
+
+
+def parse_altoona_land(features):
+    rows = []
+    for feature in features:
+        item = feature.get("attributes") or {}
+        if item.get("Status") != "For Sale" or item.get("PropertyType") != "Vacant Lot":
+            continue
+        if number(item.get("NEW_MV_BLD")) not in (None, 0):
+            continue
+        pid = clean(item.get("PAR_NUM"))
+        if not re.fullmatch(r"[\d.-]+", pid):
+            continue
+        address = clean(item.get("SITUS_ADD"))
+        rings = (feature.get("geometry") or {}).get("rings") or []
+        area = number(item.get("DEED_AC"))
+        if (not area or area <= 0) and rings:
+            area = round(rings_acres(rings), 5)
+        outline_url = one_parcel_url(ALTOONA_PA_MAP, "PAR_NUM='%s'" % pid)
+        row = {
+            "id": "pa-altoona-" + slug(pid), "source": "altoona-pa-landbank",
+            "title": "%s, Altoona (land bank vacant lot)" % (address or pid),
+            "state": "PA", "county": "Blair", "locality": "Altoona", "apn": pid,
+            "address": address, "acres": area or None, "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None,
+            "url": ALTOONA_PA_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Listed for sale as a vacant lot by the redevelopment authority", outline_url)],
+            "tags": ["land bank vacant lot"],
+        }
+        if rings:
+            apply_geometry(row, rings, outline_url, "City of Altoona GIS")
+        rows.append(row)
+    return rows
+
+
+def altoona_pa_landbank(fetch, now, warn):
+    _, features = arcgis_query(fetch, ALTOONA_PA_MAP, "Status='For Sale' AND PropertyType='Vacant Lot'",
+                               "PAR_NUM,SITUS_ADD,Status,PropertyType,DEED_AC,NEW_MV_BLD")
+    rows = parse_altoona_land(features)
+    return rows, {"complete": True, "upstream_total": len(features)}
+
+
+CRAVEN_NC_SALE = "https://gis.cravencountync.gov/County_Property_Available_For_Purchase.aspx"
+
+
+def parse_craven_county_offers(rows, url):
+    record = iter(rows)
+    heading = next(record, ()) or ()
+    if not heading or "Craven County Property Available For Purchase" not in str(heading[0]):
+        raise StructureError("Craven County's available land workbook title changed")
+    header = next((line for line in record if line[0] == "County Parcel Id"), None)
+    if not header:
+        raise StructureError("Craven County's available land workbook columns changed")
+    column = {name: header.index(name) for name in (
+        "County Parcel Id", "Owner Name", "Property Address", "Acres", "Description", "City", "Building Value")}
+    public_owners = {"CRAVEN COUNTY", "NEW BERN-CITY", "NEW BERN-CITY OF", "HAVELOCK-CITY OF", "TOWN OF DOVER"}
+    offers = []
+    for row in record:
+        pid = re.sub(r"\s+", "", str(row[column["County Parcel Id"]] or ""))
+        if not re.fullmatch(r"\d-[\dA-Z]+(?:-[\dA-Z]+)+", pid):
+            continue
+        details = clean(str(row[column["Description"]] or ""))
+        owners = {name.strip() for name in str(row[column["Owner Name"]]).upper().split("&")}
+        if "CRAVEN COUNTY" not in owners or not owners <= public_owners:
+            continue
+        building_value = str(row[column["Building Value"]]).strip()
+        if not re.fullmatch(r"0(?:\.0+)?", building_value) or not re.search(r"\b(?:vacant|wooded|empty)\b", details, re.I):
+            continue
+        if re.search(r"\b(?:occupied|mobile home|garage|sidewalk|part of drainage ditch|right.of.way|ROW)\b", details, re.I):
+            continue
+        address = clean(str(row[column["Property Address"]] or "")).title()
+        city = clean(str(row[column["City"]] or "")).title()
+        facts = [fact("availability", "County lists this unimproved property as available for purchase", url)]
+        if len(owners) > 1:
+            facts.append(fact("title_terms", "Co-owned by Craven County and the local municipality", url))
+        if re.search(r"\bland\s*locked\b", details, re.I):
+            facts.append(fact("road_access", "County report describes this lot as landlocked", url))
+        if "undeveloped" in details.lower():
+            facts.append(fact("road_access", "County report identifies an undeveloped street", url))
+        offers.append({
+            "id": "nc-craven-" + slug(pid), "source": "craven-nc-surplus",
+            "title": "%s, %s (county surplus land)" % (address or pid, city or "Craven County"),
+            "state": "NC", "county": "Craven", "locality": city, "apn": pid,
+            "address": address, "acres": number(row[column["Acres"]]), "price": None, "price_kind": "none",
+            "offering": "sale", "status": "listed", "deadline": None, "url": CRAVEN_NC_SALE,
+            "lat": None, "lon": None, "geometry": None, "facts": facts, "tags": ["county surplus land"],
+        })
+    return offers
+
+
+def craven_nc_surplus(fetch, now, warn):
+    from openpyxl import load_workbook
+
+    page = fetch.text(CRAVEN_NC_SALE)
+    link = re.search(r'\bhref="(\.\./County_Property_Available_For_Purchase/Craven_County_Property\.xlsx)"', page, re.I)
+    if not link:
+        raise StructureError("Craven County no longer links its available-to-purchase workbook")
+    url = urllib.parse.urljoin(CRAVEN_NC_SALE, link[1])
+    workbook = load_workbook(io.BytesIO(fetch.bytes(url)), read_only=True, data_only=True)
+    try:
+        rows = parse_craven_county_offers(workbook.active.values, url)
+    finally:
+        workbook.close()
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+MNDOT_SALE = "https://www.mndot.net/row/propsales.html"
+MNDOT_OTC = "https://www.mndot.net/row/propsales_over_the_counter.html"
+MNDOT_GIS = "https://services.arcgis.com/qWbGMYB49y8mLbRt/arcgis/rest/services/MnDOT_Land_for_Sale_Feature_2_view/FeatureServer/1/query"
+
+
+def parse_mndot_offers(directories, features, today):
+    indexed = {str((f.get("attributes") or {}).get("SaleNumber")): f for f in features}
+    rows = []
+    for url, page in directories.items():
+        otc = url == MNDOT_OTC
+        for block in re.findall(r"<(?:li|p)\b[^>]*>\s*<a\b[^>]*>Sale \d+</a>.*?</(?:li|p)>", page, re.I | re.S):
+            text = clean(block)
+            details = re.match(r"Sale (\d+)\s+\(PDF\)\s+-\s+([\d,.]+)\s+(Acres?|Square Feet) of Vacant Land "
+                               r"located (?:at |in |on )?(.+?),\s+([A-Za-z .-]+),\s+([A-Za-z .-]+) County, MN\.", text, re.I)
+            if not details:
+                continue
+            sid, amount, unit, address, place, county = details.groups()
+            feature = indexed.get("Sale " + sid, {})
+            meta = feature.get("attributes") or {}
+            if meta.get("SaleType") != ("Over-the-counter" if otc else "Sale by bid"):
+                continue
+            close = None
+            if not otc:
+                date = re.search(r"\bBid Opening ([A-Za-z]+ \d{1,2}, \d{4})", text)
+                if not date:
+                    continue
+                close = datetime.datetime.strptime(date[1], "%B %d, %Y").date()
+                if close <= today:
+                    continue
+            area = number(amount)
+            if area and unit.lower() == "square feet":
+                area = round(area / 43560, 6)
+            price = number(meta.get("Price"))
+            shape_url = one_parcel_url(MNDOT_GIS, "SaleNumber='Sale %s'" % sid)
+            facts = [fact("availability", "State transportation department markets the site as vacant land", url)]
+            if price is not None:
+                facts.append(fact("price", "Amount published for this sale on the department's land sale map", shape_url))
+            if close:
+                facts.append(fact("auction_start", "Bid opening " + close.isoformat() + ". Confirm the submission cutoff with MnDOT.", url))
+            row = {
+                "id": "mn-mndot-" + sid, "source": "mndot-surplus", "title": "%s, %s (MnDOT vacant land)" % (address, place),
+                "state": "MN", "county": county, "locality": place, "apn": "", "address": address,
+                "acres": area, "price": price, "price_kind": ("cash" if otc else "asking") if price is not None else "none",
+                "offering": "sale" if otc else "auction", "status": "listed" if otc else "auction_terms",
+                "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None, "facts": facts,
+                "tags": ["transportation surplus", "over the counter" if otc else "public bid"],
+            }
+            if close:
+                # The directory gives the opening date, so cease advertising by its start.
+                row["offer_close_date"] = (close - datetime.timedelta(days=1)).isoformat()
+            if rings := (feature.get("geometry") or {}).get("rings"):
+                apply_geometry(row, rings, shape_url, "Minnesota Department of Transportation")
+            rows.append(row)
+    return rows
+
+
+def mndot_surplus(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    directories = {url: fetch.text(url) for url in (MNDOT_SALE, MNDOT_OTC)}
+    if ("Current properties for sale by bid" not in directories[MNDOT_SALE] or
+            "Over the counter sales" not in directories[MNDOT_OTC]):
+        raise StructureError("MnDOT's current land sale directories changed")
+    _, features = arcgis_query(fetch, MNDOT_GIS, "1=1", "SaleNumber,SaleType,Price")
+    rows = parse_mndot_offers(directories, features, now.astimezone(ZoneInfo("America/Chicago")).date())
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -6417,8 +6593,24 @@ SOURCES = [
      "agency": "Beltrami County Natural Resource Management", "url": BELTRAMI_MN_SALE, "state": "MN",
      "run": beltrami_mn_otc, "requires_sale_match": True,
      "about": "Unimproved parcels available from the county at board-approved prices, plus separate taxes and fees."},
+    {"id": "altoona-pa-landbank", "name": "Altoona, Pennsylvania land bank vacant lots for sale",
+     "agency": "Redevelopment Authority of Altoona Land Bank", "url": ALTOONA_PA_SALE, "state": "PA",
+     "run": altoona_pa_landbank, "requires_sale_match": True,
+     "about": "The authoritative city GIS sale layer marks each included parcel For Sale and Vacant Lot. Assessor values are not advertised prices."},
+    {"id": "craven-nc-surplus", "name": "Craven County, North Carolina vacant surplus land",
+     "agency": "Craven County, North Carolina", "url": CRAVEN_NC_SALE, "state": "NC",
+     "run": craven_nc_surplus, "requires_sale_match": True,
+     "about": "County-owned unimproved land in the available-to-purchase workbook. Assessed values are not sale prices."},
+    {"id": "mndot-surplus", "name": "Minnesota DOT vacant land sales",
+     "agency": "Minnesota Department of Transportation", "url": MNDOT_SALE, "state": "MN",
+     "run": mndot_surplus, "requires_sale_match": True, "timezone": "America/Chicago",
+     "about": "Vacant land on MnDOT's current sale pages, with the agency's figures and outlines matched by sale number."},
 ]
 NOT_CARRIED = [
+    ("MnDOT individual sale packet documents", "https://www.mndot.net/row/propsales.html",
+     "The linked document host did not complete a verified robots.txt read. The agency's current directories and sale GIS are carried separately."),
+    ("City of Topeka current land bank map", "https://buildingtopeka.org/topeka-land-bank/",
+     "The city's feature service could not serve its robots.txt over verifiable HTTPS."),
     ("Newark New Jersey municipal and land bank sale catalogs", "https://www.newarknj.gov/184/Division-of-Property-Management",
      "The city's and its Land Bank listing portal's robots.txt endpoints returned HTTP 403."),
     ("West Des Moines sealed-bid real estate", "https://www.wdm.iowa.gov/home/showpublisheddocument/46357",

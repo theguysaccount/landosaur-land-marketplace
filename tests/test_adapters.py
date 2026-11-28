@@ -1069,6 +1069,44 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_todd_vacant_land_preserves_cash_price_without_inferring_a_minimum_bid(self):
+        property_text = ("31-0004800  4th Street\n"
+                         "  Appraised Value: $6,900.00\n"
+                         "  Sale Price: Fees are not included $4,650.00\n"
+                         "  Type: Residential Vacant\n"
+                         "  Approximate Lot Size: .42 Acres\n"
+                         "33-0016300  229 Clark Street\n"
+                         "  Sale Price: Fees are not included $3,900.00\n"
+                         "  Type: Residential\n")
+        otc, = adapters.parse_todd_mn_land("Tax forfeited parcel to purchase over the counter\n" + property_text, "https://county.example")
+        auction, = adapters.parse_todd_mn_land("AUCTION LISTING TAX FORFEITED PARCELS\n" + property_text, "https://county.example",
+                                              datetime.date(2026, 12, 15))
+        self.assertEqual((otc["price"], otc["price_kind"], otc["acres"]), (4650, "cash", .42))
+        self.assertEqual((auction["price"], auction["deadline"], auction["auction_day"]), (None, None, "2026-12-15"))
+
+    def test_dorchester_notice_keeps_exact_open_unimproved_accounts_and_closing_time(self):
+        directory = ('<span class="BidDetail"></span><div class="listItemsRow bid">'
+                     '<a href="bids.aspx?bidID=6">Sale of County-Owned Properties</a>'
+                     '<span>Open</span><br><span>12/1/2026 1:59 PM</span>'
+                     '<div class="listItemsRow bid alt"><a href="bids.aspx?bidID=7">Sale of County-Owned Properties</a>'
+                     '<span>Closed</span><br><span>12/1/2026 2:00 PM</span>')
+        notice = ('<meta property="og:description" content="Closing Date/Time: 12/1/2026 1:59 PM" />'
+                  '<p>No minimum bid amounts are as follows:</p>'
+                  '<p>• Account # 07179588: N/S Town Point Rd</p>'
+                  '<p>• Account # 06086721: 1612 Steamboat Wharf Rd</p><p>Sealed bids, clearly marked</p>')
+        fetch = unittest.mock.Mock()
+        fetch.text.side_effect = [directory, notice]
+        matched = [
+            {"attributes": {"ACCTID": "1007179588", "NFMLNDVL": 1000, "NFMTTLVL": 1000, "ACRES": .5}},
+            {"attributes": {"ACCTID": "1006086721", "NFMLNDVL": 1000, "NFMTTLVL": 1000, "YEARBLT": "1940"}},
+        ]
+        with patch.object(adapters, "_arcgis_query", return_value=matched):
+            rows, info = adapters.dorchester_md_real_property(fetch, NOW, self.fail)
+        self.assertEqual(info["upstream_total"], 2)
+        row, = rows
+        self.assertEqual((row["apn"], row["price"], row["deadline"]), ("07179588", None, "2026-12-01T18:59:00Z"))
+        self.assertEqual(fetch.text.call_count, 2)
+
     def test_valencia_uses_only_known_unimproved_subdivision_lots(self):
         attrs = {"UPC": "1019038365253000000", "AccountNum": "R027369", "IMPACT": 0,
                  "Subdivisio": "MEADOW LAKE SUBDIVISION", "Lot": "12", "Situs": "",

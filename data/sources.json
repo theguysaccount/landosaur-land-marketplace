@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T02:22:27Z",
+ "checked": "2026-11-28T02:52:20Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -417,6 +417,24 @@
    "upstream_total": 37,
    "url": "https://www.chnj.gov/"
   },
+  "chesterfield-mi-surplus": {
+   "about": "Current township real estate solicitations with vacant sites confirmed on the official parcel exhibits.",
+   "agency": "Charter Township of Chesterfield",
+   "complete": true,
+   "count": 4,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:47:46Z",
+   "last_success": "2026-11-28T02:47:46Z",
+   "message": "",
+   "name": "Chesterfield Township vacant Birchgrove land sales",
+   "notes": [],
+   "ok": true,
+   "read": 4,
+   "seconds": 82,
+   "state": "MI",
+   "upstream_total": 4,
+   "url": "https://www.chesterfieldtwp.org/401/Bid-and-Proposals"
+  },
   "chicago-dpd": {
    "about": "Actively offered and open-application Chicago city-owned vacant lots with zoning classifications, lot square footage, and Q4/2027 application deadlines.",
    "agency": "City of Chicago Dept. of Planning & Development",
@@ -705,6 +723,24 @@
    "upstream_total": 28077,
    "url": "https://buildingdetroit.org/properties"
   },
+  "dorchester-md-real-property": {
+   "about": "Open county property sale notices cross-matched to vacant tracts in the Maryland state parcel cadastre.",
+   "agency": "Dorchester County Council",
+   "complete": true,
+   "count": 3,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:34:41Z",
+   "last_success": "2026-11-28T02:34:41Z",
+   "message": "",
+   "name": "Dorchester County vacant surplus land",
+   "notes": [],
+   "ok": true,
+   "read": 3,
+   "seconds": 13,
+   "state": "MD",
+   "upstream_total": 5,
+   "url": "https://www.dorchestermd.gov/Bids.aspx"
+  },
   "elk-pa-repository": {
    "about": "Vacant parcels in the county's live repository index. Consult the county for offer terms and any applicable minimum.",
    "agency": "Elk County Tax Claim Bureau",
@@ -740,6 +776,24 @@
    "state": "AK",
    "upstream_total": 21,
    "url": "https://www.fnsb.gov/1295/West-Chatanika-River-Recreation-Subdivis"
+  },
+  "franklin-vt-industrial": {
+   "about": "A vacant tract listed for purchase by Vermont\u2019s regional development partner in St. Albans Town.",
+   "agency": "Franklin County Industrial Development Corporation",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:47:46Z",
+   "last_success": "2026-11-28T02:47:46Z",
+   "message": "",
+   "name": "Franklin County Industrial Development Corporation vacant industrial land",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 6,
+   "state": "VT",
+   "upstream_total": 1,
+   "url": "https://fcidc.com/st-albans-town-6/"
   },
   "glynn-brunswick-landbank": {
    "about": "Priced vacant lots published as available. Properties under foreclosure or containing structures are excluded.",
@@ -939,6 +993,24 @@
    "upstream_total": 6,
    "url": "https://www.itascacountymn.gov/304/Real-Estate"
   },
+  "jackson-oh-landbank": {
+   "about": "Vacant land listed with a minimum bid and purchase application. Lots offered together are counted once.",
+   "agency": "Jackson County Land Reutilization Corporation",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:40:12Z",
+   "last_success": "2026-11-28T02:40:12Z",
+   "message": "",
+   "name": "Jackson County Land Bank vacant lots for sale",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 1,
+   "state": "OH",
+   "upstream_total": 2,
+   "url": "https://www.jacksoncountyohlandbank.org/available-properties"
+  },
   "kansas-city-landbank": {
    "about": "Acquired vacant lots published via Kansas City Open Data, including zoning codes, lot area, and neighborhood context.",
    "agency": "Land Bank of Kansas City, Missouri",
@@ -992,6 +1064,42 @@
    "state": "WA",
    "upstream_total": 288,
    "url": "https://kingcounty.gov/"
+  },
+  "knox-oh-landbank": {
+   "about": "Vacant lots individually marked available and accepting applications to purchase.",
+   "agency": "Knox County Land Reutilization Corporation",
+   "complete": true,
+   "count": 2,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:47:46Z",
+   "last_success": "2026-11-28T02:47:46Z",
+   "message": "",
+   "name": "Knox County Land Bank available vacant land",
+   "notes": [],
+   "ok": true,
+   "read": 2,
+   "seconds": 92,
+   "state": "OH",
+   "upstream_total": 3,
+   "url": "https://knoxadf.com/land-bank/"
+  },
+  "kootenai-id-unsold": {
+   "about": "Bare land still offered on the county\u2019s current unsold property list. Road strips, right-of-way pieces and other ambiguous entries are excluded.",
+   "agency": "Kootenai County Treasurer",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:52:20Z",
+   "last_success": "2026-11-28T02:52:20Z",
+   "message": "",
+   "name": "Kootenai County unsold bare tax-deeded land",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 23,
+   "state": "ID",
+   "upstream_total": 1,
+   "url": "https://www.kcgov.us/528/Property-Tax-Sale"
   },
   "la-county-ttc": {
    "about": "Tax-defaulted vacant land auction parcels in Los Angeles County with published minimum bids, zoning, acreage, and GIS parcel outlines.",
@@ -1064,6 +1172,24 @@
    "state": "NV",
    "upstream_total": 30,
    "url": "https://www.lasvegasnevada.gov/"
+  },
+  "lorain-oh-forfeiture": {
+   "about": "Current auction tracts that the county identifies as vacant in its published parcel map.",
+   "agency": "Lorain County Auditor",
+   "complete": true,
+   "count": 7,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:52:20Z",
+   "last_success": "2026-11-28T02:52:20Z",
+   "message": "",
+   "name": "Lorain County Auditor vacant forfeited land auction",
+   "notes": [],
+   "ok": true,
+   "read": 7,
+   "seconds": 5,
+   "state": "OH",
+   "upstream_total": 8,
+   "url": "https://loraincountyauditor.gov/"
   },
   "louisville-landbank": {
    "about": "Available vacant landbank lots in Louisville/Jefferson County with GIS polygon boundaries and official buildability flags.",
@@ -1697,6 +1823,24 @@
    "upstream_total": 1,
    "url": "https://www.rawlinswy.gov/bids.aspx?bidID=347"
   },
+  "renville-mn-forfeiture": {
+   "about": "County sale parcels also listed in the live first auction, with vacancy checked against the county\u2019s aerial exhibits.",
+   "agency": "Renville County Auditor-Treasurer",
+   "complete": true,
+   "count": 4,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:44:31Z",
+   "last_success": "2026-11-28T02:44:31Z",
+   "message": "",
+   "name": "Renville County vacant tax-forfeiture auctions",
+   "notes": [],
+   "ok": true,
+   "read": 4,
+   "seconds": 7,
+   "state": "MN",
+   "upstream_total": 22,
+   "url": "https://www.renvillecountymn.gov/notice-of-sale-of-tax-forfeited-land/"
+  },
   "richmond-va": {
    "about": "City-owned vacant surplus properties in Richmond, Virginia with GIS outlines and lot area.",
    "agency": "City of Richmond, Virginia",
@@ -1949,6 +2093,24 @@
    "upstream_total": 60,
    "url": "https://www.stlouiscountymn.gov/departments-a-z/land-minerals/sales-and-contracts/tax-forfeited-land-sales"
   },
+  "todd-mn-tax-forfeit": {
+   "about": "Current auction and over-the-counter offers the county specifically classifies as vacant residential land.",
+   "agency": "Todd County Auditor-Treasurer",
+   "complete": true,
+   "count": 6,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:37:48Z",
+   "last_success": "2026-11-28T02:37:48Z",
+   "message": "",
+   "name": "Todd County vacant tax-forfeited land",
+   "notes": [],
+   "ok": true,
+   "read": 6,
+   "seconds": 4,
+   "state": "MN",
+   "upstream_total": 6,
+   "url": "https://www.toddcountymn.gov/government/departments/auditor_and_treasurer/tax_forfeited_land.php"
+  },
   "utah-udot": {
    "about": "Unsold state highway right-of-way surplus parcels across Utah with GIS outlines and PLSS location data.",
    "agency": "Utah Department of Transportation",
@@ -2110,6 +2272,24 @@
    "state": "DE",
    "upstream_total": 32,
    "url": "https://www.wilmingtonde.gov/"
+  },
+  "windham-ct-surplus": {
+   "about": "Vacant town property offered for purchase through an open reuse proposal.",
+   "agency": "Town of Windham, Connecticut",
+   "complete": true,
+   "count": 1,
+   "failures": 0,
+   "last_attempt": "2026-11-28T02:47:46Z",
+   "last_success": "2026-11-28T02:47:46Z",
+   "message": "",
+   "name": "Windham vacant town property for purchase",
+   "notes": [],
+   "ok": true,
+   "read": 1,
+   "seconds": 42,
+   "state": "CT",
+   "upstream_total": 1,
+   "url": "https://www.windhamct.gov/Bids.aspx"
   },
   "wisconsin-bcpl": {
    "about": "Surplus state trust land sold by sealed-bid auction or private sale.",

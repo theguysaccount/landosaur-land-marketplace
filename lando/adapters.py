@@ -7619,6 +7619,458 @@ def elk_pa_repository(fetch, now, warn):
     return list(rows.values()), {"complete": True, "upstream_total": len(links)}
 
 
+DORCHESTER_MD_BIDS = "https://www.dorchestermd.gov/Bids.aspx"
+DORCHESTER_MD_PARCELS = "https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_ParcelBoundaries/MapServer/0/query"
+DORCHESTER_MD_IMPROVEMENTS = ("YEARBLT", "SQFTSTRC", "BLDG_UNITS", "BLDG_STORY", "STRUBLDG")
+
+
+def parse_dorchester_md_notice(page):
+    from zoneinfo import ZoneInfo
+
+    notice = clean(page)
+    close = re.search(r"Closing Date/Time:\s*(\d+/\d+/\d{4}\s+\d+:\d+\s+[AP]M)\b", html.unescape(page), re.I)
+    if not close:
+        raise StructureError("Dorchester County’s real property notice lacks a closing time")
+    deadline = datetime.datetime.strptime(close[1], "%m/%d/%Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+    section = re.search(r"No minimum bid amounts are as follows:\s*(.*?)\s*Sealed bids,", notice, re.I)
+    if not section:
+        raise StructureError("Dorchester County’s real property account and bid terms changed")
+    accounts = dict(re.findall(r"Account\s*#\s*(\d{8}):\s*([^•]+?)(?=\s*•|$)", section[1]))
+    if not accounts:
+        raise StructureError("Dorchester County’s live notice has no readable property accounts")
+    return accounts, deadline
+
+
+def dorchester_md_real_property(fetch, now, warn):
+    directory = fetch.text(DORCHESTER_MD_BIDS)
+    if 'class="BidDetail"' not in directory:
+        raise StructureError("Dorchester County’s bid directory changed")
+    rows = {}
+    upstream_total = 0
+    for card in re.split(r'<div class="listItemsRow bid(?: alt)?">', directory)[1:]:
+        link = re.search(r'<a href="(bids\.aspx\?bidID=\d+)">Sale of County-Owned Properties</a>', card, re.I)
+        closes = re.search(r">\s*Open\s*</span>\s*<br\s*/?>\s*<span>\s*\d+/\d+/\d{4}\s", card, re.I)
+        if not link or not closes:
+            continue
+        url = urllib.parse.urljoin(DORCHESTER_MD_BIDS, link[1])
+        accounts, deadline = parse_dorchester_md_notice(fetch.text(url))
+        if deadline <= now:
+            continue
+        upstream_total += len(accounts)
+        where = "JURSCODE='DORC' AND ACCTID IN (%s)" % quote_list("10" + key for key in accounts)
+        fields = "ACCTID,NFMLNDVL,NFMIMPVL,NFMTTLVL,ACRES,PREMCITY," + ",".join(DORCHESTER_MD_IMPROVEMENTS)
+        features = _arcgis_query(fetch, DORCHESTER_MD_PARCELS, where, fields)
+        if len(features) < .75 * len(accounts):
+            raise StructureError("Dorchester County’s sale accounts no longer match the state cadastre")
+        for feature in features:
+            item = feature["attributes"]
+            account = item["ACCTID"][2:]
+            address = accounts.get(account)
+            if (not address or not number(item.get("NFMLNDVL")) or item.get("NFMIMPVL") not in (None, 0)
+                    or item.get("NFMLNDVL") != item.get("NFMTTLVL")
+                    or any(item.get(key) not in (None, 0, "") for key in DORCHESTER_MD_IMPROVEMENTS)):
+                continue
+            row = {
+                "id": "md-dorchester-county-" + account, "source": "dorchester-md-real-property",
+                "title": "%s (Dorchester County sealed-bid land)" % address,
+                "state": "MD", "county": "Dorchester", "locality": clean(item.get("PREMCITY")).title(),
+                "apn": account, "address": address, "acres": number(item.get("ACRES")),
+                "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+                "deadline": deadline.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "url": url, "lat": None, "lon": None, "geometry": None,
+                "facts": [fact("availability", "The county requests sealed purchase bids for this tract.", "="),
+                          fact("sale_terms", "The notice publishes no minimum bid. The county can reject bids.", "=")],
+                "tags": ["county surplus", "sealed bid"],
+            }
+            rings = (feature.get("geometry") or {}).get("rings") or []
+            apply_geometry(row, rings, DORCHESTER_MD_PARCELS, "Maryland Department of Planning")
+            rows[row["id"]] = row
+    return list(rows.values()), {"complete": True, "upstream_total": upstream_total}
+
+
+TODD_MN_LAND = "https://www.toddcountymn.gov/government/departments/auditor_and_treasurer/tax_forfeited_land.php"
+
+
+def parse_todd_mn_land(report, url, auction_close=None):
+    headline = "AUCTION LISTING TAX FORFEITED PARCELS" if auction_close else "Tax forfeited parcel to purchase over the counter"
+    if headline not in report:
+        raise StructureError("Todd County’s tax-forfeited listing heading changed")
+    rows = []
+    for parcel in re.finditer(r"^\s*(\d{2}-\d{7})\s+([^\r\n]+)\n(.*?)(?=^\s*\d{2}-\d{7}\s|\Z)", report, re.M | re.S):
+        pin, description, details = parcel.groups()
+        if not re.search(r"^[ \t]*Type:[ \t]+Residential Vacant[ \t]*$", details, re.M | re.I):
+            continue
+        if re.search(r"\b(?:sold|withdrawn|redeemed|pending)\b", description, re.I):
+            continue
+        acres = re.search(r"^[ \t]*Approximate Lot Size:[ \t]+([\d.]+)", details, re.M)
+        amount = re.search(r"^[ \t]*Sale Price:[^\r\n]*\$\s*([\d,.]+)", details, re.M)
+        address = clean(description)
+        price = number(amount[1]) if amount and not auction_close else None
+        rows.append({
+            "id": "mn-todd-tax-forfeit-" + pin, "source": "todd-mn-tax-forfeit",
+            "title": "%s (Todd County vacant tax-forfeited land)" % address,
+            "state": "MN", "county": "Todd", "locality": "", "apn": pin, "address": address,
+            "acres": number(acres[1]) if acres else None, "price": price,
+            "price_kind": "cash" if price else "none", "offering": "auction" if auction_close else "sale",
+            "status": "auction_terms" if auction_close else "listed", "deadline": None,
+            "auction_day": auction_close.isoformat() if auction_close else None,
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county identifies this tract as vacant residential land.", "="),
+                      fact("sale_terms", "Contact the county for current bid requirements and any applicable fees." if auction_close
+                           else "Available over the counter at the county’s listed price, plus fees and any applicable assessments.", "=")],
+            "tags": ["tax-forfeited land", "public auction" if auction_close else "over the counter"],
+        })
+        if auction_close:
+            rows[-1]["facts"].append(fact("auction_date", "The published closing date is %s." % auction_close.strftime("%B %d, %Y"), TODD_MN_LAND))
+    return rows
+
+
+def todd_mn_tax_forfeit(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(TODD_MN_LAND)
+    links = {clean(label).casefold(): urllib.parse.quote(html.unescape(url), safe=":/?&=%")
+             for url, label in re.findall(r'<a\b[^>]*\bhref\s*=\s*"([^"]+\.pdf(?:\?[^"]*)?)"[^>]*>(.*?)</a>', page, re.I | re.S)
+             if url.startswith("https://www.toddcountymn.gov/Documents/")}
+    otc = links.get("tax forfeited parcels to purchase any time over the counter.")
+    if not otc:
+        raise StructureError("Todd County’s over-the-counter listing link changed")
+    rows = {row["id"]: row for row in parse_todd_mn_land(pdf_text(fetch, otc), otc)}
+    text = clean(page)
+    auction = links.get("full listing")
+    auction_end = re.search(r"Tax forfeited properties online auction starting .*? closing ([A-Z][a-z]+ \d{1,2})(?:st|nd|rd|th)?, (\d{4})\b", text)
+    if auction and not auction_end:
+        raise StructureError("Todd County’s online auction has no recognized closing date")
+    if auction and auction_end:
+        close = datetime.datetime.strptime(" ".join(auction_end.groups()), "%B %d %Y").date()
+        if now.astimezone(ZoneInfo("America/Chicago")).date() < close:
+            rows.update((row["id"], row) for row in parse_todd_mn_land(pdf_text(fetch, auction), auction, close))
+    return list(rows.values()), {"complete": True, "upstream_total": len(rows)}
+
+
+JACKSON_OH_LANDBANK = "https://www.jacksoncountyohlandbank.org/available-properties"
+
+
+def jackson_oh_landbank(fetch, now, warn):
+    page = clean(fetch.text(JACKSON_OH_LANDBANK)).replace("\u200b", "").replace("’", "'")
+    if "The Jackson County Land Bank has the properties listed below for sale" not in page:
+        raise StructureError("Jackson County’s current land bank sale listing changed")
+    rows = []
+    wellston = re.search(r"(\d+\s+[NSEW]\.\s+[^.]+?,\s+Wellston, Ohio)\s+The minimum bid price for this\s+([\d.]+) acre lot.{0,75}?is\s+\$([\d,]+)\.", page)
+    jackson = re.search(r"Property Available\s+Two lots at the southwest corner of the intersection of\s+(.*?), Jackson, Ohio\.\s+"
+                        r"The parcel ID #'s are ([A-Z]\d+) and ([A-Z]\d+)\.\s+The two lots have a combined\s+([\d.]+) acre\.\s+"
+                        r"The minimum bid price is\s+\$([\d,]+)\.", page)
+    offers = []
+    if wellston:
+        address, acres, minimum = wellston.groups()
+        offers.append((slug(address), address, "Wellston", "", acres, minimum, []))
+    if jackson:
+        address, first, second, acres, minimum = jackson.groups()
+        facts = [fact("sale_terms", "Both lots are offered together at one minimum bid. Part of the site is in the floodplain.", "=")]
+        offers.append((slug(first + "-" + second), address, "Jackson", first + " / " + second, acres, minimum, facts))
+    for offer_id, address, place, apns, acres, minimum, facts in offers:
+        rows.append({
+            "id": "oh-jackson-landbank-" + offer_id, "source": "jackson-oh-landbank",
+            "title": "%s (Jackson County Land Bank vacant land)" % address, "state": "OH", "county": "Jackson",
+            "locality": place, "apn": apns, "address": address, "acres": number(acres),
+            "price": number(minimum), "price_kind": "min_bid", "offering": "auction", "status": "auction_terms", "deadline": None,
+            "url": JACKSON_OH_LANDBANK, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The land bank is accepting purchase applications and bids for this offer.", "=")] + facts,
+            "tags": ["land bank", "purchase application"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+KNOX_OH_LANDBANK = "https://knoxadf.com/land-bank/"
+
+
+def knox_oh_landbank(fetch, now, warn):
+    directory = fetch.text(KNOX_OH_LANDBANK)
+    vacant = directory.partition(">Available Vacant Lots</h")[2]
+    if not vacant:
+        raise StructureError("Knox County’s vacant land bank inventory changed")
+    rows = {}
+    offers = dict(re.findall(r'<a href="(https://knoxadf\.com/portfolio-item/[^"]+/)" title="([^"]+)" class="vc_gitem-link[^"]*"', vacant))
+    for url, name in offers.items():
+        page = clean(fetch.text(url))
+        if "Status: Available" not in page or "Currently accepting applications for purchase." not in page:
+            continue
+        parcel = re.search(r"Parcel Number:\s*([\d.-]+)\s+Property Card:", page)
+        area = re.search(r"Lot Size:\s*([\d.]+)\s*acres?\b", page, re.I)
+        address, _, place = clean(name).rpartition(", ")
+        if not parcel or not address or not place:
+            raise StructureError("Knox County’s available property lacks its address or parcel number")
+        rows[parcel[1]] = {
+            "id": "oh-knox-landbank-" + slug(parcel[1]), "source": "knox-oh-landbank",
+            "title": clean(name) + " (Knox County Land Bank vacant lot)",
+            "state": "OH", "county": "Knox", "locality": place, "apn": parcel[1], "address": address,
+            "acres": number(area[1]) if area else None, "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Listed as vacant and currently accepting purchase applications.", "=")],
+            "tags": ["land bank", "purchase application"],
+        }
+    return list(rows.values()), {"complete": True, "upstream_total": len(offers)}
+
+
+CHESTERFIELD_MI_BIDS = "https://www.chesterfieldtwp.org/401/Bid-and-Proposals"
+# The township's individual aerial exhibits were reviewed for buildings within each numbered boundary.
+CHESTERFIELD_MI_VACANT_MAPS = {
+    "15-09-14-101-062": "ab3c3a83fc5c1ca6fee32e3bfc8967be6d6c10c8b13925ea56855735c71941e3",
+    "15-09-14-102-032": "d166e98e23e9cf9da0aea70411ac7bc356c8b4a2edcbf59b554915b83d3ec6b9",
+    "15-09-14-151-013": "7ddfbc035ee537df472a03be5a5bb4dc6cbfbb05fe3628b1d56791f2d4e23e4f",
+    "15-09-14-302-008": "4c22cc518cc34f26e1a810c53912fc6b77e33e5017fcf64ba3eb9a5a9c9c24ff",
+}
+
+
+def chesterfield_mi_surplus(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(CHESTERFIELD_MI_BIDS)
+    if "<title>\n\tBid and Proposals" not in page and "Bid Reminders" not in page:
+        raise StructureError("Chesterfield Township’s open bid directory changed")
+    rows = []
+    for section in re.findall(r"<h2\b[^>]*>.*?RFP-[^<]+</a></h2>\s*<p>\s*<strong>Birchgrove Parcel[^<]+</strong>.*?</p>", page, re.I | re.S):
+        terms = clean(section)
+        offer = re.search(r"(RFP-\d{4}-FO-\d+)\s+(Birchgrove Parcel \d+):\s*#([\d-]+).*?Bid Deadline:\s*([A-Z][a-z]+ \d+, \d{4})\s*@\s*(\d+:\d+ [AP]M)", terms)
+        if not offer:
+            raise StructureError("Chesterfield’s real estate bid identity or deadline changed")
+        ref, title, pin, day, clock = offer.groups()
+        close = datetime.datetime.strptime(day + " " + clock, "%B %d, %Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+        if close <= now or pin not in CHESTERFIELD_MI_VACANT_MAPS:
+            continue
+        map_link = re.search(r'<a href="(/DocumentCenter/View/\d+)"[^>]*>\s*<strong>Parcel Map</strong>', section)
+        if not map_link:
+            raise StructureError("Chesterfield’s real estate sale lacks a parcel exhibit")
+        map_url = urllib.parse.urljoin(CHESTERFIELD_MI_BIDS, map_link[1])
+        if hashlib.sha256(fetch.bytes(map_url)).hexdigest() != CHESTERFIELD_MI_VACANT_MAPS[pin]:
+            raise StructureError("Chesterfield parcel exhibit changed and requires renewed verification")
+        rows.append({
+            "id": "mi-chesterfield-birchgrove-" + pin, "source": "chesterfield-mi-surplus",
+            "title": title + " (Chesterfield Township sealed bid)", "state": "MI", "county": "Macomb",
+            "locality": "Chesterfield Township", "apn": pin, "address": "", "acres": None,
+            "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+            "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": CHESTERFIELD_MI_BIDS, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "Vacant land offered by sealed bid, solicitation " + ref + ".", "="),
+                      fact("parcel_map", "Township parcel exhibit and aerial image", map_url)],
+            "tags": ["township surplus", "sealed bid"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+WINDHAM_CT_BIDS = "https://www.windhamct.gov/Bids.aspx"
+
+
+def windham_ct_surplus(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(WINDHAM_CT_BIDS)
+    if 'class="BidDetail"' not in page:
+        raise StructureError("Windham’s bid directory changed")
+    rows = []
+    for card in re.split(r'<div class="listItemsRow bid(?: alt)?">', page)[1:]:
+        link = re.search(r'<a href="(bids\.aspx\?bidID=\d+)">RFP, Sale and Reuse of Town-Owned Property</a>', card)
+        closes = re.search(r">\s*Open\s*</span>\s*<br\s*/?>\s*<span>\s*(\d+/\d+/\d{4}\s+\d+:\d+\s+[AP]M)", card, re.I)
+        if not link or not closes:
+            continue
+        close = datetime.datetime.strptime(closes[1], "%m/%d/%Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+        if close <= now:
+            continue
+        url = urllib.parse.urljoin(WINDHAM_CT_BIDS, link[1])
+        notice = fetch.text(url)
+        attachment = re.search(r'href=["\']?(/DocumentCenter/View/\d+)["\']?\s*>Bridge_Street_RFP_Sale</a>', notice)
+        if not attachment:
+            continue
+        document = urllib.parse.urljoin(WINDHAM_CT_BIDS, attachment[1])
+        terms = clean(pdf_text(fetch, document, extraction_mode="plain"))
+        place = re.search(r"(\d+ Bridge Street)\s*\|\s*(Willimantic), Connecticut", terms)
+        area = re.search(r"The parcel is approximately ([\d.]+) acres", terms)
+        if not place or not area or "The property is vacant." not in terms:
+            raise StructureError("Windham’s sale packet no longer confirms the vacant tract and acreage")
+        address, locality = place.groups()
+        rows.append({
+            "id": "ct-windham-" + slug(address), "source": "windham-ct-surplus",
+            "title": "%s, %s (Windham vacant town land)" % (address, locality),
+            "state": "CT", "county": "Windham", "locality": locality, "apn": "", "address": address,
+            "acres": number(area[1]), "price": None, "price_kind": "none", "offering": "sale", "status": "proposal_open",
+            "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The town is seeking purchase and reuse proposals for the vacant tract.", document),
+                      fact("site_constraints", "Small waterfront site with physical constraints. The town has not determined buildability.", document)],
+            "tags": ["town surplus", "purchase proposal"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
+RENVILLE_MN_LAND = "https://www.renvillecountymn.gov/notice-of-sale-of-tax-forfeited-land/"
+RENVILLE_MN_AUCTIONS = "https://publicsurplus.com/sms/renvillecotax,mn/list/current?orgid=1117057"
+# These county flyers show the exact auction boundaries with no structure inside them.
+RENVILLE_MN_VACANT_FLYERS = {
+    "03-02819-00": "c77732298acad5f57420fb31cebd0f81b4463970b3e87d9352647ea86814f10f",
+    "14-00402-00": "7a4033f68c1bb35ef8da0d59237ce84507f514806d8f5da991c608cdadf21865",
+    "28-01486-00": "95049d5f6bead32181332f20b59dd41fc5b0129f276f5d5e0ffd5faf2a6d99f8",
+    "28-02125-00": "856683923ed4f97512b11552c75d13ef5905a1f2219b7d1dc64f9a008a33aa7d",
+}
+
+
+def renville_mn_forfeiture(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    roster = fetch.text(RENVILLE_MN_LAND)
+    if "EMV Minimum Bid" not in roster:
+        raise StructureError("Renville County’s current tax-forfeiture notice changed")
+    flyers = {pin: url for url, pin in re.findall(r'<a href="(https://www\.renvillecountymn\.gov/[^"]+Forfeiture-Flyer-[^"]+\.pdf)"[^>]*>\s*(\d{2}-\d{5}-\d{2})\s*</a>', roster, re.I)}
+    auctions = fetch.text(RENVILLE_MN_AUCTIONS)
+    if "Renville" not in auctions:
+        raise StructureError("Renville County’s currently offered online lots could not be confirmed")
+    active = {pin: urllib.parse.urljoin(RENVILLE_MN_AUCTIONS, url)
+              for url, pin in re.findall(r'<a href="(/sms/renvillecotax,mn/auction/view\?auc=\d+)">\s*Renville County Tax Forfeiture Parcel\s+(\d{2}-\d{5}-\d{2})\s*</a>', auctions)}
+    rows = []
+    for pin in sorted(RENVILLE_MN_VACANT_FLYERS.keys() & flyers.keys() & active.keys()):
+        url = flyers[pin]
+        report = clean(pdf_text(fetch, url, checked_sha256=RENVILLE_MN_VACANT_FLYERS[pin]))
+        if not re.search(r"Parcel ID\s+" + re.escape(pin) + r"\b", report):
+            raise StructureError("Renville County’s auction flyer does not match its parcel number")
+        term = re.search(r"First Sale:\s*START\s+([A-Z][a-z]+ \d+, \d{4}) at (\d+:\d+ [AP]M).*?\bEND\s+([A-Z][a-z]+ \d+, \d{4}) at (\d+:\d+ [AP]M)", report)
+        address = re.search(r"Property Address:\s*(.+?)\s+Estimated Market Value", report)
+        amount = re.search(r"(?<!Second Sale )Starting Bid:\s*\$\s*([\d,.]+)", report)
+        if not term or not address or not amount:
+            raise StructureError("Renville County’s first auction terms changed")
+        zone = ZoneInfo("America/Chicago")
+        starts = datetime.datetime.strptime(term[1] + " " + term[2], "%B %d, %Y %I:%M %p").replace(tzinfo=zone)
+        close = datetime.datetime.strptime(term[3] + " " + term[4], "%B %d, %Y %I:%M %p").replace(tzinfo=zone)
+        if not starts <= now < close:
+            continue
+        rows.append({
+            "id": "mn-renville-forfeiture-" + pin, "source": "renville-mn-forfeiture",
+            "title": "Parcel %s, %s (Renville County vacant tax-forfeited land)" % (pin, address[1]),
+            "state": "MN", "county": "Renville", "locality": "", "apn": pin, "address": address[1], "acres": None,
+            "price": number(amount[1]), "price_kind": "min_bid", "offering": "auction", "status": "auction_open",
+            "deadline": close.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county lists this vacant tract in its current first-round online auction.", active[pin]),
+                      fact("sale_terms", "The displayed amount is the first auction’s starting bid. Additional fees apply.", RENVILLE_MN_LAND)],
+            "tags": ["tax-forfeited land", "online auction"],
+        })
+    return rows, {"complete": True, "upstream_total": len(flyers)}
+
+
+FRANKLIN_VT_INDUSTRIAL = "https://fcidc.com/st-albans-town-6/"
+FRANKLIN_VT_PROSPECTUS = "https://fcidc.com/wp-content/uploads/2022/07/complete-prospectus.pdf"
+
+
+def franklin_vt_industrial(fetch, now, warn):
+    page = fetch.text(FRANKLIN_VT_INDUSTRIAL)
+    if FRANKLIN_VT_PROSPECTUS not in page or "St. Albans Town Industrial Park" not in clean(page):
+        raise StructureError("Franklin County’s land listing no longer links the industrial park prospectus")
+    description = clean(pdf_text(fetch, FRANKLIN_VT_PROSPECTUS))
+    available = re.search(r"Available Lots\s+Lots\s+([a-z\d,\s]+)\s+are available\.", description, re.I)
+    if not available:
+        raise StructureError("Franklin County’s industrial park prospectus changed its available lot list")
+    if not re.search(r"\b1c\b", available[1], re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    # Carry the exact lot whose ongoing sale was separately confirmed in the current marketing listing.
+    row = {
+        "id": "vt-franklin-industrial-benoit-1c", "source": "franklin-vt-industrial",
+        "title": "Benoit Drive Lot 1C (St. Albans Town Industrial Park)",
+        "state": "VT", "county": "Franklin", "locality": "St. Albans Town", "apn": "", "address": "Benoit Drive",
+        "acres": None, "price": None, "price_kind": "none", "offering": "sale", "status": "listed",
+        "deadline": None, "url": FRANKLIN_VT_INDUSTRIAL, "lat": None, "lon": None, "geometry": None,
+        "facts": [fact("availability", "The regional development corporation lists Lot 1C as available in its industrial park prospectus.", FRANKLIN_VT_PROSPECTUS),
+                  fact("sale_terms", "Contact the development corporation for purchase terms, permitting requirements and site restrictions.", "=")],
+        "tags": ["industrial land", "regional development"],
+    }
+    return [row], {"complete": True, "upstream_total": 1}
+
+
+LORAIN_OH_AUCTION = "https://loraincountyauditor.gov/"
+LORAIN_OH_SALE_MAP = "https://experience.arcgis.com/experience/211ff217d30d4be7a62cedb7add98169"
+LORAIN_OH_SALE_PARCELS = "https://services1.arcgis.com/vGBb7WYV10mOJRNM/arcgis/rest/services/2026_Land_Sale/FeatureServer/3/query"
+
+
+def lorain_oh_forfeiture(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(LORAIN_OH_AUCTION)
+    region = re.search(r"<strong>Forfeited Land Sale:</strong>(.*?)</h4>", page, re.S)
+    if not region:
+        return [], {"complete": True, "upstream_total": 0}
+    links = {clean(label): urllib.parse.urljoin(LORAIN_OH_AUCTION, urllib.parse.quote(html.unescape(path), safe=":/?&=%"))
+             for path, label in re.findall(r'<a href="(/api/Media\?[^"]+)"[^>]*>(.*?)</a>', region[1], re.S)}
+    rules_url, parcels_url = links.get("Forfeited Land Sale Rules"), links.get("Forfeited Land Sale Parcel List")
+    if not rules_url or not parcels_url or LORAIN_OH_SALE_MAP not in region[1]:
+        raise StructureError("Lorain County’s official sale documents or current map changed")
+    rules = clean(pdf_text(fetch, rules_url, extraction_mode="plain"))
+    event = re.search(r"SALE STARTS\s+([A-Z][a-z]+ \d+, \d{4}),\s+at\s+(\d+:\d+)\s+([ap])\.m\.", rules, re.I)
+    if not event:
+        raise StructureError("Lorain County’s forfeited land auction has no recognized date and time")
+    start = datetime.datetime.strptime("%s %s %sM" % (event[1], event[2], event[3].upper()),
+                                      "%B %d, %Y %I:%M %p").replace(tzinfo=ZoneInfo("America/New_York"))
+    if start <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    roster = pdf_text(fetch, parcels_url, extraction_mode="plain")
+    offered = set(re.findall(r"\b\d{2}-\d{2}-\d{3}-\d{3}-\d{3}\b", roster))
+    if not offered:
+        raise StructureError("Lorain County’s list has no readable parcel numbers")
+    features = _arcgis_query(fetch, LORAIN_OH_SALE_PARCELS, "1=1", "PARCEL_NUMBER,ADDRESS")
+    matched = {clean(item["attributes"].get("PARCEL_NUMBER")) for item in features}
+    if offered != matched:
+        raise StructureError("Lorain County’s current list and auction map do not agree")
+    rows = []
+    for feature in features:
+        item = feature["attributes"]
+        pin = clean(item.get("PARCEL_NUMBER"))
+        vacant = re.match(r"V/L[ ,]+(.+?)(?:,\s*LORAIN|\s+LORAIN)", clean(item.get("ADDRESS")), re.I)
+        if not vacant:
+            continue
+        rings = (feature.get("geometry") or {}).get("rings") or []
+        address = vacant[1].title()
+        row = {
+            "id": "oh-lorain-forfeiture-" + pin, "source": "lorain-oh-forfeiture",
+            "title": "%s, Lorain (Lorain County vacant tax-forfeited land)" % address,
+            "state": "OH", "county": "Lorain", "locality": "Lorain", "apn": pin, "address": address,
+            "acres": rings_acres(rings) if rings else None,
+            "price": None, "price_kind": "none", "offering": "auction", "status": "auction_terms",
+            "deadline": start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": parcels_url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county lists this parcel as vacant in its current forfeited-land auction.", LORAIN_OH_SALE_MAP),
+                      fact("sale_terms", "The initial bid includes unpaid charges and sale costs. Review the county’s bidding rules.", rules_url)],
+            "tags": ["tax-forfeited land", "public auction"],
+        }
+        apply_geometry(row, rings, LORAIN_OH_SALE_PARCELS, "Lorain County Auditor")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offered)}
+
+
+KOOTENAI_ID_PROPERTY = "https://www.kcgov.us/528/Property-Tax-Sale"
+
+
+def kootenai_id_unsold(fetch, now, warn):
+    directory = fetch.text(KOOTENAI_ID_PROPERTY)
+    link = re.search(r'<a\b[^>]*href="(/DocumentCenter/View/\d+/Tax-Deed-Property-Not-Sold-PDF)"[^>]*>\s*Prior Properties offered at Tax Sales and still unsold online \(PDF\)', directory, re.I)
+    if not link:
+        raise StructureError("Kootenai County’s current unsold property list is missing")
+    url = urllib.parse.urljoin(KOOTENAI_ID_PROPERTY, link[1])
+    report = clean(pdf_text(fetch, url))
+    if "PROPERTIES OFFERED AT AUCTION THAT REMAIN UNSOLD" not in report:
+        raise StructureError("Kootenai County’s unsold property list changed")
+    rows = []
+    for match in re.finditer(r"\b([A-Z0-9]{12})\s+(\d{6})\s+\d{4}\s+([\d.]+)\s+(Piece of bare land in Government Lot \d+ in Section \d+, Township \d+ North, Range \d+ West)\b", report, re.I):
+        pin, ain, acres, description = match.groups()
+        rows.append({
+            "id": "id-kootenai-unsold-" + pin.lower(), "source": "kootenai-id-unsold",
+            "title": "Parcel %s (Kootenai County unsold tax-deeded land)" % pin,
+            "state": "ID", "county": "Kootenai", "locality": "", "apn": pin, "address": "",
+            "acres": number(acres), "price": None, "price_kind": "none", "offering": "sale",
+            "status": "listed", "deadline": None, "url": url, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county identifies this property as bare land still unsold after auction.", "="),
+                      fact("site", description, "="), fact("county_account", ain, "="),
+                      fact("sale_terms", "Ask the county about its sealed offer process for unsold property.", KOOTENAI_ID_PROPERTY)],
+            "tags": ["tax-deeded land", "post-auction offer"],
+        })
+    return rows, {"complete": True, "upstream_total": len(rows)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -8021,8 +8473,56 @@ SOURCES = [
      "agency": "Elk County Tax Claim Bureau", "url": ELK_PA_REPOSITORY, "state": "PA",
      "run": elk_pa_repository, "requires_sale_match": True,
      "about": "Vacant parcels in the county's live repository index. Consult the county for offer terms and any applicable minimum."},
+    {"id": "dorchester-md-real-property", "name": "Dorchester County vacant surplus land",
+     "agency": "Dorchester County Council", "url": DORCHESTER_MD_BIDS, "state": "MD",
+     "run": dorchester_md_real_property, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Open county property sale notices cross-matched to vacant tracts in the Maryland state parcel cadastre."},
+    {"id": "todd-mn-tax-forfeit", "name": "Todd County vacant tax-forfeited land",
+     "agency": "Todd County Auditor-Treasurer", "url": TODD_MN_LAND, "state": "MN", "timezone": "America/Chicago",
+     "run": todd_mn_tax_forfeit, "requires_sale_match": True,
+     "about": "Current auction and over-the-counter offers the county specifically classifies as vacant residential land."},
+    {"id": "jackson-oh-landbank", "name": "Jackson County Land Bank vacant lots for sale",
+     "agency": "Jackson County Land Reutilization Corporation", "url": JACKSON_OH_LANDBANK, "state": "OH",
+     "run": jackson_oh_landbank, "requires_sale_match": True,
+     "about": "Vacant land listed with a minimum bid and purchase application. Lots offered together are counted once."},
+    {"id": "knox-oh-landbank", "name": "Knox County Land Bank available vacant land",
+     "agency": "Knox County Land Reutilization Corporation", "url": KNOX_OH_LANDBANK, "state": "OH",
+     "run": knox_oh_landbank, "requires_sale_match": True,
+     "about": "Vacant lots individually marked available and accepting applications to purchase."},
+    {"id": "chesterfield-mi-surplus", "name": "Chesterfield Township vacant Birchgrove land sales",
+     "agency": "Charter Township of Chesterfield", "url": CHESTERFIELD_MI_BIDS, "state": "MI",
+     "run": chesterfield_mi_surplus, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Current township real estate solicitations with vacant sites confirmed on the official parcel exhibits."},
+    {"id": "windham-ct-surplus", "name": "Windham vacant town property for purchase",
+     "agency": "Town of Windham, Connecticut", "url": WINDHAM_CT_BIDS, "state": "CT",
+     "run": windham_ct_surplus, "requires_sale_match": True, "timezone": "America/New_York",
+     "about": "Vacant town property offered for purchase through an open reuse proposal."},
+    {"id": "renville-mn-forfeiture", "name": "Renville County vacant tax-forfeiture auctions",
+     "agency": "Renville County Auditor-Treasurer", "url": RENVILLE_MN_LAND, "state": "MN", "timezone": "America/Chicago",
+     "run": renville_mn_forfeiture, "requires_sale_match": True,
+     "about": "County sale parcels also listed in the live first auction, with vacancy checked against the county’s aerial exhibits."},
+    {"id": "franklin-vt-industrial", "name": "Franklin County Industrial Development Corporation vacant industrial land",
+     "agency": "Franklin County Industrial Development Corporation", "url": FRANKLIN_VT_INDUSTRIAL, "state": "VT",
+     "run": franklin_vt_industrial, "requires_sale_match": True,
+     "about": "A vacant tract listed for purchase by Vermont’s regional development partner in St. Albans Town."},
+    {"id": "lorain-oh-forfeiture", "name": "Lorain County Auditor vacant forfeited land auction",
+     "agency": "Lorain County Auditor", "url": LORAIN_OH_AUCTION, "state": "OH", "timezone": "America/New_York",
+     "run": lorain_oh_forfeiture, "requires_sale_match": True,
+     "about": "Current auction tracts that the county identifies as vacant in its published parcel map."},
+    {"id": "kootenai-id-unsold", "name": "Kootenai County unsold bare tax-deeded land",
+     "agency": "Kootenai County Treasurer", "url": KOOTENAI_ID_PROPERTY, "state": "ID",
+     "run": kootenai_id_unsold, "requires_sale_match": True,
+     "about": "Bare land still offered on the county’s current unsold property list. Road strips, right-of-way pieces and other ambiguous entries are excluded."},
 ]
 NOT_CARRIED = [
+    ("Claremont Development Authority price schedules and site plans", "https://www.claremontnh.com/opportunityzone",
+     "The municipal website’s robots.txt disallows the linked price and parcel map PDFs."),
+    ("Todd County linked Bid4Assets auction catalog", "https://www.bid4assets.com/ToddMN",
+     "The vendor returned HTTP 403 for robots.txt. The county's separate official sale list is carried."),
+    ("Hawaii DCCA public foreclosure notice directory", "https://mfdr.ehawaii.gov/notices/index.html",
+     "The notice host returned HTML in place of robots.txt."),
+    ("Westmoreland County industrial park offers", "https://www.westmorelandcountypa.gov/596/Westmoreland-County-Airpark",
+     "The county host returned HTTP 403 for robots.txt."),
     ("Conejos County treasurer’s government website", "https://conejoscounty.colorado.gov/treasurer",
      "The website returned HTTP 403 for robots.txt. The separately published county legal notices are carried."),
     ("Arapahoe County treasurer deed sale list", "https://www.arapahoeco.gov/your_county/county_departments/treasurer/treasurer_deed_sales.php",

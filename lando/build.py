@@ -12,6 +12,7 @@ Generates:
     robots.txt, llms.txt, IndexNow key file, share cards, and manifest.json.
 """
 from concurrent.futures import ProcessPoolExecutor
+import base64
 import csv
 import gzip
 import hashlib
@@ -28,6 +29,7 @@ from .model import Catalog, STATE_NAMES
 from .pages import DINO, Site, acres_text, esc, listing_is_indexable, price_line
 
 STATIC = ["style.css", "theme.js", "geo.js", "watchlist.js", "share-chart.js", "map.js", "listing.js", "xray.js", "list.js", "direct.js", "services.js", "atlas.js", "tax_sales.js", "tables.js", "analyze.js", "favicon.svg", "mascot.png"]
+ARCHIVED_PARCELS = "data/archived-parcels"
 
 
 def agent_download(w):
@@ -114,14 +116,24 @@ def init_listing_worker(site):
     _listing_site = site
 
 
+def write_listing_pages(writer, site, listings):
+    archived = {}
+    for row in listings:
+        path, page = site.cat.listing_path(row), site.listing(row)
+        if row["available"]:
+            writer.page(path, page, indexable=listing_is_indexable(row), group="listings")
+        else:
+            raw = page.encode("utf-8")
+            writer.pages[path] = hashlib.sha1(raw).hexdigest()[:16]
+            archived[row["slug"]] = base64.b64encode(gzip.compress(raw, compresslevel=1, mtime=0)).decode("ascii")
+    return archived
+
+
 def write_listing_batch(bounds):
-    site = _listing_site
     dist, start, end = bounds
     writer = Writer(dist)
-    for row in site.cat.listings[start:end]:
-        writer.page(site.cat.listing_path(row), site.listing(row),
-                    indexable=listing_is_indexable(row), group="listings")
-    return writer
+    archived = write_listing_pages(writer, _listing_site, _listing_site.cat.listings[start:end])
+    return writer, archived
 
 
 def write_listings(writer, site):
@@ -130,24 +142,30 @@ def write_listings(writer, site):
         raise ValueError("listing IDs must be unique across all official sources")
     workers = min(os.cpu_count() or 1, 4)
     if len(listings) < 5000 or workers < 2 or "fork" not in multiprocessing.get_all_start_methods():
-        for row in listings:
-            writer.page(site.cat.listing_path(row), site.listing(row),
-                        indexable=listing_is_indexable(row), group="listings")
-        return
+        archived = write_listing_pages(writer, site, listings)
+    else:
+        # Build workers share the read-only snapshot and write disjoint parcel paths.
+        os.makedirs(os.path.join(writer.dist, "land"), exist_ok=True)
+        size = 350
+        batches = [(writer.dist, start, min(start + size, len(listings))) for start in range(0, len(listings), size)]
+        archived = {}
+        with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("fork"),
+                                 initializer=init_listing_worker, initargs=(site,)) as pool:
+            for result, batch_archive in pool.map(write_listing_batch, batches):
+                writer.pages.update(result.pages)
+                writer.indexable.extend(result.indexable)
+                writer.indexable_groups["listings"].extend(result.indexable)
+                writer.outputs.update(result.outputs)
+                writer.directories.update(result.directories)
+                writer.files += result.files
+                archived.update(batch_archive)
 
-    # Build workers share the read-only snapshot and write disjoint parcel paths.
-    os.makedirs(os.path.join(writer.dist, "land"), exist_ok=True)
-    size = 350
-    batches = [(writer.dist, start, min(start + size, len(listings))) for start in range(0, len(listings), size)]
-    with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("fork"),
-                             initializer=init_listing_worker, initargs=(site,)) as pool:
-        for result in pool.map(write_listing_batch, batches):
-            writer.pages.update(result.pages)
-            writer.indexable.extend(result.indexable)
-            writer.indexable_groups["listings"].extend(result.indexable)
-            writer.outputs.update(result.outputs)
-            writer.directories.update(result.directories)
-            writer.files += result.files
+    buckets = {}
+    for slug, content in archived.items():
+        bucket = hashlib.sha256(slug.encode("ascii")).hexdigest()[:2]
+        buckets.setdefault(bucket, {})[slug] = content
+    for bucket, pages in buckets.items():
+        writer.write("%s/%s.json" % (ARCHIVED_PARCELS, bucket), json.dumps(pages, separators=(",", ":")))
 
 
 def atom(title, path, listings, cat, updated):

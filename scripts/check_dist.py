@@ -7,6 +7,9 @@ working internal links, unique titles), official https agency links and zero pre
 on listing pages/CSV, and exact parity between indexable pages and the sitemap index + child sitemaps.
 """
 from concurrent.futures import ProcessPoolExecutor
+import base64
+import gzip
+import hashlib
 from functools import lru_cache
 import html
 import json
@@ -96,6 +99,10 @@ def validate(rel):
         return "", False, []
     with open(os.path.join(_dist, rel), encoding="utf-8") as fh:
         doc = fh.read()
+    return validate_doc(rel, doc)
+
+
+def validate_doc(rel, doc):
     problems = []
     match = TITLE.search(doc)
     title = match.group(1) if match else ""
@@ -130,6 +137,44 @@ def validate(rel):
     return title, index, problems
 
 
+ARCHIVE_DIR = "data/archived-parcels"
+
+
+def archive_files(dist):
+    folder = os.path.join(dist, ARCHIVE_DIR)
+    if not os.path.isdir(folder):
+        return []
+    return sorted(os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".json"))
+
+
+def archive_listing_paths(buckets):
+    paths = set()
+    for bucket in buckets:
+        with open(bucket, encoding="utf-8") as fh:
+            paths.update("land/%s/index.html" % slug for slug in json.load(fh))
+    return paths
+
+
+def validate_archive(bucket):
+    with open(bucket, encoding="utf-8") as fh:
+        items = json.load(fh)
+    results = []
+    for slug, encoded in items.items():
+        rel = "land/%s/index.html" % slug
+        try:
+            doc = gzip.decompress(base64.b64decode(encoded, validate=True)).decode("utf-8")
+        except (ValueError, EOFError, OSError) as exc:
+            results.append((rel, "", False, ["invalid archived HTML (%s)" % exc]))
+            continue
+        title, index, issues = validate_doc(rel, doc)
+        if index:
+            issues.append("archived listing is indexable")
+        if hashlib.sha256(slug.encode("ascii")).hexdigest()[:2] + ".json" != os.path.basename(bucket):
+            issues.append("archived listing is in the wrong bucket")
+        results.append((rel, title, index, issues))
+    return results
+
+
 def main(dist, data_dir=None):
     dist = os.path.abspath(dist)
     base = config.base_path()
@@ -139,6 +184,11 @@ def main(dist, data_dir=None):
         prefix = dirpath[len(dist) + 1:]
         files.update(os.path.join(prefix, name) for name in names)
     pages = sorted(rel for rel in files if rel.endswith(".html") and not rel.startswith("_og/"))
+    buckets = archive_files(dist)
+    archive_paths = archive_listing_paths(buckets)
+    for duplicate in sorted(archive_paths & files):
+        problems.append("listing has both a static page and an archived page: %s" % duplicate)
+    files.update(archive_paths)
     with ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 6), initializer=init_worker,
                              initargs=(dist, files, base)) as pool:
         for rel, (title, index, issues) in zip(pages, pool.map(validate, pages, chunksize=128)):
@@ -147,6 +197,11 @@ def main(dist, data_dir=None):
                 titles.setdefault(title, []).append(rel)
             if index:
                 indexable.add("/" + rel.removesuffix("index.html"))
+        for batch in pool.map(validate_archive, buckets):
+            for rel, title, index, issues in batch:
+                problems.extend("%s: %s" % (rel, issue) for issue in issues)
+                if title:
+                    titles.setdefault(title, []).append(rel)
 
     for t, where in titles.items():
         if len(where) > 1:
@@ -200,7 +255,8 @@ def main(dist, data_dir=None):
     csv_text = open(os.path.join(dist, "data", "listings.csv"), encoding="utf-8").read()
     if "Owner" in csv_text.splitlines()[0]:
         problems.append("listings.csv has an owner column")
-    print("checked %d HTML files, %d listings, %d indexable pages: %d problems" % (len(pages), len(cat.listings), len(indexable), len(problems)))
+    print("checked %d static HTML files and %d archived dossiers, %d listings, %d indexable pages: %d problems" % (
+        len(pages), len(archive_paths), len(cat.listings), len(indexable), len(problems)))
     for p in problems[:200]:
         print("  " + p)
     return 1 if problems else 0

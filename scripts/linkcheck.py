@@ -55,9 +55,10 @@ def main(base):
 
 def local_links(dist):
     """Verify all internal URLs in the release's buyer hubs and state guides."""
-    from check_dist import HREF, resolve
+    from check_dist import HREF, archive_files, archive_listing_paths, resolve
     from pathlib import Path
     root = Path(dist)
+    archived = archive_listing_paths(archive_files(dist))
     inputs = [root / path / "index.html" for path in ("land-under-5000", "land-under-10000", "acreage-for-sale")]
     inputs.extend(sorted((root / "research").glob("buying-land-in-*/index.html")))
     bad, checked = [], set()
@@ -69,7 +70,7 @@ def local_links(dist):
             target = resolve(config.base_path(), raw)
             if target and target not in checked:
                 checked.add(target)
-                if not (root / target).is_file():
+                if target not in archived and not (root / target).is_file():
                     bad.append("%s → %s" % (page.relative_to(root), raw))
     for error in bad:
         print(error)

@@ -54,6 +54,21 @@ try {
     const total = await page.eval("document.querySelector('[data-t=total]').textContent");
     assert(total === "$1,800", "total is " + total);
   });
+  await step("archived parcel keeps its original URL, official attribution and noindex policy", async () => {
+    const path = "/land/tx-dal-00000141211000000/";
+    const [head, missing] = await Promise.all([
+      fetch(base + path, { method: "HEAD", signal: AbortSignal.timeout(10000) }),
+      fetch(base + "/land/no-such-parcel-for-release-check/", { method: "HEAD", signal: AbortSignal.timeout(10000) }),
+    ]);
+    assert(head.status === 200 && head.headers.get("x-robots-tag")?.includes("noindex"), "archive HEAD or noindex failed");
+    assert(missing.status === 404, "unknown parcel did not return 404");
+    await page.goto(base + path);
+    assert(await page.eval(`location.pathname === ${JSON.stringify(path)} &&
+      document.querySelector('link[rel=canonical]').href.endsWith(${JSON.stringify(path)}) &&
+      document.querySelector('meta[name=robots]').content.startsWith('noindex') &&
+      document.querySelector('a[data-official-source="1"]').href.startsWith('https://') &&
+      document.body.innerText.includes('It is not an offer')`), "archived parcel content or canonical URL changed");
+  });
   await step("program-priced neighborhood lots stay in the application filter", async () => {
     await page.goto(base + "/#state=MI&kind=none&q=neighborhood%20lot");
     await page.waitFor("/listings match/.test(document.getElementById('map-count').textContent)", 15000);

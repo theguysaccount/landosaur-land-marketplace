@@ -8361,6 +8361,89 @@ def clinton_ia_land(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(offers)}
 
 
+NEVADA_CA_SALE = "https://nevadacountyca.gov/957/Auction-Property-Tax-Sale"
+NEVADA_CA_GIS = "https://maps.nevadacountyca.gov/arcgis/rest/services/web_public/parcel_address_sdevw/MapServer/1/query"
+NEVADA_CA_USE_CODES = "https://www.nevadacountyca.gov/DocumentCenter/View/22500/Land-Use-Codes"
+NEVADA_CA_VACANT = {"0000": "Vacant residential land", "0040": "Vacant multifamily residential land",
+                    "1000": "Vacant agricultural land", "2000": "Vacant rural land", "3000": "Vacant commercial land"}
+NEVADA_CA_BUILDING_FIELDS = ("YearBuilt", "SquareFeetOnRecord", "ImprovementsSquareFeet", "VehicleBuildingSquareFeet",
+                             "GuestHouseSquareFeet", "Floor1SquareFeet", "Floor2SquareFeet")
+
+
+def parse_nevada_ca_roster(document):
+    terms = clean(document)
+    opening = re.search(r"Online Auction Dates:\s+([A-Za-z]+ \d{1,2}, \d{4})\s+.*?Auction Begins:\s+(\d{1,2}:\d{2}\s*[ap]m)\s+P[DS]T\b", terms, re.I)
+    if not opening or "MINIMUM BID SALE STATUS" not in terms:
+        raise StructureError("Nevada County’s current notice is missing its auction schedule or bid columns")
+    day, clock = opening.groups()
+    starts = datetime.datetime.strptime(day + " " + clock.upper(), "%B %d, %Y %I:%M %p")
+    active = {}
+    seen = set()
+    for line in document.splitlines():
+        row = re.match(r"^\s*((?:\d{3}-){3}\d{3})\s+.+?\s+\$\s*([\d,.]+)\s*(.*?)\s*$", line)
+        if not row:
+            continue
+        pin, bid, status = row.groups()
+        if pin in seen:
+            raise StructureError("Nevada County’s auction roster contains duplicate parcel numbers")
+        seen.add(pin)
+        if not status and number(bid):
+            active[pin.replace("-", "")] = (pin, number(bid))
+    if not seen:
+        raise StructureError("Nevada County’s current auction has no recognized parcel lines")
+    return starts, active
+
+
+def nevada_ca_tax_sale(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    page = fetch.text(NEVADA_CA_SALE)
+    if re.search(r"\b(?:upcoming (?:tax )?auction|tax sale) (?:has been |is )?(?:cancelled|canceled|closed)\b", clean(page), re.I):
+        return [], {"complete": True, "upstream_total": 0}
+    current = re.search(r"Auction Date:\s+([A-Za-z]+ \d{1,2}, \d{4})", clean(page))
+    link = re.search(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>\s*(?:<[^>]+>\s*)*\d{4} Auction Property List', page, re.I)
+    if not current or not link:
+        raise StructureError("Nevada County’s auction page is missing its current published date or list")
+    local_today = now.astimezone(ZoneInfo("America/Los_Angeles")).date()
+    auction_day = datetime.datetime.strptime(current[1], "%B %d, %Y").date()
+    if auction_day <= local_today:
+        return [], {"complete": True, "upstream_total": 0}
+    url = urllib.parse.urljoin(NEVADA_CA_SALE, html.unescape(link[1]))
+    start, offers = parse_nevada_ca_roster(pdf_text(fetch, url))
+    if start.date() != auction_day:
+        raise StructureError("Nevada County’s current auction date differs from the published parcel list")
+    if not offers:
+        return [], {"complete": True, "upstream_total": 0}
+    features = _arcgis_query(fetch, NEVADA_CA_GIS, "APN IN (%s)" % quote_list(sorted(offers)),
+                             "APN,UseCode,Status,Acreage,GISACRES,TotalImproveValue," + ",".join(NEVADA_CA_BUILDING_FIELDS))
+    if len(features) != len(offers) or {f["attributes"].get("APN") for f in features} != set(offers):
+        raise StructureError("Nevada County’s open auction parcels could not all be matched uniquely to the assessment layer")
+    rows = []
+    for feature in features:
+        info = feature["attributes"]
+        land_use = NEVADA_CA_VACANT.get(info.get("UseCode"))
+        if (info.get("Status") != "A" or not land_use or info.get("TotalImproveValue") != 0
+                or any(info.get(field) not in (None, 0) for field in NEVADA_CA_BUILDING_FIELDS)):
+            continue
+        pin, bid = offers[info["APN"]]
+        row = {
+            "id": "ca-nevada-auction-" + pin, "source": "nevada-ca-tax-sale",
+            "title": "Parcel %s (Nevada County vacant land auction)" % pin, "state": "CA", "county": "Nevada",
+            "locality": "", "apn": pin, "address": "", "acres": number(info.get("Acreage")) or number(info.get("GISACRES")),
+            "price": bid, "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+            "deadline": None, "auction_day": auction_day.isoformat(),
+            "url": NEVADA_CA_SALE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The county treasurer includes this parcel in the upcoming auction list.", url),
+                      fact("minimum_bid", f"${bid:,.2f}", url),
+                      fact("auction_start", start.strftime("%B %d, %Y at %-I:%M %p Pacific"), url),
+                      fact("land_use", land_use + " in the county assessment record, with zero assessed improvements.", NEVADA_CA_USE_CODES)],
+            "tags": ["tax deed auction", "registration required"],
+        }
+        apply_geometry(row, (feature.get("geometry") or {}).get("rings", []), NEVADA_CA_GIS, "Nevada County")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -8827,8 +8910,16 @@ SOURCES = [
      "agency": "City of Clinton, Iowa", "url": CLINTON_IA_LAND, "state": "IA",
      "run": clinton_ia_land, "requires_sale_match": True,
      "about": "Active municipal development lots as listed by the city, matched by parcel number to county outlines and improvement values."},
+    {"id": "nevada-ca-tax-sale", "name": "Nevada County vacant tax-deed auction lots",
+     "agency": "Nevada County Treasurer-Tax Collector, California", "url": NEVADA_CA_SALE, "state": "CA",
+     "run": nevada_ca_tax_sale, "requires_sale_match": True, "timezone": "America/Los_Angeles",
+     "about": "Upcoming vacant auction parcels with published minimum bids, matched to assessor use codes and mapped outlines."},
 ]
 NOT_CARRIED = [
+    ("Hawaii state surplus auction portal", "https://auctions.ehawaii.gov/landing.html",
+     "The auction portal returned HTML in place of robots.txt."),
+    ("Yavapai County tax-deed sales", "https://www.yavapaiaz.gov/Mapping-and-Properties/Property-Taxes/Tax-Deed-Sales",
+     "The county’s robots.txt response exceeded the crawler’s limit and could not be verified."),
     ("Clinton council agenda portal", "https://cityofclintoniowa.civicweb.net/document/470075/",
      "The agenda portal’s robots.txt disallows the agenda file. The city’s current sale roster and county parcel service are carried."),
     ("City of Knoxville Homemakers Program", "https://www.knoxvilletn.gov/509/Homemakers-Program",

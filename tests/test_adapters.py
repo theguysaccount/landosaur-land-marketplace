@@ -1069,6 +1069,28 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_nevada_county_keeps_open_priced_unimproved_parcels(self):
+        schedule = ('<p>Auction Date: January 7, 2027</p>'
+                    '<a href="/list.pdf">2026 Auction Property List</a>')
+        roster = ('Online Auction Dates: January 7, 2027 Auction Begins: 10:00 am PST\n'
+                  'PARCEL NUMBER LAST ASSESSED OWNER MINIMUM BID SALE STATUS\n'
+                  '047-180-024-000            PRIVATE PERSON        $5,036.00\n'
+                  '052-060-004-000            PRIVATE PERSON        $3,023.00   REDEEMED\n'
+                  '008-190-017-000            PRIVATE PERSON        $33,133.00\n')
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = schedule
+        gis = [{"attributes": {"APN": "047180024000", "UseCode": "2000", "Status": "A", "Acreage": .19, "TotalImproveValue": 0}},
+               {"attributes": {"APN": "008190017000", "UseCode": "0100", "Status": "A", "TotalImproveValue": 2000}}]
+        with patch.object(adapters, "pdf_text", return_value=roster), patch.object(adapters, "_arcgis_query", return_value=gis):
+            rows, info = adapters.nevada_ca_tax_sale(fetch, NOW, self.fail)
+            self.assertEqual(info["upstream_total"], 2)
+            row, = rows
+            self.assertEqual((row["apn"], row["price"], row["auction_day"], row["deadline"]),
+                             ("047-180-024-000", 5036, "2027-01-07", None))
+            self.assertNotIn("PRIVATE PERSON", repr(row))
+            expired, _ = adapters.nevada_ca_tax_sale(fetch, NOW + datetime.timedelta(days=52), self.fail)
+            self.assertEqual(expired, [])
+
     def test_atlantic_requires_a_reviewed_vacant_map_and_keeps_assessment_out_of_price(self):
         import hashlib
 

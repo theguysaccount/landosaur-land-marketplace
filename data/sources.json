@@ -1,5 +1,5 @@
 {
- "checked": "2026-11-28T03:23:53Z",
+ "checked": "2026-11-28T03:31:28Z",
  "sources": {
   "alaska-dnr": {
    "about": "State land sold over the counter and by sealed-bid auction.",
@@ -1586,6 +1586,24 @@
    "state": "AZ",
    "upstream_total": 191,
    "url": "https://www.navajocountyaz.gov/"
+  },
+  "nevada-ca-tax-sale": {
+   "about": "Upcoming vacant auction parcels with published minimum bids, matched to assessor use codes and mapped outlines.",
+   "agency": "Nevada County Treasurer-Tax Collector, California",
+   "complete": true,
+   "count": 15,
+   "failures": 0,
+   "last_attempt": "2026-11-28T03:31:28Z",
+   "last_success": "2026-11-28T03:31:28Z",
+   "message": "",
+   "name": "Nevada County vacant tax-deed auction lots",
+   "notes": [],
+   "ok": true,
+   "read": 15,
+   "seconds": 23,
+   "state": "CA",
+   "upstream_total": 24,
+   "url": "https://nevadacountyca.gov/957/Auction-Property-Tax-Sale"
   },
   "newburgh-landbank": {
    "about": "Vacant lots in the Land Bank's current sale section. Properties held for other uses or previously sold are excluded.",

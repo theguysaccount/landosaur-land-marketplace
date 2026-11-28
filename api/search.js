@@ -1,8 +1,9 @@
 // Landosaur Agent-Native Two-Sided Land Search API
 // GET /api/search/?state=IN&mode=auction&max_price=5000&min_acres=0.2&q=muncie&sort=price_asc&limit=25
-// Queries BOTH 23,500+ official public-agency parcels (/data/map.json) AND live Direct Owner/Agent listings (Vercel Blob).
+// Queries the release's official inventory and live seller listings in Vercel Blob.
 
 import { list } from "@vercel/blob";
+import { loadOfficialInventory } from "../lib/official-inventory.mjs";
 import "../site/geo.js";
 import "../site/availability.js";
 const { decode, matcher, measure } = globalThis.LandosaurGeo;
@@ -15,8 +16,6 @@ const CORS = {
 };
 
 const PREFIX = "direct/listings/";
-let cachedOfficial = { at: 0, rows: [] };
-const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function jsonResp(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -43,23 +42,6 @@ function matchesMode(r, mode) {
   if (mode === "offer" || mode === "none" || mode === "land_bank") return r[5] !== "cash" && r[5] !== "min_bid" && r[7] !== "auction_open" && r[7] !== "auction_terms";
   if (mode === "direct") return Boolean(r[13]);
   return true;
-}
-
-async function loadOfficialRows(origin) {
-  const now = Date.now();
-  if (cachedOfficial.rows.length && now - cachedOfficial.at < CACHE_TTL_MS) {
-    return cachedOfficial.rows;
-  }
-  const dep = encodeURIComponent(process.env.VERCEL_DEPLOYMENT_ID || String(Math.floor(now / 60000)));
-  const res = await fetch(`${origin}/data/map.json?v=${dep}`, {
-    headers: { "User-Agent": "Landosaur-Search/1.0" },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`map.json HTTP ${res.status}`);
-  const data = await res.json();
-  const rows = Array.isArray(data?.rows) ? data.rows : [];
-  cachedOfficial = { at: now, rows };
-  return rows;
 }
 
 async function loadDirectRows() {
@@ -117,7 +99,6 @@ function scoreRecommended(r) {
 export async function GET(request) {
   try {
     const reqUrl = new URL(request.url);
-    const origin = `${reqUrl.protocol}//${reqUrl.host}`;
     const sp = reqUrl.searchParams;
 
     const areaParam = sp.get("area");
@@ -136,7 +117,7 @@ export async function GET(request) {
     const limit = Math.max(1, Math.min(100, Number(sp.get("limit")) || 25));
     const offset = Math.max(0, Number(sp.get("offset")) || 0);
 
-    const [officialRows, directRows] = await Promise.all([loadOfficialRows(origin), loadDirectRows()]);
+    const [officialRows, directRows] = await Promise.all([loadOfficialInventory(), loadDirectRows()]);
     const all = directRows.concat(officialRows);
 
     const baseFiltered = [];

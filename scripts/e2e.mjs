@@ -83,6 +83,19 @@ try {
       assert(eligible, "search API omitted program-priced land-bank supply");
     }
   });
+  await step("search API serves the inventory from the same release as the map", async () => {
+    const match = await page.eval(`(async () => {
+      const { rows } = await fetch("/data/map.json", { cache: "no-cache" }).then((r) => r.json());
+      const latest = rows.findLast((row) => row[8] && row[1] === null && (!row[15] || row[15] > Date.now()));
+      if (!latest) return false;
+      const params = new URLSearchParams({ state: latest[3], q: latest[9], limit: "100" });
+      const response = await fetch("/api/search/?" + params);
+      if (!response.ok) return false;
+      const { results } = await response.json();
+      return results.some((row) => row.id === latest[0] && row.lat === null && row.lon === null);
+    })()`);
+    assert(match, "search omitted an active unlocated listing published on the map");
+  });
   await step("source totals distinguish active listings from archived records", async () => {
     await page.goto(base + "/sources/");
     const good = await page.eval(`fetch("/data/sources.json").then((r) => r.json()).then(({ site, sources }) =>

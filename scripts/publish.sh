@@ -208,6 +208,8 @@ rsync -a --delete \
   --exclude '.git' --exclude '.vercel' --exclude '.env' --exclude '.env.*' \
   --exclude 'dist' --exclude 'original' --exclude 'work' --exclude '.venv' --exclude '__pycache__' --exclude 'node_modules' \
   "$ROOT/" "$STAGING/"
+# Package the verified map snapshot for the functions alongside their source.
+cp "$ROOT/dist/data/map.json" "$STAGING/data/official-inventory.json"
 (cd "$STAGING" && "${vercel_cli[@]}" --prod --yes --scope persist-always)
 
 KEEP_CHANGED=1

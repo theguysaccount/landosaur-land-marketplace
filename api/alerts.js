@@ -6,6 +6,7 @@
 
 import crypto from "node:crypto";
 import { list, put } from "@vercel/blob";
+import { loadOfficialInventory } from "../lib/official-inventory.mjs";
 
 import "../site/geo.js";
 import "../site/availability.js";
@@ -20,8 +21,6 @@ const CORS = {
 
 const ALERTS_PREFIX = "saved-alerts/";
 const DIRECT_PREFIX = "direct/listings/";
-let cachedMap = { at: 0, rows: [] };
-const MAP_TTL_MS = 5 * 60 * 1000;
 
 function jsonResp(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -50,21 +49,6 @@ function xmlEsc(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
-}
-
-async function loadMapRows(origin) {
-  const now = Date.now();
-  if (cachedMap.rows.length && now - cachedMap.at < MAP_TTL_MS) return cachedMap.rows;
-  const dep = encodeURIComponent(process.env.VERCEL_DEPLOYMENT_ID || String(Math.floor(now / 60000)));
-  const r = await fetch(`${origin}/data/map.json?v=${dep}`, {
-    headers: { "User-Agent": "Landosaur-Alerts/1.0" },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!r.ok) throw new Error(`map.json HTTP ${r.status}`);
-  const d = await r.json();
-  const rows = Array.isArray(d?.rows) ? d.rows : [];
-  cachedMap = { at: now, rows };
-  return rows;
 }
 
 async function loadDirectRows() {
@@ -217,7 +201,7 @@ export async function GET(request) {
     const alert = await r.json();
 
     const origin = url.origin.includes("localhost") ? "https://landosaur.com" : url.origin;
-    const [official, direct] = await Promise.all([loadMapRows(origin), loadDirectRows()]);
+    const [official, direct] = await Promise.all([loadOfficialInventory(), loadDirectRows()]);
     const matches = filterRows(direct.concat(official), alert.criteria || {});
     const formatted = matches.slice(0, 60).map((row) => formatRow(row, origin));
 

@@ -16,7 +16,8 @@
       "maxDuration": 15
     },
     "api/search.js": {
-      "maxDuration": 15
+      "maxDuration": 15,
+      "includeFiles": "data/official-inventory.json"
     },
     "api/concierge.js": {
       "maxDuration": 30,
@@ -26,7 +27,8 @@
       "maxDuration": 15
     },
     "api/alerts.js": {
-      "maxDuration": 15
+      "maxDuration": 15,
+      "includeFiles": "data/official-inventory.json"
     },
     "api/cosl.js": {
       "maxDuration": 15

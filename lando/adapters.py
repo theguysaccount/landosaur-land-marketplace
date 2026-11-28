@@ -8600,6 +8600,78 @@ def chelan_wa_auction(fetch, now, warn):
     return rows, {"complete": True, "upstream_total": len(offers)}
 
 
+FRANKLIN_NJ_NOTICE = "https://www.franklintownshipnj.org/m/newsflash/Home/Detail/922"
+FRANKLIN_NJ_TERMS = "https://www.franklintownshipnj.org/AgendaCenter/ViewFile/Item/3676?fileID=3424"
+FRANKLIN_NJ_ROSTER = "https://www.franklintownshipnj.org/AgendaCenter/ViewFile/Item/3676?fileID=3425"
+FRANKLIN_NJ_GIS = "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0/query"
+FRANKLIN_NJ_DOCUMENTS = {
+    FRANKLIN_NJ_TERMS: "e4e26036cf57f4202730fc766a3477b9a097fc0ca9309942ad3c38fe27aea0df",
+    FRANKLIN_NJ_ROSTER: "70290bf2cc1dc1f4d10ddb71c2e011cfc1fbc4659286d5a8c61d44c169dcc009",
+}
+# Reviewed entries in the adopted ordinance’s scanned Schedule A. Stanton Avenue is one bid for two lots.
+# Block 4816 lot 6 has conflicting acreage and an ambiguously formatted bid in the scan.
+FRANKLIN_NJ_OFFERS = (
+    ("501", ("26",), "Birch Avenue", 28900, 1.89), ("501", ("27",), "Birch Avenue", 5400, .17),
+    ("501", ("31",), "Birch Avenue", 21300, 1.12), ("1001", ("4", "5"), "Stanton Avenue", 37800, .89),
+    ("4814", ("14",), "Redwood Drive", 15500, .78), ("4816", ("4",), "Redwood Drive", 8200, .41),
+    ("4816", ("5",), "Redwood Drive", 4600, .23), ("5204", ("4",), "Grubb Road", 7200, .36),
+    ("5303", ("3",), "Grubb Road", 1600, .09), ("5304", ("1",), "286 Grubb Road", 3000, .15),
+    ("5304", ("5",), "Grubb Road", 3000, .16), ("5316", ("5",), "West Boulevard", 6700, .21),
+    ("5317", ("2",), "New Jersey Avenue", 4200, .21), ("5701", ("1",), "Marshall Mill Road", 11400, 1.43),
+    ("5702", ("48",), "Main Road (rear)", 7100, .71), ("6602", ("14",), "Unexpected Road", 19200, 2.00),
+    ("7203", ("3",), "Harding Highway", 62500, 1.00),
+)
+
+
+def franklin_nj_adjacent_land(fetch, now, warn):
+    from zoneinfo import ZoneInfo
+
+    closes = datetime.datetime(2026, 12, 2, 10, tzinfo=ZoneInfo("America/New_York"))
+    if closes <= now:
+        return [], {"complete": True, "upstream_total": 0}
+    notice = clean(fetch.text(FRANKLIN_NJ_NOTICE))
+    if ("November 10, 2026 duly adopted the following ordinance: O-18-26" not in notice
+            or re.search(r"\b(?:sale|ordinance) (?:has been |was )?(?:withdrawn|cancelled|canceled)\b", notice, re.I)):
+        raise StructureError("Franklin Township’s adoption notice does not establish a current sale")
+    for url, expected in FRANKLIN_NJ_DOCUMENTS.items():
+        if hashlib.sha256(fetch.bytes(url)).hexdigest() != expected:
+            raise StructureError("Franklin Township’s scanned ordinance or Schedule A changed")
+    pins = {f"0805_{block}_{lot}" for block, lots, _, _, _ in FRANKLIN_NJ_OFFERS for lot in lots}
+    features = _arcgis_query(fetch, FRANKLIN_NJ_GIS, "PAMS_PIN IN (%s)" % quote_list(sorted(pins)),
+                             "PAMS_PIN,PROP_CLASS,IMPRVT_VAL,YR_CONSTR,DWELL,COMM_DWELL")
+    counts = Counter(f["attributes"].get("PAMS_PIN") for f in features)
+    parcels = {f["attributes"]["PAMS_PIN"]: f for f in features if counts[f["attributes"].get("PAMS_PIN")] == 1}
+    if set(parcels) != pins:
+        raise StructureError("Franklin Township’s approved roster did not match the state parcel layer exactly")
+    rows = []
+    for block, lots, situs, bid, acres in FRANKLIN_NJ_OFFERS:
+        group = [parcels[f"0805_{block}_{lot}"] for lot in lots]
+        if any(f["attributes"].get("PROP_CLASS") not in (None, "15C", "1") or
+               any(f["attributes"].get(field) not in (None, 0) for field in ("IMPRVT_VAL", "YR_CONSTR", "DWELL", "COMM_DWELL"))
+               for f in group):
+            continue
+        rings_by_parcel = [(feature.get("geometry") or {}).get("rings") for feature in group]
+        if not all(rings_by_parcel):
+            continue
+        lot_key = "-".join(lots)
+        apn = " / ".join(f"{block}-{lot}" for lot in lots)
+        row = {
+            "id": f"nj-franklin-adjacent-{block}-{lot_key}", "source": "franklin-nj-adjacent-land",
+            "title": f"Block {block}, {'lots' if len(lots) > 1 else 'lot'} {', '.join(lots)} (adjacent-buyer sealed bid)",
+            "state": "NJ", "county": "Gloucester", "locality": "Franklin Township", "address": situs, "apn": apn,
+            "acres": acres, "price": bid, "price_kind": "min_bid", "offering": "auction", "status": "auction_terms",
+            "deadline": closes.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "url": FRANKLIN_NJ_NOTICE, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("eligibility", "Only buyers who own adjacent property qualify for this sealed-bid sale.", FRANKLIN_NJ_TERMS),
+                      fact("minimum_bid", f"${bid:,.0f}", FRANKLIN_NJ_ROSTER),
+                      fact("bid_deadline", "December 2, 2026 at 10:00 AM Eastern", FRANKLIN_NJ_TERMS)],
+            "tags": ["adjacent buyers only", "sealed bid"],
+        }
+        apply_geometry(row, [ring for rings in rings_by_parcel for ring in rings], FRANKLIN_NJ_GIS, "New Jersey Office of GIS")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(FRANKLIN_NJ_OFFERS)}
+
+
 SOURCES = [
     {"id": "st-louis-lra", "name": "City of St. Louis vacant-lot inventory", "agency": "St. Louis Development Corporation / Land Reutilization Authority",
      "url": "https://www.stlouis-mo.gov/government/departments/sldc/real-estate/lra-owned-property-search.cfm", "state": "MO", "run": st_louis,
@@ -9078,6 +9150,10 @@ SOURCES = [
      "agency": "Chelan County Treasurer, Washington", "url": CHELAN_WA_AUCTION, "state": "WA",
      "run": chelan_wa_auction, "requires_sale_match": True, "timezone": "America/Los_Angeles",
      "about": "Currently scheduled auction parcels matched to county improvement records and state parcel boundaries."},
+    {"id": "franklin-nj-adjacent-land", "name": "Franklin Township vacant land for adjacent buyers",
+     "agency": "Township of Franklin, Gloucester County, New Jersey", "url": FRANKLIN_NJ_NOTICE, "state": "NJ",
+     "run": franklin_nj_adjacent_land, "requires_sale_match": True,
+     "about": "Sealed-bid municipal land sale with parcel-level starting bids. Eligibility is limited to buyers who own adjacent property."},
 ]
 NOT_CARRIED = [
     ("Snohomish County current foreclosure auction", "https://snohomishcountywa.gov/220/Tax-Foreclosures",

@@ -1069,6 +1069,28 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_franklin_adjacent_sale_requires_adopted_schedule_and_keeps_combined_bid(self):
+        import hashlib
+
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = 'November 10, 2026 duly adopted the following ordinance: O-18-26'
+        fetch.bytes.return_value = b'verified schedule'
+        document = {adapters.FRANKLIN_NJ_ROSTER: hashlib.sha256(fetch.bytes.return_value).hexdigest()}
+        offered = (("1001", ("4", "5"), "Stanton Avenue", 37800, .89),)
+        rings = [[[-75.06, 39.61], [-75.06, 39.611], [-75.059, 39.611], [-75.059, 39.61], [-75.06, 39.61]]]
+        records = [{"attributes": {"PAMS_PIN": "0805_1001_" + lot, "IMPRVT_VAL": 0}, "geometry": {"rings": rings}}
+                   for lot in ("4", "5")]
+        with patch.object(adapters, "FRANKLIN_NJ_DOCUMENTS", document), patch.object(adapters, "FRANKLIN_NJ_OFFERS", offered), \
+                patch.object(adapters, "_arcgis_query", return_value=records):
+            rows, info = adapters.franklin_nj_adjacent_land(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual(info["upstream_total"], 1)
+            self.assertEqual((row["apn"], row["price"], row["deadline"]), ("1001-4 / 1001-5", 37800, "2026-12-02T15:00:00Z"))
+            self.assertIn("adjacent buyers only", row["tags"])
+            fetch.bytes.return_value = b'updated schedule'
+            with self.assertRaises(adapters.StructureError):
+                adapters.franklin_nj_adjacent_land(fetch, NOW, self.fail)
+
     def test_chelan_tax_auction_checks_improvements_and_keeps_balance_out_of_price(self):
         schedule = ('<p>Online sale will be held Dec. 7, 2026, through Dec. 9, 2026.</p>'
                     '<table><tr><td>26258</td><td>PRIVATE PERSON</td><td>$5,123.00</td>'

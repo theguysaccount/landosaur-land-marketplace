@@ -1039,7 +1039,7 @@ class Site(object):
             '<div id="atlas-discount-table"></div>'
             '</section>',
 
-            '<section class="dossier-card" style="margin-top:24px">'
+            '<section id="atlas-county-explorer" class="dossier-card" style="margin-top:24px">'
             '<div class="eyebrow">Searchable &amp; Exportable</div>'
             '<h2>U.S. County Land Value Explorer</h2>'
             '<div class="atlas-controls">'
@@ -1049,7 +1049,7 @@ class Site(object):
             '<button type="button" id="county-export-csv" class="button ghost sm" style="margin-left:auto">Export Filtered CSV</button>'
             '</div>'
             '<p id="county-explorer-count" class="small" style="margin:8px 0"></p>'
-            '<div class="scroll"><table class="data"><thead><tr><th>County</th><th>State</th><th class="n">Benchmark per acre</th><th class="n">vs. State Avg</th><th>Action</th></tr></thead><tbody id="county-explorer-body"></tbody></table></div>'
+            '<div class="scroll"><table class="data county-explorer-table"><thead><tr><th scope="col">County</th><th scope="col">State</th><th scope="col" class="n">Benchmark per acre</th><th scope="col" class="n">vs. USDA state value</th><th scope="col">Action</th></tr></thead><tbody id="county-explorer-body"></tbody></table></div>'
             '</section>',
 
             '<section class="callout" style="margin-top:24px"><h2>Want to buy land in any county above—even if it isn\'t listed yet?</h2>'

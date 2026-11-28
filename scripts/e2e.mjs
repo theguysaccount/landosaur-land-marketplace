@@ -392,7 +392,14 @@ try {
     for (const p of ["/", "/land-under-5000/", "/land-under-10000/", "/acreage-for-sale/", "/research/buying-land-in-texas/", "/deals/", "/tax-sales/", "/services/", "/land-atlas/", "/xray/", "/list/", "/direct/", "/land-for-sale/", "/land-prices/", "/land-prices/georgia/", "/analyze/", "/research/", "/research/tax-sales/", "/closing-soon/", listingRel]) {
       await page.goto(base + p);
       if (p === "/") await page.waitFor("/listings match/.test(document.getElementById('map-count').textContent)");
-      if (p === "/land-atlas/") await page.waitFor("document.querySelector('#county-explorer-body tr')");
+      if (p === "/land-atlas/") {
+        await page.waitFor("document.querySelector('#county-explorer-body tr')");
+        const tableOverflow = await page.eval(`(() => {
+          const frame = document.querySelector("#atlas-county-explorer .scroll");
+          return frame.scrollWidth > frame.clientWidth;
+        })()`);
+        if (tableOverflow) bad.push(p + " county values require horizontal scrolling");
+      }
       if (p === "/tax-sales/") await page.waitFor("document.querySelector('#tax-tbody tr')");
       const w = await page.eval("document.documentElement.scrollWidth");
       if (w > 375) bad.push(p + " is " + w + "px wide");

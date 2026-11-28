@@ -951,6 +951,8 @@ table.data tbody tr:hover { background: var(--surface-2); }
 table.data thead th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; background: var(--surface-2); }
 table.data tbody th { font-weight: 600; }
 table.data .n { text-align: right; font-family: var(--font-mono); font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#atlas-county-explorer { scroll-margin-top: 76px; }
+.county-actions a { display: inline-block; margin-right: 12px; }
 table.sortable thead th { cursor: pointer; user-select: none; }
 table.sortable th[aria-sort="ascending"]::after { content: " \25B2"; font-size: 10px; color: var(--forest); }
 table.sortable th[aria-sort="descending"]::after { content: " \25BC"; font-size: 10px; color: var(--forest); }
@@ -1154,6 +1156,28 @@ footer p { margin: 0 0 9px; }
   .filters label.grow { flex-basis: 100%; }
   .map-legend { display: none; }
   table.data th, table.data td { padding: 8px 10px; }
+  #atlas-county-explorer { scroll-margin-top: 126px; }
+  .county-explorer-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .county-explorer-table, .county-explorer-table tbody { display: block; }
+  .county-explorer-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px 12px;
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .county-explorer-table tbody tr:last-child { border-bottom: 0; }
+  table.county-explorer-table tbody :is(th, td) { padding: 0; border: 0; }
+  table.county-explorer-table tbody th { grid-column: 1 / -1; grid-row: 1; padding-right: 42px; }
+  .county-explorer-table .county-state { grid-column: 2; grid-row: 1; justify-self: end; color: var(--muted); }
+  table.county-explorer-table td.n { text-align: left; white-space: normal; }
+  .county-explorer-table td.n::before {
+    display: block;
+    content: attr(data-label);
+    color: var(--muted);
+    font: 12px var(--font-sans);
+  }
+  .county-explorer-table .county-actions { grid-column: 1 / -1; }
   .compare-dock { left: 12px; right: 12px; bottom: 10px; justify-content: space-between; }
   header nav { gap: 2px 4px; }
   header nav a { padding: 5px 8px; font-size: 13px; }

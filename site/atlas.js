@@ -414,7 +414,7 @@
     }
 
     var stateFre = {};
-    atlas.states.forEach(function (s) { stateFre[s.code] = s.fre || s.county_median; });
+    atlas.states.forEach(function (s) { stateFre[s.code] = s.fre; });
     var lastRows = [];
 
     function render() {
@@ -437,10 +437,10 @@
         var stAvg = stateFre[c[2]];
         var vs = (c[4] && stAvg) ? pct(((c[4] / stAvg) - 1) * 100) : "–";
         var svcHref = base + "/services/?service=unlisted_outreach&county=" + encodeURIComponent(c[1]) + "&state=" + encodeURIComponent(c[2]);
-        return "<tr><td><strong>" + esc(c[1]) + "</strong></td><td>" + esc(c[2]) + "</td>" +
-          "<td class='n'><strong>" + (c[4] ? (money(c[4]) + "/ac") : "Not reported") + "</strong></td>" +
-          "<td class='n'>" + esc(vs) + "</td>" +
-          "<td><a href='" + base + "/land-prices/" + encodeURIComponent(c[3]) + "/'>State Data</a> · <a href='" + svcHref + "'>Acquire Off-Market ($20) →</a></td></tr>";
+        return "<tr><th scope='row'>" + esc(c[1]) + "</th><td class='county-state'>" + esc(c[2]) + "</td>" +
+          "<td class='n' data-label='Benchmark'><strong>" + (c[4] ? (money(c[4]) + "/ac") : "Not reported") + "</strong></td>" +
+          "<td class='n' data-label='vs. USDA state value'>" + esc(vs) + "</td>" +
+          "<td class='county-actions'><a href='" + base + "/land-prices/" + encodeURIComponent(c[3]) + "/'>State data</a> <a href='" + svcHref + "'>Acquire off-market ($20) →</a></td></tr>";
       }).join("");
     }
 

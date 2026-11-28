@@ -10,6 +10,17 @@
     printBtn.addEventListener("click", function () { window.print(); });
   }
 
+  // Arkansas COSL rotates listing tokens every few hours; transparently route live clicks
+  // through /api/cosl/?id=<CoSLPropertyId> so buyers always land on the active bidding page.
+  var coslMatch = (location.pathname || "").match(/\/land\/ar-(\d+)\/?$/i);
+  if (coslMatch) {
+    var coslLiveHref = "/api/cosl/?id=" + encodeURIComponent(coslMatch[1]);
+    Array.prototype.forEach.call(
+      document.querySelectorAll('a[href^="https://auction.cosl.org/Auction/Listing/"]'),
+      function (a) { a.setAttribute("href", coslLiveHref); }
+    );
+  }
+
   // Local shortlist / compare sync
   function loadList(k) { try { return JSON.parse(localStorage.getItem(k) || "[]"); } catch (e) { return []; } }
   function saveList(k, a) { try { localStorage.setItem(k, JSON.stringify(a)); } catch (e) {} }

@@ -27,6 +27,9 @@
     },
     "api/alerts.js": {
       "maxDuration": 15
+    },
+    "api/cosl.js": {
+      "maxDuration": 15
     }
   },
   "redirects": [

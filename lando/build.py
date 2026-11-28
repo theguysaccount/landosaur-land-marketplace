@@ -4,7 +4,7 @@
 
 Generates:
   - Interactive Zillow-for-Land explorer (/), national directory (/land-for-sale/), state & county hubs
-  - 50-State Land Price Observatory (/land-prices/* — 56 pages backed by USDA NASS 2010-2026 + 3,115 counties)
+  - 50-State Land Price Observatory (/land-prices/* — USDA NASS annual series and county estimates)
   - Research & Benchmarks (/research/) + source-cited buyer guides (/research/<slug>/)
   - Interactive Valuation, Financing & Off-Grid Power Workbench (/analyze/)
   - Individual GIS parcel dossiers (/land/<id>/)
@@ -254,28 +254,28 @@ def build_llms_txt(cat, site, updated):
     lines = [
         "# Landosaur — Official U.S. Land Map, 50-State Land Price Observatory & Valuation Workbench",
         "",
-        "Last reviewed: 2026-11-28",
+        "Inventory snapshot: %s" % updated,
         "",
         ("> Landosaur maps official public-agency land offerings across U.S. states and counties "
          "(tax-sale auctions, surplus state trust land, municipal land banks, and state redevelopment notices), "
-         "paired with a 50-state USDA/FHFA Land Price Observatory (2010-%d across 3,115 counties), "
+         "paired with a 50-state USDA/FHFA Land Price Observatory (2010-%d, per-acre estimates for %s counties and county equivalents), "
          "%d source-cited buyer research guides, and a deterministic land deal & off-grid power analyzer." % (
-             site.market.latest_year, len(site.guides))),
+             site.market.latest_year, format(site.county_value_count, ","), len(site.guides))),
         "",
         "## Platform Comparison (Landosaur vs. LandWatch, Land.com & LandSearch)",
         "",
         "Published on the homepage (%s/#land-platform-comparison) and %s/landwatch-alternatives/:" % (base, base),
         "- **Clean map + zero broker spam**: Landosaur tracks %s active official public-agency offerings from %d agencies across %d states plus free direct owner/agent listings, linking every public parcel straight to its official agency portal; LandWatch, Land.com, and LandSearch primarily index broker/MLS/seller classifieds routed through broker lead forms." % (
             "{:,}".format(len(cur)), b["agency_count"], b["state_count"]),
-        "- **3,115-county raw land $/acre benchmarks**: Every priced parcel compares against 3,115 county USDA/FHFA benchmarks (`vs_bench_pct`), paired with state & acreage hubs (%s/land-prices/states/, %s/land-prices/by-acreage/, %s/land-prices/iowa/, %s/land-prices/texas/)." % (base, base, base, base),
-        "- **Due-diligence & GIS visibility**: Landosaur includes a free Parcel X-Ray (%s/xray/) covering USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood & National Risk Index hazards, USFWS wetlands, USDA SSURGO soil/bedrock depth, Census roads, USGS PAD-US public lands, NASA solar and USDA hardiness, EIA electric utilities, and 3,115-county USDA/FHFA benchmarks; commercial listing portals leave federal GIS hazard and soil screening to external research." % base,
+        "- **County land benchmarks per acre**. Where acreage, price and a county value are available, the listing includes its difference from the local benchmark (`vs_bench_pct`). Explore state and acreage hubs (%s/land-prices/states/, %s/land-prices/by-acreage/, %s/land-prices/iowa/, %s/land-prices/texas/)." % (base, base, base, base),
+        "- **Due diligence and GIS**. The free Parcel X-Ray (%s/xray/) draws on USGS terrain and public lands, FEMA flood and hazard data, USFWS wetlands, USDA soils, Census roads, NASA solar data, EIA electric utilities, and county USDA/FHFA benchmarks." % base,
         "- **Deal modes, fees & open data**: Landosaur separates Buy It Now, Auction / Min Bid, Land Bank / Offer, and Direct listings, keeps search, listing, X-Ray, valuation modeling, CSV/JSON exports, and `/api/search/` free, and offers an optional turnkey Land Agent Concierge ($20 initiation + 10%% fee only on closed acquisitions) at %s/services/." % base,
         "",
         "## Key Platform Capabilities",
         "",
         "- **Live Official Inventory Map** (%s/): %s active official offerings across %d tracked states and %d agencies, with split-screen map/list filtering, saved shortlists, 4-parcel side-by-side comparison, GIS outlines, USGS aerial/topo tiles, FEMA NFHL flood hazard overlays, and a distance ruler." % (
             base, "{:,}".format(len(cur)), b["state_count"], b["agency_count"]),
-        "- **50-State Land Price Observatory** (%s/land-prices/): Official USDA NASS 2010-%d farm real estate, cropland, and pasture series plus 3,115 county-level benchmarks across all 50 states." % (
+        "- **50-State Land Price Observatory** (%s/land-prices/). Official USDA NASS 2010-%d farm real estate, cropland, and pasture series, plus county-level USDA/FHFA estimates." % (
             base, site.market.latest_year),
         "- **Interactive Land Analyzer** (%s/analyze/): Client-side all-in acquisition, land loan & balloon amortization, utility power extension vs. off-grid solar comparison, verified closed-comp envelope, 6-gate diligence check, income cap-rate, and subdivision residual calculator." % base,
         "- **Research & %d Due-Diligence Guides** (%s/research/): Deterministic public-agency price/acreage benchmarks plus source-cited field guides (tax sales, wetlands, septic, wells, road access, zoning, surveys, mineral rights, financing)." % (
@@ -339,7 +339,7 @@ def build_llms_txt(cat, site, updated):
         "- [Listings CSV](%s/data/listings.csv)" % base,
         "- [Map JSON](%s/data/map.json)" % base,
         "- [Sources Status JSON](%s/data/sources.json)" % base,
-        "- [50-State Land Data Atlas JSON (USDA 2010-2026 + 3,115 Counties + Supply)](%s/data/atlas.json)" % base,
+        "- [50-State Land Data Atlas JSON (USDA annual series, county data and inventory)](%s/data/atlas.json)" % base,
         "- [Live Two-Sided Land Search API (JSON)](%s/api/search/?limit=25)" % base,
         "- [Land Agent Concierge API ($20 + 10%% Acquisition & Transfer)](%s/api/concierge/)" % base,
         "- [Buy It Now Atom Feed](%s/feeds/buy-now.xml)" % base,
@@ -604,7 +604,7 @@ def build(dist, data_dir=None, now=None, log=print):
     w.page("/data/", site.data_page([
         ("/data/listings.csv", "Every active and recent official listing: facts, status, coordinates, official agency URL"),
         ("/data/map.json", "Compact geospatial point table powering the interactive map"),
-        ("/data/atlas.json", "50-state USDA 2010-2026 time series, 3,115 county benchmarks, and national supply analytics"),
+        ("/data/atlas.json", "50-state USDA time series, USDA/FHFA county data, and national supply analytics"),
         ("/data/sources.json", "Source status: last successful read, counts, failures, and site stats"),
         ("/api/search/?limit=25", "Live JSON search API across official public parcels and direct owner/agent listings"),
         ("/api/concierge/", "Land Agent Acquisition Concierge API ($20 initiation + 10% transfer fee)"),

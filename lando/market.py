@@ -2,7 +2,7 @@
 
 Every figure is read directly from:
   - data/market/usda-land-values.json (USDA NASS 2010-2026 annual state & U.S. agricultural values)
-  - data/usda/land-index-counties.json (3,115 U.S. county 2026 USDA/FHFA per-acre benchmarks)
+  - data/usda/land-index-counties.json (USDA/FHFA per-acre benchmarks by county and equivalent)
   - live Landosaur official agency catalog (never mixed with USDA estimates)
 """
 import html

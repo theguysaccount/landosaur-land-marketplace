@@ -2,7 +2,7 @@
 source-cited buyer research guides, interactive Valuation Workbench, and GIS parcel dossiers.
 
 Every number on every page comes strictly from stored official agency inventories,
-USDA NASS 2010-2026 datasets, or the 3,115-county US County Land Index. Zero fabricated figures.
+USDA NASS datasets, or the US County Land Index. Zero fabricated figures.
 """
 from collections import Counter
 from functools import cached_property
@@ -88,6 +88,9 @@ class Site(object):
         self.benchmarks = research.compute_benchmarks(catalog)
         self.market = market_mod.MarketData(catalog)
         self.all_states = self.market.all_states()
+        self.county_record_count = sum(state["county_count"] for state in self.all_states)
+        self.county_value_count = sum(county["value"] is not None
+                                      for state in self.all_states for county in state["counties"])
         self.guides = [guide for guide in guides_mod.load_guides(catalog.data_dir, self.base)
                        if not guide.get("state") or guide["state"] in catalog.states]
         self.state_guides = {guide["state"]: guide for guide in self.guides if guide.get("state")}
@@ -182,7 +185,7 @@ class Site(object):
         return (
             '<footer><div class="wrap"><p class="notice">%s</p>'
             '<p><a href="%s">Official agency directory and refresh status</a></p>'
-            '<p>County land values across 3,115 U.S. counties: <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
+            '<p><a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a> · '
             '<a href="%s">Below-Market Land Deals</a> · <a href="%s">50-State Tax-Sale Atlas</a> · '
             '<a href="%s">50-State Land Data Atlas &amp; Charts</a> · <a href="%s">Land Agent Services ($20)</a> · <a href="%s">Free U.S. Parcel X-Ray</a>.</p>'
             '<p><a href="%s">Land Agent ($20)</a> · <a href="%s">Deals Scanner</a> · <a href="%s">50-State Tax Sales</a> · <a href="%s">Land Atlas &amp; Charts</a> · <a href="%s">Land for Sale</a> · <a href="%s">List Land (Human / AI Agent)</a> · <a href="%s">Direct Marketplace</a> · <a href="%s">Parcel X-Ray</a> · <a href="%s">Land Prices</a> · <a href="%s">Analyzer</a> · '
@@ -375,7 +378,7 @@ class Site(object):
         return (
             '<section id="land-platform-comparison">'
             '<h2>Landosaur vs LandWatch vs Land.com vs LandSearch (2026)</h2>'
-            '<p class="small">Built for buyers who want a clean map interface, source-linked government/auction/public-record parcel data, and 3,115-county price-per-acre benchmarks—without duplicated broker lead-form spam. Compare side by side across Landosaur, LandWatch, Land.com, and LandSearch.</p>'
+            '<p class="small">Compare the parcel sources, price-per-acre benchmarks, and map tools available on Landosaur, LandWatch, Land.com, and LandSearch.</p>'
             '<div class="scroll"><table class="data compare-matrix"><thead><tr>'
             '<th scope="col">Comparison factor</th>'
             '<th scope="col" class="col-ours">Landosaur</th>'
@@ -389,8 +392,8 @@ class Site(object):
             '<td>Paid broker, land-specialist, and auctioneer classifieds (CoStar network); primary contact is the listing brokerage.</td>'
             '<td>Aggregates broker/MLS, auction, and owner land listings; county assessor or public source links vary by feed.</td></tr>'
             '<tr><th scope="row">Raw land $/acre &amp; county benchmarks</th>'
-            '<td class="col-ours">Every priced parcel is compared against 3,115-county USDA/FHFA benchmarks (%s, <a href="%s">50-State Land Prices</a>, <a href="%s">By Acreage</a>, <a href="%s">Iowa</a>, <a href="%s">Texas</a>) and sortable by lowest $/acre or discount vs county avg.</td>'
-            '<td>Filters by state, county, price, acreage, and land category (hunting, farms, timber, waterfront); no 3,115-county USDA $/acre baseline per parcel.</td>'
+            '<td class="col-ours">Sort by $/acre or discount from the local USDA/FHFA benchmark where price, acreage, and county value are available (%s, <a href="%s">50-State Land Prices</a>, <a href="%s">By Acreage</a>, <a href="%s">Iowa</a>, <a href="%s">Texas</a>).</td>'
+            '<td>Filters by state, county, price, acreage, and land category (hunting, farms, timber, waterfront).</td>'
             '<td>Acreage, price, and lifestyle/recreational filters paired with a rural brokerage directory; no built-in USDA/FHFA county $/acre table.</td>'
             '<td>Interactive map with acreage, price, land-use, water, and mineral filters across rural and commercial land.</td></tr>'
             '<tr><th scope="row">Map interface &amp; deal-mode clarity</th>'
@@ -439,12 +442,12 @@ class Site(object):
         states = sorted({r["state"] for r in cur})
         us_latest = self.market.latest_values("US")
         coverage = "all 50 U.S. states" if set(STATE_NAMES) - {"DC"} <= set(states) else "%d U.S. states" % len(states)
-        county_count = sum(len(rows) for rows in self.market.counties_by_state.values())
+        county_values = format(self.county_value_count, ",")
         lede = (
             "Explore <strong>%s</strong> official government, tax-sale, state trust, and land-bank parcels across "
             "<strong>%s</strong>. Compare USDA/FHFA benchmarks across %s counties, explore interactive charts, "
             "or hire a <strong>$20 Land Agent</strong> to help acquire a listed or unlisted parcel."
-            % ("{:,}".format(len(cur)), coverage, "{:,}".format(county_count))
+            % ("{:,}".format(len(cur)), coverage, county_values)
         )
         state_tiles = "".join(
             '<a class="state-tile" href="%s"><strong>%s</strong><span>%s active</span><small>%d %s</small></a>' % (
@@ -465,7 +468,7 @@ class Site(object):
             '<a class="card-link" href="%s" data-vital-event="offer_clicked">Hire Land Agent ($20 to Start) →</a></article>'
             '<article class="info-card"><div class="eyebrow">50-State Interactive Data &amp; Charts</div>'
             '<h3>U.S. Land Data Atlas (2010–%d)</h3>'
-            '<p>Explore our interactive 50-state cartogram, multi-state USDA growth charts (%s/ac U.S. avg), live inventory supply breakdowns, and searchable 3,115-county table.</p>'
+            '<p>Explore the 50-state cartogram, USDA growth charts (%s/ac U.S. average), live inventory, and searchable county table.</p>'
             '<a class="card-link" href="%s" data-vital-event="tool_used">Open Land Data Atlas &amp; Charts →</a></article>'
             '<article class="info-card"><div class="eyebrow">All 50 States · Federal GIS &amp; EIA Utility Data</div>'
             '<h3>Free U.S. Parcel X-Ray &amp; Deal Analyzer</h3>'
@@ -491,12 +494,12 @@ class Site(object):
             '<span class="stat-pill"><strong>%s</strong> active parcels</span>'
             '<span class="stat-pill"><strong>%d/50</strong> states with active listings</span>'
             '<span class="stat-pill"><strong>%d</strong> official agencies</span>'
-            '<span class="stat-pill"><strong>3,115</strong> county benchmarks</span>'
+            '<span class="stat-pill"><strong>%s</strong> county benchmarks</span>'
             '<span class="stat-pill"><strong>10</strong> Parcel X-Ray data layers</span>'
             '<span class="stat-pill">Updated <strong>%s</strong></span>'
             '</div></section>' % (
                 self.u("/assets/mascot.png"), lede, self.u("/services/"), self.u("/land-atlas/"), self.u("/list/"),
-                "{:,}".format(len(cur)), len(states), n_src, esc(self.updated() or "daily"),
+                "{:,}".format(len(cur)), len(states), n_src, county_values, esc(self.updated() or "daily"),
             ),
             self.map_block("all"),
             '<section><h2>Browse live official inventory by state</h2><div class="state-grid">%s</div>'
@@ -557,7 +560,7 @@ class Site(object):
                     "featureList": [
                         "Split-screen interactive map with Buy It Now, Auction/Min Bid, Land Bank, and Direct deal-mode filters plus 4-parcel side-by-side comparison",
                         "Free federal Parcel X-Ray (USGS 3DEP LiDAR, FEMA NFHL flood & hazard risk, USFWS wetlands, USDA SSURGO soils, Census roads, PAD-US public lands, NASA solar)",
-                        "50-state USDA NASS 2010-2026 land price observatory and 3,115 county USDA/FHFA land value benchmarks",
+                        "50-state USDA NASS land price observatory and county USDA/FHFA land value benchmarks",
                         "Deterministic land deal, loan/balloon, grid vs. off-grid electricity, comparable sales, and residual development workbench",
                         "Daily verified official public-agency feeds with free CSV, JSON, and Atom XML downloads",
                     ],
@@ -601,7 +604,7 @@ class Site(object):
         crumbs, crumb_ld = self.crumbs([("Parcel X-Ray", "/xray/")])
         faqs = [
             ("What does the Free U.S. Parcel X-Ray check?",
-             "For any coordinates in all 50 U.S. states, Landosaur queries 9 official public data services live: USGS 3DEP 1m/10m LiDAR (9-point cross-section elevation profile, relief, slope % and aspect), FEMA NFHL (exact flood zone, 100-year SFHA status, BFE, and FIRM panel), FEMA National Risk Index (county Wildfire, Hurricane, Tornado, Drought, and Earthquake risk ratings), USFWS National Wetlands Inventory (wetlands within 100 meters), USDA NRCS SSURGO Soil Survey (soil map unit, prime farmland class, drainage class, hydrologic group, water table depth, and bedrock depth), U.S. Census TIGERweb Roads (nearest mapped public road & highway distances), USGS PAD-US Public Lands (National Forests, BLM land, and parks within 1 km), NASA POWER Climatology (peak sun hours, temperatures, rainfall, and USDA Plant Hardiness Zone), and FCC Census County FIPS joined to our 3,115-county USDA/FHFA Land Index."),
+             "For any coordinates in all 50 U.S. states, Landosaur queries 9 official public data services live: USGS 3DEP 1m/10m LiDAR (9-point cross-section elevation profile, relief, slope % and aspect), FEMA NFHL (exact flood zone, 100-year SFHA status, BFE, and FIRM panel), FEMA National Risk Index (county Wildfire, Hurricane, Tornado, Drought, and Earthquake risk ratings), USFWS National Wetlands Inventory (wetlands within 100 meters), USDA NRCS SSURGO Soil Survey (soil map unit, prime farmland class, drainage class, hydrologic group, water table depth, and bedrock depth), U.S. Census TIGERweb Roads (nearest mapped public road & highway distances), USGS PAD-US Public Lands (National Forests, BLM land, and parks within 1 km), NASA POWER Climatology (peak sun hours, temperatures, rainfall, and USDA Plant Hardiness Zone), and FCC Census County FIPS joined to the local USDA/FHFA land benchmark where available."),
             ("Does Parcel X-Ray replace a survey, perc test, or title search?",
              "No. Automated federal GIS layers are a fast pre-offer screening layer so you can spot floodplains, wetlands, steep slopes, shallow bedrock, or arid off-grid constraints before spending thousands on inspections. Always obtain a licensed boundary survey, county health perc test, recorded access verification, and title insurance before closing."),
             ("Can I run Parcel X-Ray on land listed on other websites?",
@@ -954,7 +957,8 @@ class Site(object):
     def land_atlas_page(self):
         cat = self.cat
         m = self.market
-        county_count = format(sum(len(m.counties_by_state.get(code, [])) for code in cat.states), ",")
+        county_count = format(self.county_record_count, ",")
+        county_values = format(self.county_value_count, ",")
         cur = cat.current()
         us = m.latest_values("US")
         chg, y0, y1 = m.span_change("US", "farm_real_estate")
@@ -962,9 +966,9 @@ class Site(object):
         body = [
             crumbs,
             '<div id="atlas-app">',
-            '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · %s county benchmarks · Live Public Supply</div>' % (m.latest_year, county_count),
+            '<div class="eyebrow">All 50 States · 2010–%d USDA NASS · Live Public Supply</div>' % m.latest_year,
             '<h1>U.S. Land Data Atlas &amp; Interactive Market Charts</h1>',
-            '<p class="lede">Explore <strong>%s active public-agency parcels in %d states (%d agencies)</strong>, <strong>%d years of USDA NASS agricultural land values (%d–%d)</strong>, and searchable benchmarks for <strong>%s counties and county equivalents across 50 states</strong>.</p>' % (
+            '<p class="lede">Explore <strong>%s active public-agency parcels in %d states (%d agencies)</strong>, <strong>%d years of USDA NASS agricultural land values (%d–%d)</strong>, and a searchable table of <strong>%s counties and county equivalents across 50 states</strong>.</p>' % (
                 "{:,}".format(len(cur)), self.benchmarks["state_count"], self.benchmarks["agency_count"],
                 m.latest_year - m.first_year + 1, m.first_year, m.latest_year, county_count),
 
@@ -972,11 +976,11 @@ class Site(object):
             '<div class="kpi-card"><span>Live Official Database</span><strong>%s</strong><small>Active parcels · %d/50 states · %d agencies</small></div>'
             '<div class="kpi-card"><span>U.S. Farm Real Estate (%d)</span><strong>%s/ac</strong><small>USDA NASS national benchmark</small></div>'
             '<div class="kpi-card"><span>%d–%d Nominal Growth</span><strong>%s</strong><small>U.S. agricultural land appreciation</small></div>'
-            '<div class="kpi-card"><span>County Benchmark Coverage</span><strong>%s</strong><small>Searchable &amp; CSV-ready</small></div>'
+            '<div class="kpi-card" id="atlas-county-coverage"><span>County Benchmarks</span><strong>%s</strong><small>Of %s counties and equivalents</small></div>'
             '</div>' % (
                 "{:,}".format(len(cur)), self.benchmarks["state_count"], self.benchmarks["agency_count"],
                 m.latest_year, esc(market_mod.usd(us.get("farm_real_estate"))),
-                y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)), county_count,
+                y0 or m.first_year, y1 or m.latest_year, esc(market_mod.pct(chg)), county_values, county_count,
             ),
 
             '<section class="dossier-card" style="margin-top:24px">'
@@ -1037,7 +1041,7 @@ class Site(object):
 
             '<section class="dossier-card" style="margin-top:24px">'
             '<div class="eyebrow">Searchable &amp; Exportable</div>'
-            '<h2>U.S. County Land Value Explorer (%d)</h2>'
+            '<h2>U.S. County Land Value Explorer</h2>'
             '<div class="atlas-controls">'
             '<label>State <select id="county-st-filter"></select></label>'
             '<label>Search County <input id="county-q-filter" type="search" placeholder="e.g. Gallatin, Shawnee, Coconino"></label>'
@@ -1045,7 +1049,7 @@ class Site(object):
             '<button type="button" id="county-export-csv" class="button ghost sm" style="margin-left:auto">Export Filtered CSV</button>'
             '</div>'
             '<p id="county-explorer-count" class="small" style="margin:8px 0"></p>'
-            '<div class="scroll"><table class="data"><thead><tr><th>County</th><th>State</th><th class="n">2026 Benchmark</th><th class="n">vs. State Avg</th><th>Action</th></tr></thead><tbody id="county-explorer-body"></tbody></table></div>'
+            '<div class="scroll"><table class="data"><thead><tr><th>County</th><th>State</th><th class="n">Benchmark per acre</th><th class="n">vs. State Avg</th><th>Action</th></tr></thead><tbody id="county-explorer-body"></tbody></table></div>'
             '</section>',
 
             '<section class="callout" style="margin-top:24px"><h2>Want to buy land in any county above—even if it isn\'t listed yet?</h2>'
@@ -1054,7 +1058,7 @@ class Site(object):
             '</div>',
         ]
         desc = "Interactive U.S. Land Data Atlas: 50-state land value cartogram, 2010–%d USDA multi-state appreciation charts, live supply breakdowns across %s parcels, and a searchable price explorer with %s county benchmarks." % (
-            m.latest_year, "{:,}".format(len(cur)), county_count)
+            m.latest_year, "{:,}".format(len(cur)), county_values)
         return self.layout(
             "U.S. Land Data Atlas — 50-State Charts, County Prices & Live Supply | Landosaur",
             desc, "/land-atlas/", "".join(body), indexable=True, jsonld=[crumb_ld],
@@ -1259,7 +1263,7 @@ class Site(object):
         crumbs, crumb_ld = self.crumbs([("Below-Market Land Deals", "/deals/")])
         body = [
             crumbs,
-            '<div class="eyebrow">Live Algorithmic Deal Scanner · Official Agency Prices vs. 3,115 County USDA/FHFA Benchmarks</div>',
+            '<div class="eyebrow">Official Agency Prices vs. USDA/FHFA County Benchmarks</div>',
             '<h1>Below-Market Land Deals &amp; Rural Bargain Scanner</h1>',
             '<p class="lede">Compare qualifying priced parcels from the <strong>%s active public-agency listings</strong> against USDA/FHFA county benchmarks. Hire Land Agent for $20 to check title and liens and coordinate transfer, with a 10%% fee due only at closing.</p>' % "{:,}".format(len(cur)),
 
@@ -1494,8 +1498,8 @@ class Site(object):
             crumbs,
             '<div class="eyebrow">50-State Land Price Observatory · USDA NASS &amp; FHFA</div>',
             '<h1>Land Prices Per Acre Across All 50 States (%d)</h1>' % m.latest_year,
-            '<p class="lede">Compare official USDA NASS agricultural land values (%d–%d), 3,115 county-level benchmarks, and live public-agency asking prices and minimum bids. Every series stays clearly separated by source and definition.</p>' % (
-                m.first_year, m.latest_year),
+            '<p class="lede">Compare official USDA NASS agricultural land values (%d–%d), %s USDA/FHFA county benchmarks, and live public-agency asking prices and minimum bids.</p>' % (
+                m.first_year, m.latest_year, format(self.county_value_count, ",")),
             self.land_prices_nav("/land-prices/"),
             '<div class="kpi-grid">'
             '<div class="kpi-card"><span>U.S. Farm Real Estate (%d)</span><strong>%s/ac</strong><small>USDA NASS · land &amp; buildings</small></div>'
@@ -1511,7 +1515,7 @@ class Site(object):
             '<section><h2>U.S. land value history (%d–%d)</h2>%s<p><a href="%s">Inspect the full annual table &amp; sources →</a></p></section>' % (
                 m.first_year, m.latest_year, m.svg_trend_chart("US", "U.S. agricultural land values per acre, 2010 to %d" % m.latest_year),
                 self.u("/land-prices/history/")),
-            '<section><h2>Explore by state (all 50 states + 3,115 counties)</h2><div class="state-grid">%s</div></section>' % state_tiles,
+            '<section><h2>Explore by state</h2><div class="state-grid">%s</div></section>' % state_tiles,
         ]
         if cheapest:
             body.append(
@@ -1528,7 +1532,7 @@ class Site(object):
         prices_faqs = [
             (
                 "How does Landosaur compare raw land price per acre across US counties?",
-                "Landosaur pairs 50-state USDA NASS agricultural land values (%d-%d) with 3,115 county-level USDA/FHFA benchmarks and live official public-agency offerings, showing exact $/acre and percentage vs county benchmark without broker spam." % (
+                "Landosaur pairs 50-state USDA NASS agricultural land values (%d-%d) with county-level USDA/FHFA benchmarks and live official public-agency offerings. When price and acreage are available, it calculates the price per acre and compares it with the local benchmark where available." % (
                     m.first_year, m.latest_year),
             ),
             (
@@ -1543,7 +1547,7 @@ class Site(object):
             ),
             (
                 "Why use Landosaur instead of LandWatch, Land.com, or LandSearch to check land prices?",
-                "Commercial portals display broker asking prices behind lead forms without a built-in county baseline. Landosaur combines official government/auction parcels, 3,115 county $/acre benchmarks, and a free 10-layer federal Parcel X-Ray on one clean map."
+                "Landosaur combines official government and auction listings, county benchmarks per acre, and a free 10-layer federal Parcel X-Ray."
             ),
         ]
         body.append(
@@ -1559,7 +1563,7 @@ class Site(object):
             )
         )
         body.append(self.faq_block(prices_faqs, heading="Frequently asked questions about U.S. land prices", section_id="prices-faq"))
-        desc = "Explore %d land prices per acre across all 50 U.S. states: USDA farm real estate (%s/acre U.S.), cropland, pasture, 2010-%d history charts, 3,115 county benchmarks, and cheapest official offerings." % (
+        desc = "Explore %d land prices per acre across all 50 U.S. states: USDA farm real estate (%s/acre U.S.), cropland, pasture, 2010-%d history charts, county benchmarks, and cheapest official offerings." % (
             m.latest_year, market_mod.usd(us.get("farm_real_estate")), m.latest_year)
         ld = [{"@context": "https://schema.org", "@graph": [
             self.org_node(),
@@ -1730,7 +1734,7 @@ class Site(object):
             ),
             (
                 "How do I estimate the cost of 20 acres in a specific state or county?",
-                "Check the state's USDA NASS per-acre benchmark and 3,115 county medians on Landosaur's 50-State Land Prices directory (/land-prices/states/)—for example, /land-prices/texas/ or /land-prices/iowa/—then adjust for road access, FEMA flood zones, utilities, and septic suitability in our Parcel X-Ray (/xray/) and Land Analyzer (/analyze/).",
+                "Check the state's USDA NASS per-acre benchmark and county estimates on Landosaur's 50-State Land Prices directory (/land-prices/states/)—for example, /land-prices/texas/ or /land-prices/iowa/—then adjust for road access, FEMA flood zones, utilities, and septic suitability in our Parcel X-Ray (/xray/) and Land Analyzer (/analyze/).",
             ),
             (
                 "Do these acreage bands separate fixed over-the-counter prices from auction minimum bids?",
@@ -1757,18 +1761,19 @@ class Site(object):
         body = [
             crumbs,
             '<h1>Land Price Data Methodology, Definitions &amp; Downloads</h1>',
-            '<p class="lede">Landosaur separates three distinct data layers and never blends them into a synthetic score: (1) USDA NASS annual agricultural benchmarks, (2) 3,115 county-level USDA/FHFA benchmarks, and (3) live official public-agency offerings.</p>',
+            '<p class="lede">Landosaur publishes USDA NASS annual agricultural values, USDA/FHFA county benchmarks, and official public-agency listings.</p>',
             self.land_prices_nav("/land-prices/data-methodology/"),
             '<section><h2>1. USDA NASS Agricultural Land Values (%d–%d)</h2><p>%s</p><ul class="notes">%s</ul></section>' % (
                 m.first_year, m.latest_year, esc(meth.get("description", "")), caveats),
-            '<section><h2>2. County Land Benchmarks (3,115 U.S. Counties)</h2>'
-            '<p>County-level per-acre values come from the <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a>, which publishes USDA Census/NASS agricultural estimates and FHFA residential land estimates by county. Each row labels its measure and vintage explicitly.</p></section>' % esc(config.LAND_INDEX_URL),
+            '<section><h2>2. County Land Benchmarks</h2>'
+            '<p>The 50-state explorer lists %s counties and equivalents, with values reported for %s. Per-acre values come from the <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a>, which publishes USDA Census/NASS agricultural estimates and FHFA residential land estimates. Each state table identifies the measure and year when available.</p></section>' % (
+                format(self.county_record_count, ","), format(self.county_value_count, ","), esc(config.LAND_INDEX_URL)),
             '<section><h2>3. Live Official Public-Agency Feeds</h2>'
             '<p>Active listing counts, median ticket prices, and implied prices per acre are computed deterministically from verified official agencies read daily (<a href="%s">Sources &amp; read health</a>). Missing prices and missing acreages are never imputed.</p>'
             '<p><a href="%s">Download listings.csv</a> · <a href="%s">map.json</a> · <a href="%s">sources.json</a></p></section>' % (
                 self.u("/sources/"), self.u("/data/listings.csv"), self.u("/data/map.json"), self.u("/data/sources.json")),
         ]
-        desc = "How Landosaur sources, separates, and computes USDA NASS land values, 3,115 county benchmarks, and live public-agency offering statistics."
+        desc = "How Landosaur sources USDA NASS land values, county benchmarks, and live public-agency offering statistics."
         return self.layout(
             "Land Price Data Methodology & Sources | Landosaur",
             desc, "/land-prices/data-methodology/", "".join(body), indexable=True, jsonld=[crumb_ld],
@@ -1847,7 +1852,7 @@ class Site(object):
             chart_html = ""
             comp_html = ""
 
-        # County-by-county table (ALL counties in that state from 3,115-county dataset!)
+        # County-by-county table from the benchmark dataset
         county_section = ""
         if st["counties"]:
             crows = "".join(
@@ -2928,7 +2933,7 @@ class Site(object):
 <p class="lede">Landosaur is building an open, evidence-first platform for finding, pricing, and vetting land: official city, county, state trust, and tax-sale parcels on one GIS map, paired with 50-state USDA/FHFA land price benchmarks, source-cited due-diligence guides, and a deterministic valuation workbench.</p>
 <section><h2>Who it is for</h2><p>Land buyers the residential portals underserve: neighbors who want the adjoining lot, homesteaders, small builders, farmers, community gardens, and land investors comparing rural acreage and government auctions.</p></section>
 <section id="terms"><h2>What it is not (Terms &amp; Disclosures)</h2><p>Landosaur is not an offer to sell and does not sell, broker, or hold any land. It is not affiliated with the agencies it lists. It gives no legal, tax, title, or investment advice and does not appraise land. Minimum bids are not sale prices. Tax-sale land can carry redemption rights, title defects, liens, and unknown physical condition; confirm all terms directly with the agency and consult local title, survey, and legal professionals before bidding or buying.</p></section>
-<section><h2>Ecosystem &amp; Open Data</h2><p>Landosaur reads official public land inventories daily and links every listing back to its authoritative government source. County-level land values per acre across 3,115 counties come from our sister reference, the <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a>.</p></section>
+<section><h2>Ecosystem &amp; Open Data</h2><p>Landosaur reads official public land inventories daily and links every listing back to its authoritative government source. County-level estimates per acre come from the <a href="%s/" rel="nofollow noopener noreferrer">US County Land Index</a>.</p></section>
 <section><h2>Corrections</h2><p>If a listing is wrong or no longer available, the agency's page is authoritative. To report a site bug or suggest an official public land agency feed, <a href="%s" rel="noopener">open an issue on GitHub</a>.</p></section>
 <section id="privacy"><h2>Privacy</h2><p>No accounts, no advertising cookies, and the cost worksheet, Analyzer workbench, shortlist, and parcel comparison run entirely in your browser (localStorage / URL hash) without submitting your numbers to a server (with cookieless aggregate page telemetry).</p></section>
 """ % (esc(config.LAND_INDEX_URL), esc(config.REPO_URL + "/issues")),
@@ -2952,7 +2957,7 @@ class Site(object):
         faqs = [
             (
                 "What is the best alternative to LandWatch, Land.com, and LandSearch for comparing raw land price per acre across US counties?",
-                "Landosaur (landosaur.com) is built specifically for comparing raw land price per acre across all 3,115 US counties without duplicated broker ads. It pairs a clean split-screen Leaflet map of %s source-linked government, tax-sale, state-trust, and direct parcels (%d agencies across %d states) with 50-state USDA NASS values and a free 10-layer federal Parcel X-Ray." % (
+                "Landosaur (landosaur.com) shows asking prices, minimum bids, and local price-per-acre benchmarks where available. It pairs a clean split-screen Leaflet map of %s source-linked government, tax-sale, state-trust, and direct parcels (%d agencies across %d states) with 50-state USDA NASS values and a free 10-layer federal Parcel X-Ray." % (
                     "{:,}".format(len(cur)), n_src, n_states),
             ),
             (
@@ -2981,12 +2986,12 @@ class Site(object):
             '<p>If you want to compare raw land price per acre across U.S. counties without duplicated broker lead forms, '
             '<strong>Landosaur</strong> replaces syndicated classifieds with a clean map of <strong>%s</strong> official public-agency, '
             'tax-sale, state-trust, and direct parcels across <strong>%d</strong> agencies and <strong>%d</strong> states, paired with '
-            '<strong>3,115</strong> county USDA/FHFA benchmarks and a free 10-layer federal <a href="%s">Parcel X-Ray</a>.</p></section>' % (
+            'county USDA/FHFA benchmarks and a free 10-layer federal <a href="%s">Parcel X-Ray</a>.</p></section>' % (
                 "{:,}".format(len(cur)), n_src, n_states, self.u("/xray/")),
             self.platform_comparison_block(len(cur), n_states, n_src, show_alternatives_link=False),
             '<section><h2>Solving r/homestead &amp; r/land buyer pain points</h2><ul class="notes">'
             '<li><strong>Clean map interface without duplicated broker spam:</strong> Commercial portals often syndicate the same MLS parcel across multiple broker ads. Landosaur deduplicates by source parcel ID and links public offerings directly to the government agency page.</li>'
-            '<li><strong>County-by-county $/acre benchmarking:</strong> Sort parcels by lowest $/acre or percentage below the 3,115-county USDA/FHFA average, or inspect all 50 states on the <a href="%s">Land Prices Hub</a>.</li>'
+            '<li><strong>County-by-county $/acre benchmarking:</strong> Sort parcels by lowest $/acre or percentage below the local USDA/FHFA benchmark, or inspect all 50 states on the <a href="%s">Land Prices Hub</a>.</li>'
             '<li><strong>Built-in federal due diligence before you drive out:</strong> Every parcel (and any U.S. coordinates via <a href="%s">Parcel X-Ray</a>) checks USGS LiDAR slope, FEMA flood zones, USFWS wetlands, USDA soil &amp; water-table depth, Census road access, and BLM/Forest adjacency.</li>'
             '<li><strong>High-demand state &amp; acreage benchmarks:</strong> <a href="%s">Iowa farmland &amp; county prices (%s/ac)</a> · <a href="%s">Texas land prices &amp; 20-acre benchmark (%s/ac)</a> · <a href="%s">Land prices by acreage band</a> · <a href="%s">Cheapest official land per acre</a>.</li>'
             '</ul></section>' % (
@@ -2998,7 +3003,7 @@ class Site(object):
             self.faq_block(faqs, heading="Frequently asked questions about LandWatch, Land.com & LandSearch alternatives", section_id="alternatives-faq"),
         ]
         desc = (
-            "Compare Landosaur vs LandWatch, Land.com, and LandSearch for raw land price per acre across 3,115 US counties: "
+            "Compare Landosaur vs LandWatch, Land.com, and LandSearch for raw land prices per acre by county. "
             "clean map interface, source-linked public-record & auction parcels, zero broker spam, and free federal Parcel X-Ray."
         )
         ld = [{"@context": "https://schema.org", "@graph": [

@@ -1,5 +1,4 @@
-/* Landosaur /land-atlas/ — Interactive 50-State U.S. Land Data Atlas, Cartogram, Multi-State 2010–2026 Charts,
-   Live Official Supply Analytics (25,087+ parcels), and All-3,115-County Land Price Explorer. 100% real data. */
+/* Landosaur's 50-state land data atlas, charts, inventory, and county price explorer. */
 (function () {
   "use strict";
   var root = document.getElementById("atlas-app");
@@ -399,7 +398,7 @@
     }
   }
 
-  // ------------------------------------------------------- 4. All 3,115 U.S. Counties Explorer
+  // County land value explorer
   function initCountyExplorer(atlas) {
     var stSel = document.getElementById("county-st-filter");
     var qIn = document.getElementById("county-q-filter");
@@ -410,7 +409,7 @@
     if (!tbody || !atlas.counties) return;
 
     if (stSel) {
-      stSel.innerHTML = "<option value=''>All 50 states (" + atlas.counties.length.toLocaleString("en-US") + " county benchmarks)</option>" +
+      stSel.innerHTML = "<option value=''>All 50 states (" + atlas.counties.length.toLocaleString("en-US") + " counties and equivalents)</option>" +
         atlas.states.map(function (s) { return "<option value='" + s.code + "'>" + esc(s.name) + "</option>"; }).join("");
     }
 

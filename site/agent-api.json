@@ -25,7 +25,7 @@
       "method": "POST",
       "url": "https://landosaur.com/api/listings/",
       "content_type": "application/json",
-      "auto_enrichment": "Landosaur automatically runs a Parcel X-Ray (USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood zone, FEMA National Risk Index wildfire/hazards, USFWS wetlands, USDA SSURGO soil/bedrock, Census TIGERweb nearest road/highway, USGS PAD-US public lands, NASA solar & USDA hardiness zone, EIA electric utilities, and 3,115-county USDA/FHFA land value benchmark) from lat/lon or location.",
+      "auto_enrichment": "Landosaur automatically runs a Parcel X-Ray (USGS 3DEP LiDAR elevation/slope, FEMA NFHL flood zone, FEMA National Risk Index wildfire/hazards, USFWS wetlands, USDA SSURGO soil/bedrock, Census TIGERweb nearest road/highway, USGS PAD-US public lands, NASA solar & USDA hardiness zone, EIA electric utilities, and the local USDA/FHFA land value benchmark where available) from lat/lon or location.",
       "required_fields": {
         "lat_lon_or_location": "Provide lat & lon (US bounds) OR location/address string",
         "acres": "Positive number of acres",
@@ -117,7 +117,7 @@
     "land_data_atlas": {
       "method": "GET",
       "url": "https://landosaur.com/data/atlas.json",
-      "description": "Complete 50-state USDA 2010-2026 historical land value series, 3,115 county benchmarks, and live 50-state public inventory analytics."
+      "description": "USDA annual land value series, USDA/FHFA county benchmarks, and live public-agency inventory across the 50-state Atlas."
     },
     "deals_and_tax_sales": {
       "below_market_deals_url": "https://landosaur.com/deals/",

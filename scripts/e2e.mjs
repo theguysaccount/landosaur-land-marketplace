@@ -137,7 +137,17 @@ try {
     await page.goto(base + "/land-atlas/");
     await page.waitFor("document.querySelectorAll('#atlas-cartogram .us-tile').length === 50", 12000);
     assert(await page.eval("document.querySelectorAll('#atlas-compare-chart svg path').length >= 2"), "missing multi-state SVG comparison paths");
-    assert(await page.eval("document.querySelectorAll('#county-explorer-body tr').length >= 50"), "missing 3,115-county explorer rows");
+    assert(await page.eval("document.querySelectorAll('#county-explorer-body tr').length >= 50"), "missing county explorer rows");
+    const atlasCountyCoverage = await page.eval(`fetch(${JSON.stringify(base)} + "/data/atlas.json")
+      .then(r => r.json()).then(({counties}) => {
+        const coverage = document.querySelector("#atlas-county-coverage");
+        const reporting = counties.filter(row => row[4] != null).length.toLocaleString("en-US");
+        const total = counties.length.toLocaleString("en-US");
+        return coverage.querySelector("strong").textContent === reporting &&
+          coverage.querySelector("small").textContent.includes(total) &&
+          document.querySelector("#county-st-filter option").textContent.includes(total);
+      })`);
+    assert(atlasCountyCoverage, "county explorer coverage differs from the published data");
     if (!isLocal) {
       const concOk = await page.eval(`fetch(${JSON.stringify(base)} + "/api/concierge/").then(r => r.ok ? r.json() : null).then(d => !!(d && d.ok && d.initiation_fee_usd === 20 && d.concierge_fee_pct === 10))`);
       assert(concOk, "live /api/concierge/ metadata check failed");

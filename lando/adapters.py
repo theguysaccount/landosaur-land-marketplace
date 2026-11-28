@@ -12035,6 +12035,10 @@ SOURCES = [
      "about": "Current Panguingue Creek residential lots with published fixed prices, acreage and access terms."},
 ]
 NOT_CARRIED = [
+    ("Maui County tax sale notices", "https://www.mauicounty.gov/1748/Delinquent-Tax-Accounts",
+     "The county's robots.txt returned HTTP 403. A delinquency or public-land record does not establish a current sale."),
+    ("Rockingham, Vermont municipal property sale packet", "https://rockbf.org/public-notices",
+     "The town's robots.txt could not be verified over TLS, and its linked Box PDF representation is disallowed by robots.txt."),
     ("Utah Press Association legal notice database", "https://www.utahlegals.com/",
      "The publisher’s terms prohibit automated collection, database incorporation and commercial reuse."),
     ("Cochise County Board tax-deed award exhibits", "https://public.destinyhosted.com/26244/agenda/",

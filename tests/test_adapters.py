@@ -1069,6 +1069,53 @@ Zoning R-1 Single Family Residential
 
 
 class OfficialInventoryExtensionTest(unittest.TestCase):
+    def test_atlantic_requires_a_reviewed_vacant_map_and_keeps_assessment_out_of_price(self):
+        import hashlib
+
+        page = ('<p>To purchase a City-owned vacant lot, complete the bid form.</p>'
+                '<p>Current Available Properties for Sale</p>'
+                '<p>1106 Poplar Street<br />Size: 7,500 sq. ft.<br />Assessed Value: $8,180</p>'
+                '<p><img src="/map.png"></p><a>Policy for Disposition</a>')
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = page
+        fetch.bytes.return_value = b"reviewed exhibit"
+        approved = {"1106 Poplar Street": hashlib.sha256(fetch.bytes.return_value).hexdigest()}
+        with patch.object(adapters, "ATLANTIC_IA_VACANT_IMAGES", approved):
+            rows, _ = adapters.atlantic_ia_land(fetch, NOW, self.fail)
+            row, = rows
+            self.assertEqual((row["address"], row["acres"], row["price"]), ("1106 Poplar Street", .1722, None))
+            fetch.bytes.return_value = b"replacement map"
+            with self.assertRaises(adapters.StructureError):
+                adapters.atlantic_ia_land(fetch, NOW, self.fail)
+
+    def test_clinton_preserves_combined_offers_and_rejects_improved_parcels(self):
+        page = ('<h2>Disposition of City-Owned Buildable Lots</h2><p>We sell buildable, bare ground lots.</p>'
+                '<table><tr><td>1 Main</td><td>80-1234-0000 &amp; 80-1235-0000</td><td>Irreg.</td></tr>'
+                '<tr><td>2 Main</td><td>80-1236-0000</td><td>30 x 100</td></tr></table>')
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = page
+        gis = [{"attributes": {"Parcel_ID": key, "Dwelling_Value": 0, "Improvement_Value": improvements, "Graphic_Ac": acres}}
+               for key, improvements, acres in (("8012340000", 0, .1), ("8012350000", 0, .15), ("8012360000", 200, .07))]
+        with patch.object(adapters, "_arcgis_query", return_value=gis):
+            rows, info = adapters.clinton_ia_land(fetch, NOW, self.fail)
+        self.assertEqual(info["upstream_total"], 2)
+        row, = rows
+        self.assertEqual((row["apn"], row["acres"], row["price"]), ("80-1234-0000 / 80-1235-0000", .25, None))
+
+    def test_centerville_only_currently_offers_explicit_bare_lots(self):
+        fetch = unittest.mock.Mock()
+        fetch.text.return_value = ('<p>Properties currently owned by the City and available for development. '
+                                   'Contact the city about purchasing a property for residential construction.</p>'
+                                   '<p>340011020660000&nbsp;515 N. Park&nbsp;<strong>Bare Lot</strong></p>'
+                                   '<p>340011015650000&nbsp;418 E. Van Buren&nbsp;Derelict Structure</p>')
+        rows, info = adapters.centerville_ia_land(fetch, NOW, self.fail)
+        self.assertEqual(info["upstream_total"], 2)
+        row, = rows
+        self.assertEqual((row["apn"], row["address"], row["price"]), ("340011020660000", "515 N. Park", None))
+        fetch.text.return_value = '<p>340011020660000 515 N. Park Bare Lot</p>'
+        with self.assertRaises(adapters.StructureError):
+            adapters.centerville_ia_land(fetch, NOW, self.fail)
+
     def test_providence_requires_fee_simple_and_uses_published_close(self):
         import io
         from zipfile import ZipFile

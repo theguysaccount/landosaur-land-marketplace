@@ -8183,6 +8183,7 @@ def providence_ri_prairie(fetch, now, warn):
         "deadline": deadline.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "url": PROVIDENCE_RI_RFP, "lat": None, "lon": None, "geometry": None,
         "facts": [fact("availability", "The agency invites qualified redevelopment proposals, including fee-simple purchase. It also considers ground leases.", url),
+                  fact("submission_deadline", deadline.strftime("%B %d, %Y at %-I:%M %p Eastern"), url),
                   fact("land_use", "The former building was demolished. An environmental remedial action plan is part of the solicitation.", PROVIDENCE_RI_SITE),
                   fact("sale_terms", "Proposals must include an affordable-housing component. The agency board must approve the transfer.", url),
                   fact("boundary_use", "For general reference, planning and guidance only. The outline is not a legal boundary or a professional survey.", PROVIDENCE_RI_GIS)],
@@ -8227,6 +8228,137 @@ def lidgerwood_nd_lots(fetch, now, warn):
                   fact("sale_terms", "Include the proposed use and development timeline in a letter of intent to the city.", "=")],
         "tags": ["city-owned vacant lot", "purchase proposals"],
     }], {"complete": True, "upstream_total": 1}
+
+
+CENTERVILLE_IA_LAND = "https://www.centerville-ia.org/news/city-owned-properties-available-development-october-12-2026"
+
+
+def centerville_ia_land(fetch, now, warn):
+    page = fetch.text(CENTERVILLE_IA_LAND)
+    text = clean(page)
+    if "currently owned by the City and available for development" not in text or "purchasing a property for residential construction" not in text:
+        raise StructureError("Centerville’s municipal purchase roster changed")
+    roster = {}
+    for paragraph in re.findall(r"<p\b[^>]*>(.*?)</p>", page, re.I | re.S):
+        match = re.fullmatch(r"(\d{15}) (.+?) (Bare Lot|Derelict Structure)", clean(paragraph), re.I)
+        if not match:
+            continue
+        pin, address, condition = match.groups()
+        if pin in roster:
+            raise StructureError("Centerville’s municipal purchase roster contains a duplicate parcel")
+        roster[pin] = (address, condition.casefold())
+    if not roster:
+        raise StructureError("Centerville’s available municipal parcels changed format")
+    rows = []
+    for pin, (address, condition) in roster.items():
+        if condition != "bare lot":
+            continue
+        rows.append({
+            "id": "ia-centerville-" + pin, "source": "centerville-ia-land",
+            "title": address + " (Centerville municipal vacant lot)", "state": "IA", "county": "Appanoose",
+            "locality": "Centerville", "apn": pin, "address": address, "acres": None,
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": CENTERVILLE_IA_LAND, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city lists this parcel as a bare lot available for residential development.", "="),
+                      fact("sale_terms", "The city invites prospective buyers to contact it about purchase and construction terms.", "=")],
+            "tags": ["municipal vacant land", "residential development"],
+        })
+    return rows, {"complete": True, "upstream_total": len(roster)}
+
+
+ATLANTIC_IA_LAND = "https://cityofatlantic.com/city-owned-properties-for-sale/"
+ATLANTIC_IA_VACANT_IMAGES = {
+    "1106 Poplar Street": "5a41ef000cf90eee08c0bfec6fff24a824368cb6055b2f23a133cb99568aaa03",
+    "7 West 11th Street": "932747035dd8bbcafb7817ccfb1f833adfcd5c5a18b52f59956cb200d0e63e63",
+    "211 Locust Street": "558558fba0ef135b57af4c5e3bfc0405771ea94d7c88e0ecf28f52dcbf6c0bae",
+}
+
+
+def atlantic_ia_land(fetch, now, warn):
+    page = fetch.text(ATLANTIC_IA_LAND)
+    active = re.search(r"Current Available Properties for Sale\b(.*?)Policy for Disposition", page, re.I | re.S)
+    if not active or "purchase a City-owned vacant lot" not in clean(page):
+        raise StructureError("Atlantic’s municipal purchase list changed")
+    pattern = r'<p>(\d+[^<]+)<br\s*/?>\s*Size:\s*([\d,]+)\s+sq\.\s*ft\.<br\s*/?>[^<]+</p>\s*<p><img[^>]+src="([^"]+)"'
+    prospects = re.findall(pattern, active[1], re.I)
+    if not prospects:
+        raise StructureError("Atlantic's available city lots have no recognized size or map records")
+    rows = []
+    for address, sqft, exhibit in prospects:
+        address = clean(address)
+        exhibit = urllib.parse.urljoin(ATLANTIC_IA_LAND, html.unescape(exhibit))
+        if address not in ATLANTIC_IA_VACANT_IMAGES:
+            continue
+        if hashlib.sha256(fetch.bytes(exhibit)).hexdigest() != ATLANTIC_IA_VACANT_IMAGES[address]:
+            raise StructureError("Atlantic’s vacant parcel map changed and requires renewed review")
+        rows.append({
+            "id": "ia-atlantic-" + slug(address), "source": "atlantic-ia-land",
+            "title": address + " (Atlantic municipal vacant lot)", "state": "IA", "county": "Cass",
+            "locality": "Atlantic", "apn": "", "address": address, "acres": round(number(sqft) / 43560, 4),
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": ATLANTIC_IA_LAND, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city lists this vacant lot for purchase and accepts bids through the city clerk.", "="),
+                      fact("lot_area", "%s square feet per the city’s current purchase list." % sqft, "="),
+                      fact("parcel_map", "The city’s parcel aerial shows an unimproved lot.", exhibit)],
+            "tags": ["municipal vacant land", "purchase application"],
+        })
+    return rows, {"complete": True, "upstream_total": len(prospects)}
+
+
+CLINTON_IA_LAND = "https://www.cityofclintoniowa.gov/552/Sale-of-City-Owned-Properties"
+CLINTON_IA_GIS = "https://wfs.schneidercorp.com/arcgis/rest/services/ClintonCountyIA_WFS/MapServer/0/query"
+
+
+def clinton_ia_land(fetch, now, warn):
+    page = fetch.text(CLINTON_IA_LAND)
+    table = re.search(r"<h2[^>]*>Disposition of City-Owned Buildable Lots</h2>(.*?)</table>", page, re.S | re.I)
+    if not table or "buildable, bare ground lots" not in clean(table[1]):
+        raise StructureError("Clinton’s city-owned bare lot directory changed")
+    offers = []
+    matched_ids = set()
+    for tr in re.findall(r"<tr\b[^>]*>(.*?)</tr>", table[1], re.S | re.I):
+        columns = [clean(cell) for cell in re.findall(r"<td\b[^>]*>(.*?)</td>", tr, re.S | re.I)]
+        if len(columns) != 3 or not re.fullmatch(r"\d{2}-\d{4}-\d{4}(?:\s*&\s*\d{2}-\d{4}-\d{4})*", columns[1]):
+            continue
+        ids = re.findall(r"\d{2}-\d{4}-\d{4}", columns[1])
+        keys = [pin.replace("-", "") for pin in ids]
+        if matched_ids.intersection(keys):
+            raise StructureError("Clinton’s available lot directory lists the same parcel twice")
+        matched_ids.update(keys)
+        offers.append((columns[0], ids, keys))
+    if not matched_ids:
+        raise StructureError("Clinton’s bare lot directory no longer provides parcel numbers")
+    gis = _arcgis_query(fetch, CLINTON_IA_GIS, "Parcel_ID IN (%s)" % quote_list(sorted(matched_ids)),
+                        "Parcel_ID,Graphic_Ac,Dwelling_Value,Improvement_Value")
+    parcels = {feature["attributes"]["Parcel_ID"]: feature for feature in gis}
+    if len(gis) != len(parcels) or not matched_ids.issubset(parcels):
+        raise StructureError("Clinton’s advertised lots do not have a unique match in the county parcel map")
+    rows = []
+    for address, pins, keys in offers:
+        features = [parcels[key] for key in keys]
+        attributes = [feature["attributes"] for feature in features]
+        if any(item.get("Dwelling_Value") != 0 or item.get("Improvement_Value") != 0 for item in attributes):
+            continue
+        areas = [number(item.get("Graphic_Ac")) for item in attributes]
+        row = {
+            "id": "ia-clinton-" + "-".join(keys), "source": "clinton-ia-land",
+            "title": address + " (Clinton municipal vacant land)", "state": "IA", "county": "Clinton",
+            "locality": "Clinton", "apn": " / ".join(pins), "address": address,
+            "acres": round(sum(areas), 4) if all(areas) else None,
+            "price": None, "price_kind": "none", "offering": "sale", "status": "listed", "deadline": None,
+            "url": CLINTON_IA_LAND, "lat": None, "lon": None, "geometry": None,
+            "facts": [fact("availability", "The city lists this bare ground for development and invites purchase inquiries.", "="),
+                      fact("land_use", "The county appraisal records no assessed dwelling or improvement value.", CLINTON_IA_GIS)],
+            "tags": ["municipal vacant land", "residential development"],
+        }
+        if len(pins) > 1:
+            row["facts"].append(fact("combined_parcels", "The city groups these parcel numbers into one offering.", "="))
+        if row["acres"] is not None:
+            row["facts"].append(fact("acreage_method", "Graphic acreage from the Clinton County parcel map.", CLINTON_IA_GIS))
+        rings = [ring for feature in features for ring in (feature.get("geometry") or {}).get("rings", [])]
+        apply_geometry(row, rings, CLINTON_IA_GIS, "Clinton County")
+        rows.append(row)
+    return rows, {"complete": True, "upstream_total": len(offers)}
 
 
 SOURCES = [
@@ -8683,8 +8815,28 @@ SOURCES = [
      "agency": "City of Lidgerwood, North Dakota", "url": LIDGERWOOD_ND_LOTS, "state": "ND",
      "run": lidgerwood_nd_lots, "requires_sale_match": True,
      "about": "Unimproved city lots offered for purchase and checked against current council decisions."},
+    {"id": "centerville-ia-land", "name": "Centerville city-owned bare residential lots",
+     "agency": "City of Centerville, Iowa", "url": CENTERVILLE_IA_LAND, "state": "IA",
+     "run": centerville_ia_land, "requires_sale_match": True,
+     "about": "The city’s municipal purchase roster explicitly identifies these parcels as bare lots available for housing development."},
+    {"id": "atlantic-ia-land", "name": "Atlantic city-owned vacant lots",
+     "agency": "City of Atlantic, Iowa", "url": ATLANTIC_IA_LAND, "state": "IA",
+     "run": atlantic_ia_land, "requires_sale_match": True,
+     "about": "Current municipal purchase offerings with parcel areas and vacancy verified on the city’s annotated aerials."},
+    {"id": "clinton-ia-land", "name": "Clinton city-owned bare lots available for purchase",
+     "agency": "City of Clinton, Iowa", "url": CLINTON_IA_LAND, "state": "IA",
+     "run": clinton_ia_land, "requires_sale_match": True,
+     "about": "Active municipal development lots as listed by the city, matched by parcel number to county outlines and improvement values."},
 ]
 NOT_CARRIED = [
+    ("Clinton council agenda portal", "https://cityofclintoniowa.civicweb.net/document/470075/",
+     "The agenda portal’s robots.txt disallows the agenda file. The city’s current sale roster and county parcel service are carried."),
+    ("City of Knoxville Homemakers Program", "https://www.knoxvilletn.gov/509/Homemakers-Program",
+     "The municipal site and the file-host redirect both returned HTTP 403 for robots.txt."),
+    ("Kenai Peninsula Borough land sale catalog", "https://www.kpb.us/local-governance-and-permitting/land-use/borough-public-lands/borough-public-lands-resources/kpb-land-sales",
+     "The municipal host returned HTML in place of robots.txt."),
+    ("USDA Farm Service Agency property catalog", "https://www.resales.usda.gov/resales/public/searchFSA",
+     "The listing host returned HTML in place of robots.txt."),
     ("City of Providence municipal parcel server", "https://webgis.providenceri.gov/server/rest/services",
      "The municipal parcel server timed out on robots.txt. The Rhode Island DEM independently publishes the Providence parcel outline."),
     ("Kauaʻi County real property tax site", "https://www.kauaipropertytax.com/",
